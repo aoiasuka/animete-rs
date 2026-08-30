@@ -1,0 +1,18 @@
+[package]
+name = "ds-jellyfin"
+version.workspace = true
+edition.workspace = true
+description = "Jellyfin/Emby 媒体服务器源（REST，直链在线播放）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+smol_str = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }

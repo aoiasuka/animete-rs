@@ -1,0 +1,10 @@
+[package]
+name = "ani-domain"
+version.workspace = true
+edition.workspace = true
+description = "自动选源评分引擎（对应 domain/media/selector）"
+
+[dependencies]
+ani-core = { workspace = true }
+smol_str = { workspace = true }
+serde = { workspace = true }

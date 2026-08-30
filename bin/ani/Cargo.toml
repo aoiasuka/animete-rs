@@ -1,0 +1,36 @@
+[package]
+name = "ani"
+version.workspace = true
+edition.workspace = true
+description = "ani-rs 桌面客户端（Tauri 2 壳，对应 app/desktop 的 AniDesktop）"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ani-core = { workspace = true }
+ani-domain = { workspace = true }
+ani-db = { workspace = true }
+ani-danmaku = { workspace = true }
+ani-torrent = { workspace = true }
+ds-acgrip = { workspace = true }
+ds-bangumi = { workspace = true }
+ds-jellyfin = { workspace = true }
+ds-nyaa = { workspace = true }
+ds-dmhy = { workspace = true }
+ds-mikan = { workspace = true }
+
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+smol_str = { workspace = true }
+url = { workspace = true }

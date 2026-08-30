@@ -1,0 +1,15 @@
+[package]
+name = "ani-torrent"
+version.workspace = true
+edition.workspace = true
+description = "librqbit 封装：会话、边下边播 piece 优先级（对应 torrent:api + anitorrent）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+librqbit = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }

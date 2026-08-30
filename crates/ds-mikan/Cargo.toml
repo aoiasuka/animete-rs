@@ -1,0 +1,16 @@
+[package]
+name = "ds-mikan"
+version.workspace = true
+edition.workspace = true
+description = "蜜柑计划 mikanani.me BT/RSS 源（对应 :datasource:mikan）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+feed-rs = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+smol_str = { workspace = true }
+url = { workspace = true }

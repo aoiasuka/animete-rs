@@ -1,0 +1,8 @@
+/target
+
+# 本地分析文档（不入库）
+/Ani-Rust构建蓝图.md
+/Ani项目深度拆解.md
+
+# Tauri 构建生成物
+bin/ani/gen/schemas/

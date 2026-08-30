@@ -1,0 +1,16 @@
+[package]
+name = "ani-db"
+version.workspace = true
+edition.workspace = true
+description = "SQLite 持久层（sqlx + migrations，对应 app-data 的 Room）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }

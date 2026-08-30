@@ -1,0 +1,15 @@
+[package]
+name = "ani-core"
+version.workspace = true
+edition.workspace = true
+description = "全项目的骨架：领域模型 + MediaSource trait（对应 Ani 的 datasource:api）"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+smol_str = { workspace = true }
+url = { workspace = true }
+futures = "0.3"
+reqwest = { workspace = true }
+async-trait = { workspace = true }

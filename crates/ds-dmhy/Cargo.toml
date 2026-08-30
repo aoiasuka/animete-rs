@@ -1,0 +1,17 @@
+[package]
+name = "ds-dmhy"
+version.workspace = true
+edition.workspace = true
+description = "动漫花园 dmhy.org BT 源（HTML 解析，对应 :datasource:dmhy）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+scraper = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+smol_str = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }

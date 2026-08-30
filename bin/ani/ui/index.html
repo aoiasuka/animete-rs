@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ani-rs 追番</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region><span class="logo">▶</span> ani-rs</div>
+    <div class="search">
+      <input id="search-input" type="text" placeholder="搜索 Bangumi 条目（回车）" autofocus />
+      <button id="search-btn">搜索</button>
+    </div>
+    <div id="status" class="status"></div>
+    <button id="player-btn" class="ghost small" title="在线播放">▶ 播放</button>
+    <button id="settings-btn" class="ghost small" title="设置">⚙ 设置</button>
+    <div class="win-controls">
+      <button id="win-min" title="最小化" aria-label="最小化">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1.5 6h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+      <button id="win-max" title="最大化 / 还原" aria-label="最大化或还原">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1.7" y="1.7" width="8.6" height="8.6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+      </button>
+      <button id="win-close" class="wc-close" title="关闭" aria-label="关闭">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.2 2.2l7.6 7.6M9.8 2.2l-7.6 7.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 首页：新番时间表 + 最近搜索 / 搜索结果 -->
+    <section id="view-subjects" class="view">
+      <div id="home-section">
+        <div class="home-head">
+          <h2>本周新番</h2>
+          <span class="meta">放送时间表 · 数据来自 Bangumi</span>
+        </div>
+        <div id="weekday-tabs" class="weekday-tabs"></div>
+        <div id="calendar-grid" class="cards home-grid"><div class="empty">加载时间表中…</div></div>
+
+        <div class="home-head hist-head">
+          <h2>最近搜索</h2>
+          <button id="clear-history" class="ghost small hidden">清空</button>
+        </div>
+        <div id="history-chips" class="weekday-tabs"><span class="meta">还没有搜索记录</span></div>
+      </div>
+
+      <div id="search-section" class="hidden">
+        <div class="home-head">
+          <h2 id="subjects-title">搜索结果</h2>
+          <button id="home-back" class="ghost small">← 返回首页</button>
+        </div>
+        <div id="subjects" class="cards"></div>
+      </div>
+    </section>
+
+    <!-- 第二步：剧集 + 选源 -->
+    <section id="view-detail" class="view hidden">
+      <div class="detail-head">
+        <button id="back-btn" class="ghost">← 返回</button>
+        <div>
+          <h2 id="subject-name"></h2>
+          <div id="subject-meta" class="meta"></div>
+        </div>
+      </div>
+      <div class="episodes-wrap">
+        <h3>剧集</h3>
+        <div id="episodes" class="episodes"></div>
+      </div>
+      <div id="source-errors" class="errors hidden"></div>
+      <div class="cand-head">
+        <h3>候选资源</h3>
+        <span id="cand-count" class="meta"></span>
+        <span style="flex:1"></span>
+        <select id="cand-filter-group" class="select" style="max-width:180px" title="按字幕组过滤">
+          <option value="">全部字幕组</option>
+        </select>
+        <select id="cand-filter-res" class="select" style="max-width:130px" title="按分辨率过滤">
+          <option value="">全部分辨率</option>
+        </select>
+      </div>
+      <div id="candidates" class="cands"></div>
+    </section>
+
+    <!-- 设置 -->
+    <section id="view-settings" class="view hidden">
+      <div class="settings-head">
+        <button id="settings-back" class="ghost">← 返回</button>
+        <h2>设置</h2>
+        <span id="save-hint" class="meta"></span>
+      </div>
+      <div class="settings-layout">
+        <nav class="settings-nav">
+          <div class="nav-item active" data-pane="selector">选源偏好</div>
+          <div class="nav-item" data-pane="sources">数据源</div>
+          <div class="nav-item" data-pane="torrent">BT 下载</div>
+          <div class="nav-item" data-pane="danmaku">弹幕</div>
+          <div class="nav-item" data-pane="cache">缓存</div>
+          <div class="nav-item" data-pane="about">关于</div>
+        </nav>
+
+        <div class="settings-panes">
+          <!-- 选源偏好 -->
+          <div class="pane" id="pane-selector">
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">字幕组偏好</div>
+                <div class="row-desc">自动选源时优先选择该字幕组的资源</div>
+              </div>
+              <input id="set-group" class="text-input" type="text" placeholder="如 LoliHouse" />
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">期望分辨率</div>
+                <div class="row-desc">越接近该分辨率得分越高</div>
+              </div>
+              <select id="set-res" class="select">
+                <option value="">不限</option>
+                <option value="2160">2160p (4K)</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+              </select>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">最低分辨率</div>
+                <div class="row-desc">低于该分辨率的资源直接排除</div>
+              </div>
+              <select id="set-min-res" class="select">
+                <option value="">不限</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+              </select>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">黑名单关键词</div>
+                <div class="row-desc">标题命中即排除（如 预告、PV、合集）</div>
+              </div>
+              <div class="tag-editor" id="tags-blacklist-kw"></div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">黑名单字幕组</div>
+                <div class="row-desc">命中的字幕组资源直接排除</div>
+              </div>
+              <div class="tag-editor" id="tags-blacklist-group"></div>
+            </div>
+          </div>
+
+          <!-- 数据源 -->
+          <div class="pane hidden" id="pane-sources">
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">启用 / 停用数据源</div>
+                <div class="row-desc">停用后立即生效，下一次检索不再请求该源</div>
+              </div>
+              <div id="source-list" class="source-list"></div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">Bangumi 账号（收藏 / 进度同步）</div>
+                <div class="row-desc">在 bgm.tv 开发者平台免费创建应用获取 ClientID/Secret（回调地址留空即可）。
+                  登录后看完一集会自动标记「看过」，条目未收藏时自动加入「在看」</div>
+              </div>
+              <div class="jf-grid">
+                <input id="set-bg-id" class="text-input" type="text" placeholder="ClientID" />
+                <input id="set-bg-secret" class="text-input" type="password" placeholder="ClientSecret" />
+                <input id="set-bg-redirect" class="text-input wide" type="text" placeholder="回调地址（可选，需与创建应用时一致）" />
+              </div>
+              <div class="inline-ctl">
+                <button id="set-bg-auth" class="ghost small">打开授权页</button>
+                <input id="set-bg-code" class="text-input" type="text" placeholder="粘贴授权码" style="max-width:200px" />
+                <button id="set-bg-exchange" class="ghost small">完成登录</button>
+                <button id="set-bg-logout" class="ghost small hidden">退出登录</button>
+                <span id="bg-status" class="meta"></span>
+              </div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">Jellyfin / Emby 媒体服务器</div>
+                <div class="row-desc">配置后作为高分片源出现，条目可直接在线播放（HLS）。
+                  填服务器地址 + 用户名/密码，或只填 API Key。保存后立即生效。</div>
+              </div>
+              <input id="set-jf-url" class="text-input wide" type="text" placeholder="服务器地址，如 http://192.168.1.10:8096" />
+              <div class="jf-grid">
+                <input id="set-jf-user" class="text-input" type="text" placeholder="用户名（用 API Key 则留空）" />
+                <input id="set-jf-pass" class="text-input" type="password" placeholder="密码" />
+                <input id="set-jf-key" class="text-input" type="password" placeholder="或 API Key" />
+              </div>
+              <div class="inline-ctl">
+                <button id="set-jf-test" class="ghost small">测试连接</button>
+                <span id="jf-test-result" class="meta"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- BT 下载 -->
+          <div class="pane hidden" id="pane-torrent">
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">下载目录</div>
+                <div class="row-desc">留空使用默认目录（%APPDATA%\ani-rs\downloads）</div>
+              </div>
+              <div class="path-line">
+                <input id="set-dl-dir" class="text-input wide" type="text" placeholder="默认目录" />
+                <button id="set-dl-dir-open" class="ghost small">打开目录</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">下载完成后继续做种</div>
+                <div class="row-desc">回馈 swarm，帮助其他用户更快下载</div>
+              </div>
+              <label class="switch"><input id="set-seeding" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">监听端口</div>
+                <div class="row-desc">BT 连接端口，0 = 系统分配</div>
+              </div>
+              <input id="set-port" class="text-input num" type="number" min="0" max="65535" />
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">起播缓冲</div>
+                <div class="row-desc">BT 在线播放：视频头部下载到该 MB 数即拉起播放器</div>
+              </div>
+              <input id="set-head" class="text-input num" type="number" min="1" />
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">在线播放超时</div>
+                <div class="row-desc">等待种子元数据 + 头部数据的总超时（分钟）</div>
+              </div>
+              <input id="set-timeout" class="text-input num" type="number" min="1" />
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">mpv 播放器路径</div>
+                <div class="row-desc">BT 在线播放用 mpv 渐进播放；留空自动探测（PATH/常见安装位置），找不到时用系统默认播放器</div>
+              </div>
+              <input id="set-mpv" class="text-input wide" type="text" placeholder="例如 D:/tools/mpv/mpv.exe" />
+              <div class="inline-ctl">
+                <button id="set-mpv-check" class="ghost small">检测 mpv</button>
+                <span id="mpv-check-result" class="meta"></span>
+              </div>
+            </div>
+            <div class="row col">
+              <div class="hint">BT 会话在首次下载时创建，监听端口与下载目录的修改在下一次会话创建时生效。</div>
+            </div>
+          </div>
+
+          <!-- 弹幕 -->
+          <div class="pane hidden" id="pane-danmaku">
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">隐藏滚动弹幕</div>
+                <div class="row-desc">只显示顶部/底部弹幕</div>
+              </div>
+              <label class="switch"><input id="set-hide-scroll" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">隐藏顶部/底部弹幕</div>
+                <div class="row-desc">只显示滚动弹幕</div>
+              </div>
+              <label class="switch"><input id="set-hide-topbottom" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">弹幕源（dandanplay 开放 API）</div>
+                <div class="row-desc">在弹弹play 开放平台免费申请 AppId/AppSecret 后填入，播放时按番名+集号自动匹配弹幕；
+                  弹幕会应用下方的关键词/用户/类型屏蔽</div>
+              </div>
+              <label class="switch"><input id="set-dm-enable" type="checkbox" /><span class="slider"></span></label>
+              <div class="jf-grid">
+                <input id="set-dm-appid" class="text-input" type="text" placeholder="AppId" />
+                <input id="set-dm-secret" class="text-input" type="password" placeholder="AppSecret" />
+              </div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">屏蔽关键词</div>
+                <div class="row-desc">弹幕内容命中即不显示</div>
+              </div>
+              <div class="tag-editor" id="tags-danmaku-kw"></div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">屏蔽用户</div>
+                <div class="row-desc">该发送者的弹幕不显示</div>
+              </div>
+              <div class="tag-editor" id="tags-danmaku-user"></div>
+            </div>
+          </div>
+
+          <!-- 缓存 -->
+          <div class="pane hidden" id="pane-cache">
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">离线缓存</div>
+                <div class="row-desc">在候选列表点「⤓ 缓存」把 Jellyfin/HLS/直链视频下载到本地（%APPDATA%\ani-rs\cache），
+                  缓存完成后在列表里点「播放」即可观看，断网也能看</div>
+              </div>
+              <div id="cache-list" class="source-list"></div>
+              <div class="inline-ctl"><span id="cache-total" class="meta"></span></div>
+            </div>
+          </div>
+
+          <!-- 关于 -->
+          <div class="pane hidden" id="pane-about">
+            <div class="row">
+              <div class="row-label"><div class="row-title">版本</div></div>
+              <span class="meta">ani-rs 0.1.0（M0–M3）</span>
+            </div>
+            <div class="row">
+              <div class="row-label"><div class="row-title">设置文件</div></div>
+              <div class="path-line"><span id="path-settings" class="meta mono"></span>
+                <button class="ghost small" data-reveal="settings">打开</button></div>
+            </div>
+            <div class="row">
+              <div class="row-label"><div class="row-title">数据库</div></div>
+              <div class="path-line"><span id="path-db" class="meta mono"></span>
+                <button class="ghost small" data-reveal="db">打开</button></div>
+            </div>
+            <div class="row">
+              <div class="row-label"><div class="row-title">下载目录</div></div>
+              <div class="path-line"><span id="path-downloads" class="meta mono"></span>
+                <button class="ghost small" data-reveal="downloads">打开</button></div>
+            </div>
+            <div class="row col">
+              <div class="hint">架构对应：datasource:api / domain/media/selector / torrent:api / danmaku:* —— 详见 README 与构建蓝图。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 在线播放器（必须在 main 内，否则会被 main 的固定高度推出屏幕外） -->
+    <section id="view-player" class="view hidden">
+      <div class="player-head">
+        <button id="player-back" class="ghost">← 返回</button>
+        <div id="player-title" class="player-title"></div>
+        <span id="player-time" class="meta mono">0:00 / 0:00</span>
+        <select id="player-quality" class="select hidden" title="画质"></select>
+        <button id="player-danmaku" class="ghost small" title="弹幕开关">弹幕 关</button>
+        <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
+        <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
+      </div>
+      <div class="player-stage">
+        <video id="video" controls></video>
+        <canvas id="danmaku-canvas" class="hidden"></canvas>
+      </div>
+      <div class="player-url">
+        <input id="player-url-input" type="text" placeholder="粘贴视频直链 / HLS 地址（m3u8）在线播放" />
+        <button id="player-url-btn">播放直链</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- 下载面板（多任务） -->
+  <aside id="download-panel" class="dl hidden">
+    <div class="dl-title">
+      下载任务 <span id="dl-count" class="meta"></span>
+      <button id="dl-close" class="ghost small">✕</button>
+    </div>
+    <div id="dl-list" class="dl-list"><div class="meta">暂无任务</div></div>
+  </aside>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="vendor/hls.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

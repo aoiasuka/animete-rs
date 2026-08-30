@@ -1,0 +1,17 @@
+[package]
+name = "ds-bangumi"
+version.workspace = true
+edition.workspace = true
+description = "bangumi.tv v0 REST 客户端（对应 :datasource:bangumi）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }

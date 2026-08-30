@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    # 应用为 Windows 端（windows_subsystem / CommandExt / 注册表路径），CI 跑 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: test
+        run: cargo test --workspace
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: build release
+        run: cargo build --release -p ani
+
+  release:
+    # 打 v* tag 时产出 ani.exe 附件（简单产物上传；后续可换 cargo-dist 矩阵）
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p ani
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ani-exe
+          path: target/release/ani.exe

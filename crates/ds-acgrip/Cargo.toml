@@ -1,0 +1,16 @@
+[package]
+name = "ds-acgrip"
+version.workspace = true
+edition.workspace = true
+description = "acg.rip BT 源（RSS 解析，中文番剧资源站）"
+
+[dependencies]
+ani-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+feed-rs = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+smol_str = { workspace = true }
+url = { workspace = true }

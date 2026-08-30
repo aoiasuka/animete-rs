@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+members = [
+    "bin/ani",
+    "bin/ani-cli",
+    "crates/ani-core",
+    "crates/ani-domain",
+    "crates/ani-danmaku",
+    "crates/ani-db",
+    "crates/ani-torrent",
+    "crates/ds-bangumi",
+    "crates/ds-acgrip",
+    "crates/ds-dmhy",
+    "crates/ds-jellyfin",
+    "crates/ds-mikan",
+    "crates/ds-nyaa",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "json", "gzip"] }
+scraper = "0.20"
+feed-rs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+smol_str = { version = "0.3", features = ["serde"] }
+url = { version = "2", features = ["serde"] }
+async-trait = "0.1"
+dirs = "5"
+librqbit = "8"
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+ani-core = { path = "crates/ani-core" }
+ani-domain = { path = "crates/ani-domain" }
+ani-danmaku = { path = "crates/ani-danmaku" }
+ani-db = { path = "crates/ani-db" }
+ani-torrent = { path = "crates/ani-torrent" }
+ds-acgrip = { path = "crates/ds-acgrip" }
+ds-bangumi = { path = "crates/ds-bangumi" }
+ds-jellyfin = { path = "crates/ds-jellyfin" }
+ds-nyaa = { path = "crates/ds-nyaa" }
+ds-dmhy = { path = "crates/ds-dmhy" }
+ds-mikan = { path = "crates/ds-mikan" }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
