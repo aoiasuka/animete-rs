@@ -517,9 +517,10 @@ fn parse_tier(t: &str) -> ani_core::MediaSourceTier {
 
 // ---------- 在线播放 ----------
 
-/// BT 渐进播放（边下边播的 M2-lite 实现）：
-/// 加入种子 → 等元数据 → 选最大的视频文件 → 轮询该文件头部字节
-/// （默认 8MB，够 mpv/系统播放器起播）→ 发 `stream-ready` 事件（带本地路径）。
+/// BT 渐进播放：
+/// 加入种子 → 等元数据 → 按集号选视频文件 → 轮询头部字节落盘（默认 8MB，够起播）
+/// → 发 `stream-ready` 事件：`url` 指向 anibt:// 协议（应用内边下边播，弹幕/续播可用），
+/// `path` 是本地文件路径（外部 mpv 兜底）。
 #[tauri::command]
 pub async fn start_torrent_stream(
     app: AppHandle,
@@ -613,7 +614,17 @@ pub async fn start_torrent_stream(
         let path = download_dir.join(&video.name);
         let _ = app.emit(
             "stream-ready",
-            &serde_json::json!({ "path": path.to_string_lossy(), "title": title, "file": video.name }),
+            &serde_json::json!({
+                // url = 应用内播放（anibt:// 协议，btstream 模块）；path = 外部播放器兜底
+                "path": path.to_string_lossy(),
+                "url": format!(
+                    "http://anibt.localhost/v/{}/{}",
+                    handle.info_hash().as_string(),
+                    video.index
+                ),
+                "title": title,
+                "file": video.name,
+            }),
         );
     });
     Ok(())

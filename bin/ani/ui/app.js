@@ -1262,6 +1262,9 @@ let playerPrev = "subjects";
 let currentMediaKey = null;
 let resumeListener = null;
 let lastSavedSec = -10;
+// 应用内 BT 播放（anibt://）失败时回落外部播放器用的本地路径
+let btFallbackPath = null;
+let btErrorListener = null;
 const RATES = [1.0, 1.25, 1.5, 2.0];
 
 function mediaKey(str) {
@@ -1298,6 +1301,10 @@ function destroyPlayer() {
   if (resumeListener) {
     v.removeEventListener("loadedmetadata", resumeListener);
     resumeListener = null;
+  }
+  if (btErrorListener) {
+    v.removeEventListener("error", btErrorListener);
+    btErrorListener = null;
   }
   if (hls) {
     hls.destroy();
@@ -1381,6 +1388,20 @@ function showPlayer(url, title) {
       }
     });
   } else {
+    if (url.startsWith("http://anibt.localhost/")) {
+      // 应用内 BT 播放失败（容器不受支持/区间长时间无数据）→ 自动回落外部播放器
+      btErrorListener = () => {
+        if (!btFallbackPath) {
+          toast("播放失败：该视频格式可能不受 WebView 支持");
+          return;
+        }
+        toast("应用内播放失败，改用外部播放器…");
+        invoke("spawn_player", { path: btFallbackPath })
+          .then((via) => toast("已在" + via + "中播放", true))
+          .catch(() => {});
+      };
+      v.addEventListener("error", btErrorListener, { once: true });
+    }
     v.src = url;
   }
   // 记住的音量/倍速
@@ -1416,7 +1437,7 @@ $("player-btn").onclick = showPlayerEmpty;
 async function startStream(uri, title) {
   openDlPanel();
   setStatus("在线播放准备中…");
-  toast("BT 渐进播放：先下载视频头部数据…");
+  toast("BT 边下边播：先缓冲视频头部数据…");
   try {
     await invoke("start_torrent_stream", { uri, title, ep: state.currentEp ?? null });
   } catch (e) {
@@ -1436,8 +1457,15 @@ listen("stream-file", (f) => {
 }).catch(() => {});
 
 listen("stream-ready", async (ev) => {
-  const { path, title } = ev.payload;
+  const { url, path, title } = ev.payload;
   setStatus("");
+  if (url) {
+    // 应用内边下边播（anibt:// 协议）：弹幕/断点续播/倍速全可用
+    btFallbackPath = path || null;
+    openPlayer(url, title);
+    toast("BT 边下边播：正在应用内播放器缓冲…", true);
+    return;
+  }
   try {
     const via = await invoke("spawn_player", { path });
     toast("已在" + via + "中播放（边下边播，请勿关闭下载面板）", true);

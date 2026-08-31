@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod btstream;
 mod cache;
 mod commands;
 mod settings;
@@ -85,6 +86,15 @@ fn main() {
             let path = request.uri().path().to_string();
             tauri::async_runtime::spawn(async move {
                 responder.respond(cache::serve_file(&path));
+            });
+        })
+        // BT 渐进播放：http://anibt.localhost/v/<info_hash>/<file_index>，
+        // 把 librqbit 文件流以 HTTP Range 语义喂给应用内播放器（btstream 模块）
+        .register_asynchronous_uri_scheme_protocol("anibt", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let resp = btstream::handle(app.state::<AppContext>().inner(), request).await;
+                responder.respond(resp);
             });
         })
         .run(tauri::generate_context!())

@@ -2,7 +2,7 @@
 
 一个 Windows 端追番客户端：**找番 → 聚合搜源 → 自动选源 → BT 下载 / 在线播放 / 离线缓存 → 弹幕 → 进度云同步**，用 Rust + Tauri 2 实现 [Ani（Animeko）](https://github.com/open-ani/animeko)的核心体验。
 
-项目基于两份本地分析文档施工（不入库）：Ani 6.0.0 的行为级深度拆解（模块/类/端点地图），以及据此编写的《Rust 构建蓝图》（选型/子系统设计/工程规范/里程碑）。本仓库是蓝图的施工实现。当前进度：**M0 骨架、M1 数据源、M3 GUI 壳、M4 弹幕与同步完成；BT 渐进播放为 M2-lite 形态**。
+项目基于两份本地分析文档施工（不入库）：Ani 6.0.0 的行为级深度拆解（模块/类/端点地图），以及据此编写的《Rust 构建蓝图》（选型/子系统设计/工程规范/里程碑）。本仓库是蓝图的施工实现。当前进度：**M0 骨架、M1 数据源、M3 GUI 壳、M4 弹幕与同步完成；M2 边下边播已落地应用内形态（anibt:// 流式协议，mpv 为兜底）**。
 
 ---
 
@@ -14,7 +14,7 @@
 - **BT 下载**：磁力/.torrent 一键下载，右下角浮窗多任务管理（进度 / 速度 / 暂停 / 移除 / 完成后直接播放）
 - **在线播放**：
   - HTTP/HLS 直链（Jellyfin 条目、直链粘贴）——内置 hls.js 播放器，多码率画质切换
-  - BT 渐进播放（M2-lite）——按集号自动选种子内视频文件，头部缓冲就绪即拉起 mpv 边下边播
+  - BT 边下边播（应用内播放器）——按集号自动选种子内视频文件，头部缓冲就绪即在应用内起播：`anibt://` 自定义协议把 librqbit 文件流以 HTTP Range 形式喂给播放器，读到未下载区间阻塞等 piece、读位置（seek）即下载优先级；弹幕 / 断点续播 / 倍速对 BT 源全部生效，容器不受 WebView 支持时自动回落外部 mpv
 - **播放器**：断点续播、倍速/音量记忆、键盘快捷键（空格 / ←→ / ↑↓ / F）、点击暂停、双击全屏、缓冲指示、HLS 出错自动恢复
 - **弹幕**（dandanplay 开放 API）：在设置页填入免费申请的 AppId/AppSecret 后，播放时按「番名 + 集号」自动匹配弹幕池；结果缓存 3 天（SQLite，网络失败时回落过期缓存），后端完成去重 + 关键词/用户/类型屏蔽，前端 Canvas 渲染（滚动/顶部/底部三轨道、轨道满自动限流、seek 重定位），播放器内一键开关
 - **下载任务**：librqbit fastresume 恢复的历史任务自动登记进面板（可见、可暂停、可移除）；下载面板增量渲染（进度事件只改数值，不重建 DOM）
@@ -91,8 +91,9 @@ crates/ds-jellyfin   Jellyfin/Emby 媒体服务器源（HLS 直链，在线播�
        ──▶ ani-domain::select_auto（评分 + 可解释排除，黑名单/偏好来自设置）
        ──▶ 候选列表（Available 按分排序 + Excluded 带原因）
 下载   ──▶ ani-torrent（librqbit 会话，fastresume 持久化）→ 800ms ticker 广播 downloads-progress
-在线播放 ─▶ BT：等元数据 → 按集号选文件 → 头部 8MB 就绪 → spawn_player(mpv/系统播放器) 边下边播
-         ▶ HTTP/HLS：hls.js 直播
+在线播放 ─▶ BT：等元数据 → 按集号选文件 → 头部 8MB 就绪 → 应用内播放器经 anibt:// 协议
+         │  读 librqbit FileStream（未下载区间阻塞等 piece、seek 即改下载优先级），206 分块响应
+         └▶ HTTP/HLS：hls.js 直播（应用内 BT 播放失败时回落外部 mpv/系统播放器）
 看完/退出 ─▶ ani-db playback_history（断点续播；媒体 key = URL 哈希）
 ```
 
@@ -113,6 +114,7 @@ crates/ds-jellyfin   Jellyfin/Emby 媒体服务器源（HLS 直链，在线播�
 
 - **自动选源**（`ani-domain`）：源分级打底（High/Medium/Low → 3/2/1 ×10）+ 字幕组偏好（完全 +8 / 模糊 +4）+ 分辨率接近度 + 大小合理性（<100MiB 惩罚预告、>20GiB 惩罚合集）；剧集号解析绕开 `1080p`/`x265`/`S01`/`第2季`/`Season 2`/年份/日期区间等全部假阳性，`S01E05` 取 E 后集号
 - **BT 渐进播放**：磁力 `add` 内部会阻塞等元数据（librqbit 行为），命令层包超时；文件显式 `output_folder` 使落盘路径与播放路径恒一致；piece 区间换算（`pieces_for_range`）是 seek 的核心一跳
+- **anibt:// 协议**（`bin/ani/src/btstream.rs`）：Tauri 的协议 responder 只收缓冲响应体，所以按 4MiB 封顶回 206（Content-Range 收敛区间），WebView 按消费进度续发 Range 请求，等价于滚动窗口的渐进读取；无 Range 头的请求按 `bytes=0-` 处理（防止整部几 GiB 文件读进内存）；读块 60s 超时防死种挂起。Range 解析/路径校验是纯函数带单测（多区间取第一个、`bytes=-N` 后缀、非法 spec 忽略、越界 416）
 - **弹幕索引**：1 秒分桶 + 桶内按权重降序，`window(from, to)` 供渲染层 O(1) 取窗口；脏数据（负值/超 24h `time_ms`）构建时丢弃；多源去重按时间窗回看，O(n·w)
 - **设置**：单文件 JSON + `version` 链式迁移预留 + 临时文件 rename 原子写；损坏时留档 `.json.bad` 防止静默覆盖
 - **错误模型**：`UserError` 两级（network / source_blocked / captcha_required / internal），command 边界统一收敛，前端按 kind 出文案
@@ -149,7 +151,7 @@ cargo fmt --all --check         # CI 同样强制
 | M0 骨架 | workspace + ani-core + Bangumi CLI | ✅ |
 | M1 数据源 | dmhy/mikan/acgrip/nyaa + 聚合选源 | ✅ |
 | M3 GUI 壳 | Tauri 2 窗口 + 首页/搜索/选源/设置/播放器 | ✅ |
-| M2 边下边播 | StreamingReader + mpv stream-cb 随机读、piece 级优先级、分段进度条 | 🔶 当前为 M2-lite（文件级选择 + 头部缓冲 + mpv 渐进播放） |
+| M2 边下边播 | StreamingReader + mpv stream-cb 随机读、piece 级优先级、分段进度条 | 🔶 **应用内形态已落地**：librqbit FileStream（AsyncRead+AsyncSeek，流位置即 piece 优先级）经 anibt:// 协议接入应用内播放器（弹幕/续播可用），mpv 为兜底；未做 mpv stream-cb 直读 |
 | M4 弹幕与同步 | dandanplay 弹幕接入 + Canvas 渲染层 + Bangumi 收藏/进度云同步 | ✅ 弹幕（需自配 AppId）+ Bangumi 看完自动打卡均已打通 |
 | M5 选源与缓存 | 偏好学习持久化 + 双缓存引擎（BT/HTTP） | 🔶 偏好学习 + HTTP/HLS 离线缓存（含管理页）已就绪；BT 引擎即下载目录本身 |
 | M6 打磨 | 托盘 / 单实例 / 更新器 / 打包 CI / i18n | 🔶 托盘 + 单实例已就绪；更新器/CI 待做 |
@@ -159,7 +161,7 @@ cargo fmt --all --check         # CI 同样强制
 - **mikan**：匿名搜索接口被官方停用且 ID 空间独立（非 bangumi.tv ID），恢复需登录态接入；当前该源静默无结果，不影响其它源
 - **弹幕**：dandanplay 开放 API 需要在[弹弹play 开放平台](https://github.com/kaedei/dandanplay-libraryindex)免费申请 AppId/AppSecret 并填入设置（Ani 官方是内置自家凭据，本项目按合规考虑让用户自配）；未配置时弹幕静默关闭，不影响其它功能
 - **Bangumi 账号**：OAuth 需要在 [bgm.tv 开发者平台](https://bgm.tv/dev/app)免费创建应用获取 ClientID/Secret 并填入设置（授权采用「打开授权页 → 复制授权码」流程，应用无需注册回调地址）；未登录时看完打卡静默跳过，不影响本地进度
-- BT 渐进播放依赖 mpv（设置里可配路径，自动探测 PATH/常见位置），找不到时回退系统默认播放器
+- BT 边下边播默认走应用内播放器（需视频容器被 WebView2 支持：mp4/webm/ts 无碍，mkv 走 Edge 媒体栈多数可播）；失败自动回落外部 mpv（设置里可配路径，自动探测 PATH/常见位置），再找不到回退系统默认播放器
 - 仅在 Windows 10/11 上验证（Tauri 2 理论上可跨平台，未测）
 
 ## 合规说明

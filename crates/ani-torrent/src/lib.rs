@@ -3,9 +3,10 @@
 //! 关键设计（蓝图 3.3）：
 //! - 会话持久化交给 librqbit 自己落盘，SQLite 里只存活跃种子清单（单一真相源原则）
 //! - 下载目录默认 %APPDATA%/ani-rs/downloads
-//! - piece 优先级：librqbit 8 不暴露 per-piece API，流式播放用"文件级选择（only_files）
-//!   + 顺序读磁盘"实现；后续升级 librqbit 9 可接入 `focus` 做 seek 优先
-//! - 边下边播的 StreamingReader（对应 Ani 的 torrent/io）在 M2 里程碑补齐
+//! - 边下边播：librqbit 的 [`open_stream`] 返回 AsyncRead + AsyncSeek 的文件流，
+//!   读到未下载 piece 会阻塞等待，且 session 按所有活跃流的当前位置交错提升
+//!   piece 下载优先级（seek 即改读位置，优先级随动）——对应 Ani 的 torrent/io
+//!   StreamingReader；上层经 anibt:// 协议把该流喂给应用内播放器
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -155,6 +156,18 @@ impl TorrentSession {
             // 末字节所在 piece（闭区间），与 TorrentFileEntry::piece_range 语义一致
             (abs + len.max(1) - 1) / piece_len,
         )
+    }
+
+    /// 打开种子内文件的流式读取器（需元数据就绪、种子处于下载/暂停状态）。
+    ///
+    /// librqbit 未导出 `FileStream` 具体类型，这里以 `impl Trait` 透传：
+    /// `AsyncRead` 读到未下载 piece 时阻塞等待（piece 到位后唤醒），
+    /// `AsyncSeek` 改读位置即改变下载优先级队列的起点。
+    pub fn open_stream(
+        handle: &ManagedTorrentHandle,
+        file_index: usize,
+    ) -> anyhow::Result<impl tokio::io::AsyncRead + tokio::io::AsyncSeek + Unpin + Send> {
+        handle.clone().stream(file_index)
     }
 }
 
