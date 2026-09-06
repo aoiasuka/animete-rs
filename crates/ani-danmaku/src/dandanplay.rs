@@ -10,7 +10,7 @@ use crate::{DanmakuEvent, DanmakuMode};
 use anyhow::Context;
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 const API: &str = "https://api.dandanplay.net";
@@ -152,7 +152,7 @@ impl DandanplayClient {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpisodeEntry {
     pub anime_title: String,
     pub episode_id: i64,

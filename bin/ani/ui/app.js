@@ -1560,6 +1560,43 @@ function renderDownloads() {
     };
   }
 
+  // 全部暂停 / 全部继续 按钮
+  const toggleAllBtn = $("dl-toggle-all-btn");
+  const unfinishedTasks = tasks.filter((t) => !t.finished);
+  if (toggleAllBtn) {
+    toggleAllBtn.classList.toggle("hidden", unfinishedTasks.length === 0);
+    const anyRunning = unfinishedTasks.some((t) => !t.paused);
+    toggleAllBtn.textContent = anyRunning ? "全部暂停 ⏸" : "全部继续 ▶";
+    toggleAllBtn.onclick = async () => {
+      try {
+        const nextPaused = anyRunning;
+        await invoke("set_all_downloads_paused", { paused: nextPaused });
+        for (const t of unfinishedTasks) {
+          t.paused = nextPaused;
+          const node = dlNodes.get(t.id);
+          if (node) updateDlNode(node, t);
+        }
+        toast(nextPaused ? "已暂停所有下载任务" : "已恢复所有下载任务", true);
+        renderDownloads();
+      } catch (e) {
+        toast("批量操作失败：" + e);
+      }
+    };
+  }
+
+  // 打开下载目录按钮
+  const openDirBtn = $("dl-open-dir-btn");
+  if (openDirBtn) {
+    openDirBtn.onclick = async () => {
+      try {
+        await invoke("open_download_dir");
+        toast("已在资源管理器中打开下载目录", true);
+      } catch (e) {
+        toast("打开下载目录失败：" + e);
+      }
+    };
+  }
+
   // 移除已消失任务的节点
   for (const [id, node] of [...dlNodes]) {
     if (!dlTasks.has(id)) {
@@ -1632,6 +1669,350 @@ listen("torrent-files", (ev) => {
     toast(`元数据就绪：${list.length} 个视频文件`, true);
   }
 }).catch(() => {});
+
+// ---------- 剧集批量下载调度台 ----------
+let isBatchDownloading = false;
+
+function openBatchDownloadModal() {
+  const modal = $("batch-dl-modal");
+  if (!modal) return;
+  const subjectTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "当前动画";
+  const titleEl = $("batch-dl-subject-title");
+  if (titleEl) titleEl.textContent = `《${subjectTitle}》`;
+
+  const grid = $("batch-ep-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  const eps = state.episodes || [];
+  if (!eps.length) {
+    grid.innerHTML = `<div class="meta" style="grid-column: 1 / -1; padding: 20px; text-align: center;">暂无剧集数据</div>`;
+    modal.classList.remove("hidden");
+    return;
+  }
+
+  eps.forEach((e) => {
+    const epId = Number(e.id?.id ?? e.id);
+    const isWatched = state.watchedEps.has(epId);
+    const isMain = e.ep_type === 0 || e.kind === "main" || !e.kind;
+    const epTitle = e.display_title || (e.name_cn ? `${e.ep}. ${e.name_cn}` : `第 ${e.ep} 集`);
+
+    const item = document.createElement("label");
+    item.className = "batch-ep-item";
+    item.dataset.epId = String(epId);
+    item.dataset.ep = String(e.ep);
+    item.dataset.isMain = isMain ? "1" : "0";
+    item.dataset.isWatched = isWatched ? "1" : "0";
+
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.className = "batch-ep-chk";
+    chk.value = String(e.ep);
+    // 默认勾选未看的正片
+    chk.checked = isMain && !isWatched;
+
+    if (chk.checked) item.classList.add("selected");
+
+    chk.onchange = () => {
+      item.classList.toggle("selected", chk.checked);
+      updateBatchSelectedCount();
+    };
+
+    const span = document.createElement("span");
+    span.className = "batch-ep-label";
+    span.textContent = epTitle;
+    span.title = epTitle;
+
+    item.appendChild(chk);
+    item.appendChild(span);
+    grid.appendChild(item);
+  });
+
+  updateBatchSelectedCount();
+  $("batch-dl-progress-box")?.classList.add("hidden");
+  modal.classList.remove("hidden");
+}
+
+function updateBatchSelectedCount() {
+  const chks = document.querySelectorAll(".batch-ep-chk:checked");
+  const cntEl = $("batch-sel-count");
+  if (cntEl) cntEl.textContent = `已选 ${chks.length} 集`;
+}
+
+function closeBatchDownloadModal() {
+  if (isBatchDownloading) {
+    if (!confirm("批量下载任务正在调度中，确定中断吗？")) return;
+    isBatchDownloading = false;
+  }
+  $("batch-dl-modal")?.classList.add("hidden");
+}
+
+const batchDlBtn = $("ep-batch-dl-btn");
+if (batchDlBtn) batchDlBtn.onclick = openBatchDownloadModal;
+
+const batchDlClose = $("batch-dl-close");
+if (batchDlClose) batchDlClose.onclick = closeBatchDownloadModal;
+
+const batchDlCancel = $("batch-dl-cancel-btn");
+if (batchDlCancel) batchDlCancel.onclick = closeBatchDownloadModal;
+
+const batchModalEl = $("batch-dl-modal");
+if (batchModalEl) {
+  batchModalEl.onclick = (e) => {
+    if (e.target === batchModalEl) closeBatchDownloadModal();
+  };
+}
+
+// 快捷选择按钮
+const batchSelMain = $("batch-sel-main");
+if (batchSelMain) {
+  batchSelMain.onclick = () => {
+    document.querySelectorAll(".batch-ep-item").forEach((item) => {
+      const chk = item.querySelector(".batch-ep-chk");
+      if (chk) {
+        chk.checked = item.dataset.isMain === "1";
+        item.classList.toggle("selected", chk.checked);
+      }
+    });
+    updateBatchSelectedCount();
+  };
+}
+
+const batchSelUnwatched = $("batch-sel-unwatched");
+if (batchSelUnwatched) {
+  batchSelUnwatched.onclick = () => {
+    document.querySelectorAll(".batch-ep-item").forEach((item) => {
+      const chk = item.querySelector(".batch-ep-chk");
+      if (chk) {
+        chk.checked = item.dataset.isWatched !== "1";
+        item.classList.toggle("selected", chk.checked);
+      }
+    });
+    updateBatchSelectedCount();
+  };
+}
+
+const batchSelInvert = $("batch-sel-invert");
+if (batchSelInvert) {
+  batchSelInvert.onclick = () => {
+    document.querySelectorAll(".batch-ep-item").forEach((item) => {
+      const chk = item.querySelector(".batch-ep-chk");
+      if (chk) {
+        chk.checked = !chk.checked;
+        item.classList.toggle("selected", chk.checked);
+      }
+    });
+    updateBatchSelectedCount();
+  };
+}
+
+const batchSelClear = $("batch-sel-clear");
+if (batchSelClear) {
+  batchSelClear.onclick = () => {
+    document.querySelectorAll(".batch-ep-item").forEach((item) => {
+      const chk = item.querySelector(".batch-ep-chk");
+      if (chk) {
+        chk.checked = false;
+        item.classList.remove("selected");
+      }
+    });
+    updateBatchSelectedCount();
+  };
+}
+
+// 开始批量下载
+const batchStartBtn = $("batch-dl-start-btn");
+if (batchStartBtn) {
+  batchStartBtn.onclick = async () => {
+    if (isBatchDownloading) return;
+    const selectedChks = [...document.querySelectorAll(".batch-ep-chk:checked")];
+    if (!selectedChks.length) {
+      toast("请先勾选至少一集要下载的剧集");
+      return;
+    }
+    const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+    if (!subjectId) {
+      toast("未找到番剧上下文");
+      return;
+    }
+
+    const prefRes = $("batch-pref-res")?.value || "";
+    const prefGroup = ($("batch-pref-group")?.value || "").trim().toLowerCase();
+
+    isBatchDownloading = true;
+    batchStartBtn.disabled = true;
+    batchStartBtn.textContent = "调度中…";
+
+    const progBox = $("batch-dl-progress-box");
+    const progBar = $("batch-prog-bar");
+    const progStatus = $("batch-prog-status");
+    const progPct = $("batch-prog-pct");
+    const progLog = $("batch-prog-log");
+
+    if (progBox) progBox.classList.remove("hidden");
+    if (progLog) progLog.innerHTML = "";
+
+    const addLog = (msg) => {
+      if (!progLog) return;
+      const row = document.createElement("div");
+      row.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      progLog.appendChild(row);
+      progLog.scrollTop = progLog.scrollHeight;
+    };
+
+    let successCount = 0;
+    let failCount = 0;
+
+    addLog(`开始批量调度：共 ${selectedChks.length} 集，首选清晰度: ${prefRes ? prefRes + "p" : "自动最优"}`);
+
+    for (let idx = 0; idx < selectedChks.length; idx++) {
+      if (!isBatchDownloading) {
+        addLog("批量下载已被用户取消");
+        break;
+      }
+      const chk = selectedChks[idx];
+      const epNum = parseFloat(chk.value);
+      const pct = Math.round((idx / selectedChks.length) * 100);
+
+      if (progBar) progBar.style.width = `${pct}%`;
+      if (progPct) progPct.textContent = `${pct}%`;
+      if (progStatus) progStatus.textContent = `正在解析第 ${epNum} 集资源 (${idx + 1}/${selectedChks.length})…`;
+
+      try {
+        const sel = await invoke("fetch_medias", { subjectId, ep: epNum });
+        const all = sel.candidates || [];
+        let avail = all.filter((c) => c.type === "available");
+        if (!avail.length && all.length) avail = all;
+
+        if (!avail.length) {
+          addLog(`第 ${epNum} 集：未找到有效资源候选，跳过`);
+          failCount++;
+          continue;
+        }
+
+        // 匹配偏好分辨率
+        let matched = avail;
+        if (prefRes) {
+          const resFiltered = matched.filter((c) => c.media?.properties?.resolution?.height === Number(prefRes));
+          if (resFiltered.length > 0) matched = resFiltered;
+        }
+        // 匹配偏好字幕组
+        if (prefGroup) {
+          const groupFiltered = matched.filter((c) =>
+            c.media?.properties?.subtitle_group?.toLowerCase().includes(prefGroup)
+          );
+          if (groupFiltered.length > 0) matched = groupFiltered;
+        }
+
+        const best = matched[0] || avail[0];
+        const m = best.media;
+        const magnet = m.download?.type === "torrent" ? m.download.uri : null;
+        const httpUrl = m.download?.type === "http" ? m.download.url : null;
+
+        if (magnet) {
+          await invoke("start_torrent", { uri: magnet, title: m.title || null });
+          learnPreference({ group: m.properties?.subtitle_group, res: m.properties?.resolution?.height });
+          successCount++;
+          addLog(`第 ${epNum} 集：已加入 BT 下载队列 (${m.title})`);
+        } else if (httpUrl) {
+          await invoke("cache_start", { url: httpUrl, title: m.title || "离线视频" });
+          successCount++;
+          addLog(`第 ${epNum} 集：已加入离线缓存队列 (${m.title})`);
+        } else {
+          addLog(`第 ${epNum} 集：无下载地址，跳过`);
+          failCount++;
+        }
+      } catch (err) {
+        addLog(`第 ${epNum} 集解析失败：${err}`);
+        failCount++;
+      }
+
+      // 平滑节流，防并发限流
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+
+    if (progBar) progBar.style.width = "100%";
+    if (progPct) progPct.textContent = "100%";
+    if (progStatus) progStatus.textContent = `批量调度完毕：成功添加 ${successCount} 集${failCount > 0 ? `，跳过/失败 ${failCount} 集` : ""}`;
+    addLog(`调度任务结束：成功 ${successCount} 集，失败 ${failCount} 集`);
+
+    isBatchDownloading = false;
+    batchStartBtn.disabled = false;
+    batchStartBtn.textContent = "开始批量下载";
+
+    toast(`批量调度完成！已添加 ${successCount} 集至下载面板`, true);
+    openDlPanel();
+  };
+}
+
+// ---------- 追番与历史 Markdown 导出器 ----------
+function exportCollectionsToMarkdown() {
+  const cols = cachedCollections || [];
+  if (!cols.length) {
+    toast("当前暂无追番数据可供导出");
+    return;
+  }
+  let md = `# 我的追番清单 (共 ${cols.length} 部)\n\n`;
+  md += `> 导出时间：${new Date().toLocaleString()} · 由 [ani-rs](https://github.com/ani-rs/ani-rs) 追番客户端生成\n\n`;
+  md += `| 封面 | 番剧名称 | 评分 | 观看进度 | 更新状态 | 放送星期 |\n`;
+  md += `| :---: | :--- | :---: | :---: | :---: | :---: |\n`;
+
+  const WEEKDAYS = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
+  for (const c of cols) {
+    const title = c.subject_name_cn ? `${c.subject_name_cn} (${c.subject_name})` : c.subject_name;
+    const cover = c.cover_url ? `![封面](${c.cover_url})` : "无封面";
+    const score = c.score ? `⭐ ${c.score.toFixed(1)}` : "暂无评分";
+    const progress = c.last_watched_ep ? `看到第 ${c.last_watched_ep} 集` : "尚未开始";
+    const status = c.air_status === "caught_up" ? "✅ 已追平" : (c.air_status === "pending" ? "⏳ 待看" : "追番中");
+    const weekday = c.air_weekday ? (WEEKDAYS[c.air_weekday] || `周${c.air_weekday}`) : "已完结/未知";
+
+    md += `| ${cover} | **${title.replace(/\|/g, "/")}** | ${score} | ${progress} | ${status} | ${weekday} |\n`;
+  }
+
+  navigator.clipboard.writeText(md).then(() => {
+    toast(`已成功复制 ${cols.length} 部追番清单为 Markdown 表格！`, true);
+  }).catch((e) => {
+    toast("复制到剪贴板失败：" + e);
+  });
+}
+
+async function exportHistoryToMarkdown() {
+  try {
+    const history = await invoke("list_full_playback_history", { limit: 300 });
+    if (!history || !history.length) {
+      toast("当前暂无观影历史可供导出");
+      return;
+    }
+    let md = `# 我的观影足迹与历史 (共 ${history.length} 条)\n\n`;
+    md += `> 导出时间：${new Date().toLocaleString()} · 由 [ani-rs](https://github.com/ani-rs/ani-rs) 追番客户端生成\n\n`;
+    md += `| 番剧名称 | 剧集 | 进度 | 播放时长 | 状态 | 最后观看时间 |\n`;
+    md += `| :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+
+    for (const h of history) {
+      const title = h.subject_name || "未知动画";
+      const ep = h.ep ? `第 ${h.ep} 集` : (h.title || "正片");
+      const pct = h.duration_seconds > 0 ? Math.min(100, Math.round((h.position_seconds / h.duration_seconds) * 100)) : 0;
+      const progress = `${pct}%`;
+      const posStr = `${fmtTime(h.position_seconds)} / ${fmtTime(h.duration_seconds)}`;
+      const status = h.finished ? "已看完" : "未播完";
+      const dateStr = h.updated_at_ms ? new Date(h.updated_at_ms).toLocaleString() : "-";
+
+      md += `| **${title.replace(/\|/g, "/")}** | ${ep} | ${progress} | ${posStr} | ${status} | ${dateStr} |\n`;
+    }
+
+    await navigator.clipboard.writeText(md);
+    toast(`已成功复制 ${history.length} 条观影历史为 Markdown 表格！`, true);
+  } catch (e) {
+    toast("导出观影历史失败：" + e);
+  }
+}
+
+const colExportBtn = $("col-export-btn");
+if (colExportBtn) colExportBtn.onclick = exportCollectionsToMarkdown;
+
+const historyExportBtn = $("history-export-btn");
+if (historyExportBtn) historyExportBtn.onclick = exportHistoryToMarkdown;
 
 // ---------- 杂项 ----------
 
@@ -3671,15 +4052,26 @@ function clearAbLoop(notify = true) {
   }
 }
 
-// ---------- Web Audio 音量超频增益系统 ----------
+// ---------- Web Audio 音量超频增益与音频均衡器系统 ----------
 const audioBoostState = {
   level: parseFloat(localStorage.getItem("ani_audio_boost")) || 1.0,
+  eqMode: localStorage.getItem("ani_audio_eq") || "flat",
   ctx: null,
   sourceNode: null,
   gainNode: null,
+  lowFilter: null,
+  midFilter: null,
+  highFilter: null,
 };
 
 const BOOST_LEVELS = [1.0, 1.5, 2.0, 3.0];
+
+const EQ_PRESETS = {
+  flat: { name: "原声", low: 0, mid: 0, high: 0 },
+  vocal: { name: "人声清晰", low: -2.5, mid: 4.5, high: 1.0 },
+  bass: { name: "影院重低音", low: 6.0, mid: 0, high: -1.0 },
+  bright: { name: "明亮高音", low: -1.0, mid: 1.5, high: 4.5 },
+};
 
 function initAudioBoost() {
   const v = $("video");
@@ -3690,16 +4082,60 @@ function initAudioBoost() {
     try {
       audioBoostState.ctx = new AudioContext();
       audioBoostState.sourceNode = audioBoostState.ctx.createMediaElementSource(v);
+
+      // 三段均衡滤波节点（低架 / 参量峰值 / 高架）
+      audioBoostState.lowFilter = audioBoostState.ctx.createBiquadFilter();
+      audioBoostState.lowFilter.type = "lowshelf";
+      audioBoostState.lowFilter.frequency.value = 100;
+
+      audioBoostState.midFilter = audioBoostState.ctx.createBiquadFilter();
+      audioBoostState.midFilter.type = "peaking";
+      audioBoostState.midFilter.frequency.value = 2200;
+      audioBoostState.midFilter.Q.value = 1.1;
+
+      audioBoostState.highFilter = audioBoostState.ctx.createBiquadFilter();
+      audioBoostState.highFilter.type = "highshelf";
+      audioBoostState.highFilter.frequency.value = 6000;
+
       audioBoostState.gainNode = audioBoostState.ctx.createGain();
       audioBoostState.gainNode.gain.value = audioBoostState.level;
-      audioBoostState.sourceNode.connect(audioBoostState.gainNode);
+
+      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> gainNode -> destination
+      audioBoostState.sourceNode.connect(audioBoostState.lowFilter);
+      audioBoostState.lowFilter.connect(audioBoostState.midFilter);
+      audioBoostState.midFilter.connect(audioBoostState.highFilter);
+      audioBoostState.highFilter.connect(audioBoostState.gainNode);
       audioBoostState.gainNode.connect(audioBoostState.ctx.destination);
+
+      applyAudioEq(audioBoostState.eqMode);
     } catch {
       // 避免重复创建 MediaElementSource 错误
     }
   }
   if (audioBoostState.ctx && audioBoostState.ctx.state === "suspended") {
     audioBoostState.ctx.resume().catch(() => {});
+  }
+}
+
+function applyAudioEq(mode) {
+  const preset = EQ_PRESETS[mode] || EQ_PRESETS.flat;
+  if (audioBoostState.lowFilter) audioBoostState.lowFilter.gain.value = preset.low;
+  if (audioBoostState.midFilter) audioBoostState.midFilter.gain.value = preset.mid;
+  if (audioBoostState.highFilter) audioBoostState.highFilter.gain.value = preset.high;
+}
+
+function setAudioEq(mode, notify = false) {
+  audioBoostState.eqMode = mode;
+  localStorage.setItem("ani_audio_eq", mode);
+  initAudioBoost();
+  applyAudioEq(mode);
+  document.querySelectorAll(".visual-eq-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.eq === mode);
+  });
+  if (notify) {
+    const preset = EQ_PRESETS[mode] || EQ_PRESETS.flat;
+    showPlayerOsd(`🎧 均衡器: ${preset.name}`);
+    toast(`已切换音频均衡器模式：${preset.name}`, true);
   }
 }
 
@@ -4484,6 +4920,114 @@ if (dmClearBtn) {
   };
 }
 
+// ---------- 弹幕手动搜索与跨集匹配系统 ----------
+const dmManualMatchBtn = $("dm-manual-match-btn");
+const dmMatchModal = $("dm-match-modal");
+const dmMatchClose = $("dm-match-close");
+const dmMatchInput = $("dm-match-input");
+const dmMatchSearchBtn = $("dm-match-search-btn");
+const dmMatchResults = $("dm-match-results");
+
+function openDmMatchModal() {
+  $("danmaku-menu")?.classList.add("hidden");
+  if (!dmMatchModal) return;
+  dmMatchModal.classList.remove("hidden");
+  const curTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "";
+  if (dmMatchInput) {
+    if (curTitle && !dmMatchInput.value.trim()) {
+      dmMatchInput.value = curTitle;
+    }
+    dmMatchInput.focus();
+    if (dmMatchInput.value.trim()) {
+      performDmSearch(dmMatchInput.value.trim());
+    }
+  }
+}
+
+function closeDmMatchModal() {
+  if (dmMatchModal) dmMatchModal.classList.add("hidden");
+}
+
+if (dmManualMatchBtn) {
+  dmManualMatchBtn.onclick = openDmMatchModal;
+}
+if (dmMatchClose) {
+  dmMatchClose.onclick = closeDmMatchModal;
+}
+if (dmMatchModal) {
+  dmMatchModal.onclick = (e) => {
+    if (e.target === dmMatchModal) closeDmMatchModal();
+  };
+}
+
+async function performDmSearch(keyword) {
+  if (!dmMatchResults) return;
+  if (!keyword || !keyword.trim()) {
+    dmMatchResults.innerHTML = `<div class="meta empty-tip">请输入有效的番剧名称</div>`;
+    return;
+  }
+  dmMatchResults.innerHTML = `<div class="meta empty-tip">正在向弹弹play检索「${escapeHtml(keyword)}」剧集库…</div>`;
+  try {
+    const list = await invoke("danmaku_search_episodes", { anime: keyword.trim() });
+    if (!list || !list.length) {
+      dmMatchResults.innerHTML = `<div class="meta empty-tip">未找到匹配的剧集条目，请尝试换用别名或日文原名</div>`;
+      return;
+    }
+    dmMatchResults.innerHTML = "";
+    list.forEach((ep) => {
+      const el = document.createElement("div");
+      el.className = "dm-match-item";
+      const fullTitle = ep.episode_title ? `${ep.anime_title} - ${ep.episode_title}` : ep.anime_title;
+      el.innerHTML = `
+        <div class="dm-match-info">
+          <div class="dm-match-title">${escapeHtml(fullTitle)}</div>
+          <div class="dm-match-meta">ID: ${ep.episode_id} · 番名: ${escapeHtml(ep.anime_title)}</div>
+        </div>
+        <button class="button small dm-match-action-btn">载入弹幕</button>
+      `;
+      el.onclick = async () => {
+        try {
+          toast(`正在拉取「${fullTitle}」弹幕库…`);
+          const r = await invoke("danmaku_fetch_by_episode_id", {
+            episodeId: ep.episode_id,
+            title: fullTitle,
+          });
+          if (r && r.matched) {
+            DanmakuOverlay.load(r.comments);
+            DanmakuOverlay.setEnabled(true);
+            setDanmakuOpacity(0.5, false);
+            syncDanmakuToggle();
+            renderDanmakuHeatmap(r.comments);
+            closeDmMatchModal();
+            toast(`已成功载入 ${r.comments.length} 条弹幕（${r.title}）`, true);
+            showPlayerOsd(`弹幕已匹配: ${r.comments.length} 条`);
+          } else {
+            toast("该集弹幕库为空或拉取失败");
+          }
+        } catch (e) {
+          toast("载入弹幕失败：" + e);
+        }
+      };
+      dmMatchResults.appendChild(el);
+    });
+  } catch (e) {
+    dmMatchResults.innerHTML = `<div class="meta empty-tip">搜索失败：${escapeHtml(String(e))}</div>`;
+  }
+}
+
+if (dmMatchSearchBtn) {
+  dmMatchSearchBtn.onclick = () => {
+    if (dmMatchInput) performDmSearch(dmMatchInput.value.trim());
+  };
+}
+if (dmMatchInput) {
+  dmMatchInput.onkeydown = (e) => {
+    if (e.key === "Enter") {
+      performDmSearch(dmMatchInput.value.trim());
+    }
+  };
+}
+
 syncDanmakuMenuUI();
 
 // seek 后重定位弹幕游标；窗口尺寸变化时重排画布
@@ -5060,6 +5604,13 @@ document.querySelectorAll(".visual-boost-opt").forEach((btn) => {
   btn.onclick = () => {
     const level = parseFloat(btn.getAttribute("data-boost")) || 1.0;
     setAudioBoost(level, true);
+  };
+});
+
+document.querySelectorAll(".visual-eq-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const eq = btn.getAttribute("data-eq") || "flat";
+    setAudioEq(eq, true);
   };
 });
 
@@ -5652,6 +6203,16 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const batchModal = $("batch-dl-modal");
+    if (batchModal && !batchModal.classList.contains("hidden")) {
+      closeBatchDownloadModal();
+      return;
+    }
+    const dmModal = $("dm-match-modal");
+    if (dmModal && !dmModal.classList.contains("hidden")) {
+      closeDmMatchModal();
+      return;
+    }
     const histModal = $("history-modal");
     if (histModal && !histModal.classList.contains("hidden")) {
       toggleHistoryModal(false);

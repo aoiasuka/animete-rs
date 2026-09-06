@@ -114,6 +114,7 @@
                 <button class="ghost small col-tab" data-status="pending">待看</button>
                 <button class="ghost small col-tab" data-status="caught_up">已追平</button>
               </div>
+              <button id="col-export-btn" class="ghost small" title="将追番列表导出为 Markdown / 纯文本">导出清单 📋</button>
               <button id="btn-refresh-collections" class="ghost small" title="并发检查全部追番条目更新状态">检查追更 🔄</button>
             </div>
           </div>
@@ -238,6 +239,7 @@
           <div class="episodes-actions">
             <input type="text" id="ep-filter-input" class="ep-filter-input" placeholder="筛选剧集/标题…" />
             <button id="ep-sort-btn" class="ghost small" title="切换正序 / 倒序">正序 1→N</button>
+            <button id="ep-batch-dl-btn" class="ghost small" title="批量下载当前番剧选定剧集">批量下载 ⤓</button>
             <button id="ep-mark-all" class="ghost small" title="将当前分类全部剧集标记为已看">全标已看</button>
             <button id="ep-clear-all" class="ghost small" title="清空本条目的已看标记">清空已看</button>
           </div>
@@ -650,6 +652,7 @@
           <button id="player-danmaku" class="ghost small" title="弹幕设置与高级调谐 (快捷键 D)">弹幕 关</button>
           <div id="danmaku-menu" class="danmaku-menu hidden">
             <div class="danmaku-menu-title">弹幕高级调谐</div>
+            <button id="dm-manual-match-btn" class="sub-menu-item">🔍 手动搜索匹配弹幕源</button>
             <button id="dm-load-file-btn" class="sub-menu-item">📂 加载本地弹幕 (.xml / .json)</button>
             <button id="dm-clear-btn" class="sub-menu-item hidden">✕ 卸载当前弹幕</button>
             <input type="file" id="dm-file-input" accept=".xml,.json" class="hidden" />
@@ -833,6 +836,15 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">音频均衡器</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-eq-opt active" data-eq="flat" title="还原原始声线，平衡无修饰">原声</button>
+                <button class="ghost small visual-eq-opt" data-eq="vocal" title="增强台词人声频段 (2kHz)，字字清晰">人声清晰</button>
+                <button class="ghost small visual-eq-opt" data-eq="bass" title="增强 80Hz 重低音与战斗爆炸氛围">影院重低音</button>
+                <button class="ghost small visual-eq-opt" data-eq="bright" title="增强高频 6kHz，清澈通透">明亮高音</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">睡眠定时</span>
               <div class="visual-btn-group">
                 <button class="ghost small visual-sleep-opt active" data-sleep="off" title="关闭定时">关闭</button>
@@ -939,6 +951,8 @@
         <span id="dl-total-speed" class="meta mono hidden"></span>
       </div>
       <div class="dl-title-actions">
+        <button id="dl-toggle-all-btn" class="ghost small hidden" title="全部暂停 / 全部继续">全部暂停 ⏸</button>
+        <button id="dl-open-dir-btn" class="ghost small" title="在系统资源管理器中打开下载目录">打开目录 📁</button>
         <button id="dl-clear-finished" class="ghost small hidden" title="清理已完成任务记录">清空完成</button>
         <button id="dl-close" class="ghost small" title="关闭面板 (Esc)">✕</button>
       </div>
@@ -956,12 +970,90 @@
         </div>
         <div class="modal-head-actions">
           <input type="text" id="history-search-input" class="history-search-input" placeholder="按番名或剧集搜索…" />
+          <button id="history-export-btn" class="ghost small" title="将观影历史导出为 Markdown 表格">导出清单 📋</button>
           <button id="history-clear-all" class="ghost small danger" title="清空全部观影历史">清空历史</button>
           <button id="history-close" class="ghost small" title="关闭 (Esc)">✕</button>
         </div>
       </div>
       <div class="modal-body history-modal-body">
         <div id="history-list" class="history-list"><div class="meta">暂无历史记录</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 剧集批量下载弹窗 -->
+  <div id="batch-dl-modal" class="modal-backdrop hidden">
+    <div class="modal-card batch-dl-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">剧集批量下载调度台</div>
+          <span id="batch-dl-subject-title" class="meta"></span>
+        </div>
+        <button id="batch-dl-close" class="ghost small" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="modal-body batch-dl-body">
+        <div class="batch-dl-toolbar">
+          <div class="batch-dl-select-tools">
+            <span class="meta">快捷勾选：</span>
+            <button id="batch-sel-main" class="ghost small">全选正片</button>
+            <button id="batch-sel-unwatched" class="ghost small">全选未看</button>
+            <button id="batch-sel-invert" class="ghost small">反选</button>
+            <button id="batch-sel-clear" class="ghost small">清空</button>
+            <span id="batch-sel-count" class="meta mono">已选 0 集</span>
+          </div>
+          <div class="batch-dl-prefs">
+            <div class="batch-pref-item">
+              <span class="meta">期望清晰度：</span>
+              <select id="batch-pref-res" class="select small">
+                <option value="">自动最优 (综合评分)</option>
+                <option value="1080">1080p 高清</option>
+                <option value="720">720p 标清</option>
+                <option value="2160">2160p / 4K 超清</option>
+              </select>
+            </div>
+            <div class="batch-pref-item">
+              <span class="meta">偏好字幕组：</span>
+              <input type="text" id="batch-pref-group" class="batch-pref-input" placeholder="留空默认自动匹配…" />
+            </div>
+          </div>
+        </div>
+        <div class="batch-ep-grid-wrap">
+          <div id="batch-ep-grid" class="batch-ep-grid"></div>
+        </div>
+        <div id="batch-dl-progress-box" class="batch-dl-progress-box hidden">
+          <div class="batch-prog-header">
+            <span id="batch-prog-status" class="meta">正在初始化批量调度…</span>
+            <span id="batch-prog-pct" class="meta mono">0%</span>
+          </div>
+          <div class="bar"><div id="batch-prog-bar" class="bar-fill" style="width:0%"></div></div>
+          <div id="batch-prog-log" class="batch-prog-log mono"></div>
+        </div>
+      </div>
+      <div class="modal-foot batch-dl-foot">
+        <button id="batch-dl-cancel-btn" class="ghost">取消</button>
+        <button id="batch-dl-start-btn" class="button">开始批量下载</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹幕手动搜索与匹配弹窗 -->
+  <div id="dm-match-modal" class="modal-backdrop hidden">
+    <div class="modal-card dm-match-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">弹幕手动搜索与匹配</div>
+          <span class="meta">解决因番名译名或版本差异导致的未匹配</span>
+        </div>
+        <button id="dm-match-close" class="ghost small" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="modal-body dm-match-body">
+        <div class="dm-match-search-bar">
+          <input type="text" id="dm-match-input" class="dm-match-input" placeholder="输入动画名、别名或日文原名…" />
+          <button id="dm-match-search-btn" class="button small">搜索弹幕源</button>
+        </div>
+        <div id="dm-match-results" class="dm-match-results">
+          <div class="meta empty-tip">输入番名回车或点击「搜索弹幕源」从弹弹play检索剧集库</div>
+        </div>
       </div>
     </div>
   </div>

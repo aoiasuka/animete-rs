@@ -424,6 +424,39 @@ pub async fn download_video_path(
     Ok(best.map(|f| dir.join(&f.name).to_string_lossy().into_owned()))
 }
 
+/// 批量暂停或恢复所有活动下载任务。返回受影响的任务数量。
+#[tauri::command]
+pub async fn set_all_downloads_paused(
+    ctx: State<'_, AppContext>,
+    paused: bool,
+) -> Result<usize, String> {
+    let handles: Vec<_> = {
+        let list = ctx.downloads.lock().unwrap();
+        list.iter().map(|t| t.handle.clone()).collect()
+    };
+    let count = handles.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    let session = ctx.torrent_session().await.map_err(|e| e.to_string())?;
+    for handle in handles {
+        if paused {
+            let _ = session.inner().pause(&handle).await;
+        } else {
+            let _ = session.inner().unpause(&handle).await;
+        }
+    }
+    Ok(count)
+}
+
+/// 在系统资源管理器中直接打开当前生效的下载根目录。
+#[tauri::command]
+pub async fn open_download_dir(ctx: State<'_, AppContext>) -> Result<(), String> {
+    let dir = ctx.effective_download_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    reveal_path(dir.to_string_lossy().into_owned()).await
+}
+
 // ---------- 设置 ----------
 
 #[tauri::command]
@@ -1351,6 +1384,95 @@ pub async fn danmaku_fetch(
             Err(e.to_string())
         }
     }
+}
+
+/// 手动搜索 Dandanplay 上的番剧及剧集列表（用于自动匹配失败或别名/OVA手选）。
+#[tauri::command]
+pub async fn danmaku_search_episodes(
+    ctx: State<'_, AppContext>,
+    anime: String,
+) -> Result<Vec<ani_danmaku::dandanplay::EpisodeEntry>, String> {
+    let (enabled, app_id, app_secret) = {
+        let st = ctx.settings.read().unwrap();
+        (
+            st.danmaku_source.enabled,
+            st.danmaku_source.app_id.trim().to_string(),
+            st.danmaku_source.app_secret.trim().to_string(),
+        )
+    };
+    if !enabled || app_id.is_empty() || app_secret.is_empty() || anime.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = ani_danmaku::dandanplay::DandanplayClient::new(app_id, app_secret);
+    client
+        .search_episode(anime.trim())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 按具体的 episode_id 直接从 Dandanplay 拉取弹幕，支持手动匹配绑定并缓存。
+#[tauri::command]
+pub async fn danmaku_fetch_by_episode_id(
+    ctx: State<'_, AppContext>,
+    episode_id: i64,
+    title: String,
+) -> Result<DanmakuFetchResult, String> {
+    let (enabled, app_id, app_secret, filter) = {
+        let st = ctx.settings.read().unwrap();
+        (
+            st.danmaku_source.enabled,
+            st.danmaku_source.app_id.trim().to_string(),
+            st.danmaku_source.app_secret.trim().to_string(),
+            st.danmaku.clone(),
+        )
+    };
+    if !enabled || app_id.is_empty() || app_secret.is_empty() {
+        return Ok(DanmakuFetchResult {
+            matched: false,
+            title: String::new(),
+            comments: Vec::new(),
+        });
+    }
+    let cache_key = format!("dp:ep_id:{episode_id}");
+    let repo = ani_db::DanmakuCacheRepo::new(ctx.db.clone());
+    let cached = repo.get(&cache_key).await.unwrap_or(None);
+    let fresh = cached
+        .as_ref()
+        .filter(|(_, _, at)| chrono::Utc::now().timestamp_millis() - *at < 3 * 24 * 3600 * 1000);
+    if let Some((t, json, _)) = fresh {
+        if let Ok(comments) = serde_json::from_str::<Vec<ani_danmaku::DanmakuEvent>>(json) {
+            return Ok(DanmakuFetchResult {
+                matched: true,
+                title: if title.is_empty() { t.clone() } else { title },
+                comments,
+            });
+        }
+    }
+
+    let client = ani_danmaku::dandanplay::DandanplayClient::new(app_id, app_secret);
+    let raw = client
+        .fetch_comments(episode_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let merged = ani_danmaku::merge_dedup(vec![raw]);
+    let kept: Vec<_> = merged.into_iter().filter(|d| filter.allows(d)).collect();
+    let display_title = if title.trim().is_empty() {
+        format!("Episode {episode_id}")
+    } else {
+        title
+    };
+    let _ = repo
+        .put(
+            &cache_key,
+            &display_title,
+            &serde_json::to_string(&kept).unwrap_or_default(),
+        )
+        .await;
+    Ok(DanmakuFetchResult {
+        matched: true,
+        title: display_title,
+        comments: kept,
+    })
 }
 
 // ---------- Bangumi 账号（OAuth + 看完自动打卡） ----------
