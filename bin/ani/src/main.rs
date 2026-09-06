@@ -61,6 +61,7 @@ fn main() {
             commands::save_progress,
             commands::load_progress,
             commands::list_playback_history,
+            commands::list_full_playback_history,
             commands::remove_playback_history,
             commands::clear_playback_history,
             commands::is_subject_collected,

@@ -48,6 +48,12 @@
           <line x1="12" y1="15" x2="12" y2="3"></line>
         </svg> 下载<span id="dl-badge" class="badge-count hidden">0</span>
       </button>
+      <button id="history-btn" class="ghost small" title="观影历史 (快捷键 H)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg> 历史
+      </button>
       <button id="player-btn" class="ghost small" title="在线播放">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 播放
       </button>
@@ -126,6 +132,25 @@
           <div id="calendar-grid" class="cards home-grid"><div class="empty">加载时间表中…</div></div>
         </div>
 
+        <div class="home-head hot-tags-head">
+          <div class="home-head-left">
+            <h2>热门题材探索</h2>
+            <span class="meta">点击即搜</span>
+          </div>
+        </div>
+        <div id="hot-tags-chips" class="weekday-tabs hot-tags-chips">
+          <button class="ghost small hot-tag-pill" data-keyword="异世界">异世界</button>
+          <button class="ghost small hot-tag-pill" data-keyword="热血">热血</button>
+          <button class="ghost small hot-tag-pill" data-keyword="日常">日常</button>
+          <button class="ghost small hot-tag-pill" data-keyword="科幻">科幻</button>
+          <button class="ghost small hot-tag-pill" data-keyword="恋爱">恋爱</button>
+          <button class="ghost small hot-tag-pill" data-keyword="奇幻">奇幻</button>
+          <button class="ghost small hot-tag-pill" data-keyword="治愈">治愈</button>
+          <button class="ghost small hot-tag-pill" data-keyword="悬疑">悬疑</button>
+          <button class="ghost small hot-tag-pill" data-keyword="搞笑">搞笑</button>
+          <button class="ghost small hot-tag-pill" data-keyword="机战">机战</button>
+        </div>
+
         <div class="home-head hist-head">
           <div class="home-head-left">
             <h2>最近搜索</h2>
@@ -137,8 +162,25 @@
 
       <div id="search-section" class="hidden">
         <div class="home-head">
-          <h2 id="subjects-title">搜索结果</h2>
-          <button id="home-back" class="ghost small">← 返回首页</button>
+          <div class="home-head-left">
+            <h2 id="subjects-title">搜索结果</h2>
+            <span id="search-results-count" class="meta"></span>
+          </div>
+          <div class="search-section-actions">
+            <div class="search-type-tabs" id="search-type-tabs">
+              <button class="ghost small search-tab active" data-type="all">全部</button>
+              <button class="ghost small search-tab" data-type="tv">TV 动画</button>
+              <button class="ghost small search-tab" data-type="movie">剧场版</button>
+              <button class="ghost small search-tab" data-type="ova">OVA / SP</button>
+            </div>
+            <select id="search-sort-select" class="select small" title="搜索结果排序">
+              <option value="default">默认匹配</option>
+              <option value="air_desc">放送日期 (新→旧)</option>
+              <option value="air_asc">放送日期 (旧→新)</option>
+              <option value="title">标题拼音/首字母</option>
+            </select>
+            <button id="home-back" class="ghost small">← 返回首页</button>
+          </div>
         </div>
         <div id="subjects" class="cards"></div>
       </div>
@@ -743,14 +785,33 @@
             <div class="visual-menu-row">
               <span class="visual-menu-label">跳过片头</span>
               <div class="visual-btn-group">
-                <button id="btn-skip-op" class="ghost small visual-action-btn" title="快进 90 秒 (快捷键 S)">+90s 跳过</button>
+                <button id="btn-skip-op" class="ghost small visual-action-btn" title="快进跳过片头 (快捷键 S)">+90s 跳过</button>
                 <button id="btn-auto-skip-op" class="ghost small visual-action-btn" title="连播自动跳过 OP">自动跳过: 关</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">片头时长</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-op-len-opt" data-len="60">60s</button>
+                <button class="ghost small visual-op-len-opt" data-len="85">85s</button>
+                <button class="ghost small visual-op-len-opt active" data-len="90">90s</button>
+                <button class="ghost small visual-op-len-opt" data-len="100">100s</button>
+                <button class="ghost small visual-op-len-opt" data-len="120">120s</button>
               </div>
             </div>
             <div class="visual-menu-row">
               <span class="visual-menu-label">跳过片尾</span>
               <div class="visual-btn-group">
                 <button id="btn-auto-skip-ed" class="ghost small visual-action-btn" title="剧集结尾自动跳过片尾 ED 并连播下一集">跳过片尾: 关</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">片尾时长</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-ed-len-opt" data-len="60">60s</button>
+                <button class="ghost small visual-ed-len-opt" data-len="80">80s</button>
+                <button class="ghost small visual-ed-len-opt active" data-len="90">90s</button>
+                <button class="ghost small visual-ed-len-opt" data-len="120">120s</button>
               </div>
             </div>
             <div class="visual-menu-row">
@@ -802,6 +863,17 @@
           <span>跳过片头 OP</span>
           <kbd>S</kbd>
         </div>
+        <div id="danmaku-heatmap-wrap" class="danmaku-heatmap-wrap hidden" title="弹幕高能热力波形（点击波形跳至对应精彩瞬间）">
+          <div class="heatmap-header">
+            <span class="heatmap-label">🔥 高能时刻</span>
+            <div id="heatmap-peaks" class="heatmap-peaks"></div>
+          </div>
+          <div class="heatmap-track" id="heatmap-track">
+            <canvas id="danmaku-heatmap-canvas" class="danmaku-heatmap-canvas"></canvas>
+            <div id="heatmap-playhead" class="heatmap-playhead"></div>
+            <div id="heatmap-hover-tip" class="heatmap-hover-tip hidden"></div>
+          </div>
+        </div>
         <div id="player-stats-osd" class="player-stats-osd hidden">
           <div class="stats-osd-head">
             <span>播放统计信息 (Stats for Nerds)</span>
@@ -825,6 +897,33 @@
           <div id="ep-drawer-list" class="ep-drawer-list"></div>
         </div>
       </div>
+      <div class="player-danmaku-bar">
+        <div class="dm-send-mode-wrap">
+          <button id="dm-send-mode-btn" class="ghost small dm-mode-btn" title="弹幕模式：滚动 / 顶部 / 底部">滚动 ➔</button>
+          <div id="dm-send-mode-menu" class="dm-send-popup hidden">
+            <button class="dm-popup-item active" data-mode="scroll">滚动弹幕 ➔</button>
+            <button class="dm-popup-item" data-mode="top">顶端弹幕 ⤓</button>
+            <button class="dm-popup-item" data-mode="bottom">底端弹幕 ⤒</button>
+          </div>
+        </div>
+        <div class="dm-send-color-wrap">
+          <button id="dm-send-color-btn" class="ghost small dm-color-btn" title="弹幕色彩" style="--cur-color: #ffffff;">
+            <span class="dm-color-dot"></span>
+          </button>
+          <div id="dm-send-color-menu" class="dm-send-popup dm-color-picker hidden">
+            <span class="color-opt active" data-color="#ffffff" style="background:#ffffff" title="纯白"></span>
+            <span class="color-opt" data-color="#ff4757" style="background:#ff4757" title="热血红"></span>
+            <span class="color-opt" data-color="#ffa502" style="background:#ffa502" title="元气橙"></span>
+            <span class="color-opt" data-color="#ffd32a" style="background:#ffd32a" title="柠檬黄"></span>
+            <span class="color-opt" data-color="#2ed573" style="background:#2ed573" title="极光绿"></span>
+            <span class="color-opt" data-color="#1e90ff" style="background:#1e90ff" title="天蓝"></span>
+            <span class="color-opt" data-color="#a55eea" style="background:#a55eea" title="电光紫"></span>
+            <span class="color-opt" data-color="#ff78cb" style="background:#ff78cb" title="梦幻粉"></span>
+          </div>
+        </div>
+        <input id="dm-send-input" class="dm-send-input" type="text" placeholder="发一条友善的弹幕见证高能时刻 (快捷键 Enter 发送)…" />
+        <button id="dm-send-btn" class="button small dm-send-btn">发射 🚀</button>
+      </div>
       <div class="player-url">
         <input id="player-url-input" type="text" placeholder="粘贴视频直链 / HLS 地址（m3u8）在线播放" />
         <button id="player-url-btn">播放直链</button>
@@ -847,6 +946,26 @@
     <div id="dl-list" class="dl-list"><div class="meta">暂无任务</div></div>
   </aside>
 
+  <!-- 观影历史弹窗 -->
+  <div id="history-modal" class="modal-backdrop hidden">
+    <div class="modal-card history-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">观影历史与足迹</div>
+          <span id="history-modal-count" class="meta"></span>
+        </div>
+        <div class="modal-head-actions">
+          <input type="text" id="history-search-input" class="history-search-input" placeholder="按番名或剧集搜索…" />
+          <button id="history-clear-all" class="ghost small danger" title="清空全部观影历史">清空历史</button>
+          <button id="history-close" class="ghost small" title="关闭 (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="modal-body history-modal-body">
+        <div id="history-list" class="history-list"><div class="meta">暂无历史记录</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- 快捷键与使用指南弹窗 -->
   <div id="help-modal" class="modal-backdrop hidden">
     <div class="modal-card">
@@ -858,6 +977,7 @@
         <div class="shortcut-group">
           <div class="sg-title">全局与导航</div>
           <div class="sg-item"><span class="sg-desc">聚焦顶部搜索框</span><kbd>/</kbd></div>
+          <div class="sg-item"><span class="sg-desc">打开观影历史面板</span><kbd>H</kbd></div>
           <div class="sg-item"><span class="sg-desc">层级返回 / 关闭弹窗</span><kbd>Esc</kbd></div>
           <div class="sg-item"><span class="sg-desc">快捷老板键 (静音暂停并最小化)</span><div class="kbds"><kbd>Alt</kbd> + <kbd>Q</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">打开快捷键指南</span><kbd>?</kbd></div>
@@ -865,6 +985,7 @@
         <div class="shortcut-group">
           <div class="sg-title">播放器控制</div>
           <div class="sg-item"><span class="sg-desc">播放 / 暂停</span><kbd>Space</kbd></div>
+          <div class="sg-item"><span class="sg-desc">聚焦弹幕发射输入框</span><kbd>Enter</kbd></div>
           <div class="sg-item"><span class="sg-desc">快退 10 秒 / 快进 10 秒</span><div class="kbds"><kbd>←</kbd> <kbd>→</kbd> <span class="meta">或</span> <kbd>J</kbd> <kbd>L</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">音量调整 (+10% / -10%)</span><div class="kbds"><kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><kbd>M</kbd></div>

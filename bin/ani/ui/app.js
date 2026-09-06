@@ -533,17 +533,108 @@ async function doSearch() {
   }
 }
 
-function renderSubjects(subjects, q) {
-  $("subjects-title").textContent = subjects.length ? `“${q}” 的搜索结果（${subjects.length}）` : "没有结果，换个关键词试试";
+let searchFilterType = "all";
+let searchSortOrder = "default";
+let rawSearchResults = [];
+let currentSearchKeyword = "";
+
+function applySearchFilterAndSort() {
+  if (!rawSearchResults || !rawSearchResults.length) return;
+  let list = [...rawSearchResults];
+
+  if (searchFilterType !== "all") {
+    list = list.filter((s) => {
+      const title = (s.display_title || s.name_cn || s.name || "").toLowerCase();
+      const orig = (s.original_title || s.name || "").toLowerCase();
+      const combined = title + " " + orig;
+      if (searchFilterType === "movie") {
+        return combined.includes("剧场版") || combined.includes("movie") || combined.includes("电影");
+      }
+      if (searchFilterType === "ova") {
+        return (
+          combined.includes("ova") ||
+          combined.includes("oad") ||
+          combined.includes("sp") ||
+          combined.includes("特别篇")
+        );
+      }
+      if (searchFilterType === "tv") {
+        return (
+          !combined.includes("剧场版") &&
+          !combined.includes("movie") &&
+          !combined.includes("ova") &&
+          !combined.includes("oad")
+        );
+      }
+      return true;
+    });
+  }
+
+  if (searchSortOrder === "air_desc") {
+    list.sort((a, b) => (b.air_date || "").localeCompare(a.air_date || ""));
+  } else if (searchSortOrder === "air_asc") {
+    list.sort((a, b) => (a.air_date || "9999").localeCompare(b.air_date || "9999"));
+  } else if (searchSortOrder === "title") {
+    list.sort((a, b) =>
+      (a.display_title || a.name_cn || "").localeCompare(b.display_title || b.name_cn || "", "zh-CN")
+    );
+  }
+
   const wrap = $("subjects");
   wrap.innerHTML = "";
-  if (!subjects.length) {
-    wrap.innerHTML = `<div class="empty">换个关键词，或返回首页从时间表挑一部</div>`;
+  const countEl = $("search-results-count");
+  if (countEl) {
+    countEl.textContent = `（${rawSearchResults.length} 部番剧${searchFilterType !== "all" ? ` · 过滤后 ${list.length} 部` : ""}）`;
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty">当前分类下没有匹配条目，可尝试切换「全部」</div>`;
     return;
   }
-  for (const s of subjects) {
+  for (const s of list) {
     wrap.appendChild(subjectCard(s));
   }
+}
+
+function renderSubjects(subjects, q) {
+  rawSearchResults = subjects || [];
+  currentSearchKeyword = q;
+  $("subjects-title").textContent = subjects.length ? `“${q}” 的搜索结果` : "没有结果，换个关键词试试";
+  if (!subjects.length) {
+    $("subjects").innerHTML = `<div class="empty">换个关键词，或返回首页从时间表挑一部</div>`;
+    if ($("search-results-count")) $("search-results-count").textContent = "";
+    return;
+  }
+  applySearchFilterAndSort();
+}
+
+// 热门题材点击与搜索分类切换绑定
+document.querySelectorAll(".hot-tag-pill").forEach((pill) => {
+  pill.onclick = () => {
+    const kw = pill.getAttribute("data-keyword");
+    if (!kw) return;
+    const input = $("search-input");
+    if (input) {
+      input.value = kw;
+      doSearch();
+    }
+  };
+});
+
+document.querySelectorAll(".search-tab").forEach((tab) => {
+  tab.onclick = () => {
+    searchFilterType = tab.getAttribute("data-type") || "all";
+    document.querySelectorAll(".search-tab").forEach((t) => t.classList.toggle("active", t === tab));
+    applySearchFilterAndSort();
+  };
+});
+
+const searchSortSelect = $("search-sort-select");
+if (searchSortSelect) {
+  searchSortSelect.onchange = () => {
+    searchSortOrder = searchSortSelect.value;
+    applySearchFilterAndSort();
+  };
 }
 
 // ---------- 第二步：条目详情 + 剧集 ----------
@@ -2481,7 +2572,189 @@ $("settings-back").onclick = () => {
 };
 
 
-// ---------- 在线播放器 ----------
+function getUserDanmakuKey() {
+  const bgmId = state.subject?.id?.id ?? state.subject?.bangumi_id ?? "gen";
+  const ep = state.currentEp != null ? state.currentEp : "all";
+  return `ani_user_dm_${bgmId}_${ep}`;
+}
+
+function loadStoredUserDanmaku() {
+  try {
+    const raw = localStorage.getItem(getUserDanmakuKey());
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUserDanmaku(evt) {
+  try {
+    const list = loadStoredUserDanmaku();
+    list.push(evt);
+    localStorage.setItem(getUserDanmakuKey(), JSON.stringify(list));
+  } catch {}
+}
+
+function renderDanmakuHeatmap(events, duration) {
+  const wrap = $("danmaku-heatmap-wrap");
+  const canvas = $("danmaku-heatmap-canvas");
+  if (!wrap || !canvas || !events || !events.length || !duration || !isFinite(duration) || duration <= 0) {
+    if (wrap) wrap.classList.add("hidden");
+    return;
+  }
+
+  const NUM_BINS = 100;
+  const binSec = duration / NUM_BINS;
+  const bins = new Array(NUM_BINS).fill(0);
+
+  for (const e of events) {
+    const sec = (e.time_ms || 0) / 1000;
+    if (sec >= 0 && sec <= duration) {
+      const idx = Math.min(NUM_BINS - 1, Math.floor(sec / binSec));
+      bins[idx]++;
+    }
+  }
+
+  const maxCount = Math.max(...bins);
+  if (maxCount === 0) {
+    wrap.classList.add("hidden");
+    return;
+  }
+  wrap.classList.remove("hidden");
+
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 600;
+  const h = canvas.clientHeight || 32;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, "rgba(244, 63, 94, 0.75)");
+  grad.addColorStop(0.4, "rgba(139, 92, 246, 0.55)");
+  grad.addColorStop(1, "rgba(56, 189, 248, 0.12)");
+
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+
+  const stepX = w / (NUM_BINS - 1);
+  for (let i = 0; i < NUM_BINS; i++) {
+    const norm = bins[i] / maxCount;
+    const scaled = Math.pow(norm, 0.7);
+    const x = i * stepX;
+    const y = h - scaled * (h - 4);
+    if (i === 0) {
+      ctx.lineTo(x, y);
+    } else {
+      const prevX = (i - 1) * stepX;
+      const prevNorm = bins[i - 1] / maxCount;
+      const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
+      const cx = (prevX + x) / 2;
+      ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+    }
+  }
+
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+  ctx.beginPath();
+  for (let i = 0; i < NUM_BINS; i++) {
+    const norm = bins[i] / maxCount;
+    const scaled = Math.pow(norm, 0.7);
+    const x = i * stepX;
+    const y = h - scaled * (h - 4);
+    if (i === 0) ctx.moveTo(x, y);
+    else {
+      const prevX = (i - 1) * stepX;
+      const prevNorm = bins[i - 1] / maxCount;
+      const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
+      const cx = (prevX + x) / 2;
+      ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  const peaksContainer = $("heatmap-peaks");
+  if (peaksContainer) {
+    peaksContainer.innerHTML = "";
+    const peakIndices = [];
+    const threshold = maxCount * 0.4;
+    for (let i = 1; i < NUM_BINS - 1; i++) {
+      if (bins[i] >= threshold && bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1]) {
+        peakIndices.push(i);
+      }
+    }
+    peakIndices.sort((a, b) => bins[b] - bins[a]);
+
+    const selected = [];
+    for (const idx of peakIndices) {
+      if (!selected.some((s) => Math.abs(s - idx) < 8)) {
+        selected.push(idx);
+        if (selected.length >= 3) break;
+      }
+    }
+    selected.sort((a, b) => a - b);
+
+    for (const idx of selected) {
+      const peakTime = Math.round(idx * binSec);
+      const count = bins[idx];
+      const btn = document.createElement("button");
+      btn.className = "peak-badge";
+      btn.innerHTML = `🔥 ${fmtTime(peakTime)} <span style="opacity:0.8;font-size:9.5px">(${count}条)</span>`;
+      btn.title = `点击直达名场面高能时刻（${fmtTime(peakTime)}，本段约 ${count} 条弹幕）`;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const v = $("video");
+        if (v) {
+          v.currentTime = Math.max(0, peakTime - 2);
+          showPlayerOsd(`🔥 已直达高能时刻：${fmtTime(peakTime)}`);
+        }
+      };
+      peaksContainer.appendChild(btn);
+    }
+  }
+
+  const track = $("heatmap-track");
+  const hoverTip = $("heatmap-hover-tip");
+  if (track) {
+    track.onmousemove = (e) => {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const hoverSec = ratio * duration;
+      const binIdx = Math.min(NUM_BINS - 1, Math.floor(hoverSec / binSec));
+      const count = bins[binIdx] || 0;
+      if (hoverTip) {
+        hoverTip.classList.remove("hidden");
+        hoverTip.style.left = `${ratio * 100}%`;
+        hoverTip.textContent = `${fmtTime(hoverSec)} · ${count} 条弹幕`;
+      }
+    };
+    track.onmouseleave = () => {
+      if (hoverTip) hoverTip.classList.add("hidden");
+    };
+    track.onclick = (e) => {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const targetSec = ratio * duration;
+      const v = $("video");
+      if (v) {
+        v.currentTime = targetSec;
+        DanmakuOverlay.seekTo(targetSec);
+        showPlayerOsd(`跳转至 ${fmtTime(targetSec)}`);
+      }
+    };
+  }
+}
 
 // ---------- 弹幕渲染层（Canvas 覆盖层；过滤已在后端完成，这里只管画） ----------
 const DanmakuOverlay = (() => {
@@ -2609,13 +2882,22 @@ const DanmakuOverlay = (() => {
       timeOffsetSec = 0;
       const delayEl = $("dm-delay-val");
       if (delayEl) delayEl.textContent = "0.0s";
-      events = [...list].sort((a, b) => a.time_ms - b.time_ms);
+      const userList = loadStoredUserDanmaku();
+      const merged = [...(list || []), ...userList];
+      events = merged.sort((a, b) => a.time_ms - b.time_ms);
+      danmakuTimeline = events;
       this.setEnabled(this.enabled);
+      const v = vid();
+      if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
+        renderDanmakuHeatmap(events, v.duration);
+      }
     },
     clear() {
       events = []; cursor = 0; items = []; lastT = 0;
       const c = cv();
       if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
+      const wrap = $("danmaku-heatmap-wrap");
+      if (wrap) wrap.classList.add("hidden");
     },
     /** seek 后重定位游标并清空已上屏内容 */
     seekTo(sec) {
@@ -2665,6 +2947,29 @@ const DanmakuOverlay = (() => {
     },
     setSpeedMs(ms) {
       scrollMs = ms;
+    },
+    /** 即时添加单条弹幕并实时上屏 */
+    addEvent(event) {
+      if (!event || typeof event.time_ms !== "number") return;
+      let lo = 0, hi = events.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        events[mid].time_ms <= event.time_ms ? (lo = mid + 1) : (hi = mid);
+      }
+      events.splice(lo, 0, event);
+      if (lo <= cursor) {
+        cursor++;
+      }
+      const v = vid();
+      if (v && this.enabled) {
+        const now = v.currentTime;
+        spawn(event, now);
+        ensureRunning();
+      }
+    },
+    /** 获取当前所有弹幕事件 */
+    getEvents() {
+      return events;
     },
     enabled: false,
     resize,
@@ -3708,9 +4013,15 @@ function showPlayer(url, title) {
         if (r.matched) {
           DanmakuOverlay.load(r.comments);
           if (r.comments.length) toast(`弹幕已加载：${r.comments.length} 条（${r.title}）`, true);
+        } else {
+          DanmakuOverlay.load([]);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        DanmakuOverlay.load([]);
+      });
+  } else {
+    DanmakuOverlay.load([]);
   }
 }
 
@@ -3842,22 +4153,29 @@ $("video").addEventListener("timeupdate", () => {
     v.currentTime = visualState.abLoop.a ?? 0;
   }
 
+  // 弹幕热力图进度游标跟随
+  const playhead = $("heatmap-playhead");
+  if (playhead && v.duration > 0) {
+    playhead.style.left = `${(v.currentTime / v.duration) * 100}%`;
+  }
+
   // 自动跳过片头（连播时仅在开播 0.5s~5s 自动触发一次）
   if (visualState.autoSkipOp && !opAutoSkipped && v.currentTime >= 0.5 && v.currentTime < 5) {
     opAutoSkipped = true;
-    skipOp(90);
+    skipOp(getOpSkipSeconds());
   }
 
   // 自动跳过片尾（若开启，在离结尾还有 autoSkipEd 秒时自动跳过并连播）
+  const edSkip = getEdSkipSeconds();
   if (
     visualState.autoSkipEd > 0 &&
     !edAutoSkipped &&
     v.duration > 180 &&
-    v.currentTime >= (v.duration - visualState.autoSkipEd) &&
+    v.currentTime >= (v.duration - edSkip) &&
     !v.paused
   ) {
     edAutoSkipped = true;
-    showPlayerOsd(`⏭ 已自动跳过片尾 (-${visualState.autoSkipEd}s)`);
+    showPlayerOsd(`⏭ 已自动跳过片尾 (-${edSkip}s)`);
     toast("已跳过片尾，自动连播下一集…", true);
     v.currentTime = v.duration;
   }
@@ -3905,6 +4223,14 @@ $("video").addEventListener("playing", () => {
   setPlayerSpinner(false);
 });
 $("video").addEventListener("canplay", () => setPlayerSpinner(false));
+$("video").addEventListener("loadedmetadata", () => {
+  const v = $("video");
+  if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
+    if (DanmakuOverlay.getEvents().length) {
+      renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
+    }
+  }
+});
 $("video").addEventListener("pause", () => {
   if (stageEl) stageEl.classList.remove("idle");
   clearTimeout(stageIdleTimer);
@@ -4648,10 +4974,42 @@ if (btnResetTransform) {
   };
 }
 
+function getOpSkipSeconds() {
+  return parseInt(localStorage.getItem("ani_op_skip_len") || "90", 10);
+}
+
+function getEdSkipSeconds() {
+  return parseInt(localStorage.getItem("ani_ed_skip_len") || "90", 10);
+}
+
 const btnSkipOp = $("btn-skip-op");
 if (btnSkipOp) {
-  btnSkipOp.onclick = () => skipOp(90);
+  btnSkipOp.textContent = `+${getOpSkipSeconds()}s 跳过`;
+  btnSkipOp.onclick = () => skipOp(getOpSkipSeconds());
 }
+
+document.querySelectorAll(".visual-op-len-opt").forEach((btn) => {
+  const len = parseInt(btn.getAttribute("data-len"), 10);
+  if (len === getOpSkipSeconds()) btn.classList.add("active");
+  else btn.classList.remove("active");
+  btn.onclick = () => {
+    localStorage.setItem("ani_op_skip_len", String(len));
+    document.querySelectorAll(".visual-op-len-opt").forEach((b) => b.classList.toggle("active", b === btn));
+    if (btnSkipOp) btnSkipOp.textContent = `+${len}s 跳过`;
+    showPlayerOsd(`片头跳过时长已设为 ${len} 秒`);
+  };
+});
+
+document.querySelectorAll(".visual-ed-len-opt").forEach((btn) => {
+  const len = parseInt(btn.getAttribute("data-len"), 10);
+  if (len === getEdSkipSeconds()) btn.classList.add("active");
+  else btn.classList.remove("active");
+  btn.onclick = () => {
+    localStorage.setItem("ani_ed_skip_len", String(len));
+    document.querySelectorAll(".visual-ed-len-opt").forEach((b) => b.classList.toggle("active", b === btn));
+    showPlayerOsd(`片尾跳过时长已设为 ${len} 秒`);
+  };
+});
 
 const btnAutoSkipOp = $("btn-auto-skip-op");
 if (btnAutoSkipOp) {
@@ -4685,7 +5043,7 @@ if (btnAbClear) btnAbClear.onclick = () => clearAbLoop();
 
 const skipCapsule = $("player-skip-capsule");
 if (skipCapsule) {
-  skipCapsule.onclick = () => skipOp(90);
+  skipCapsule.onclick = () => skipOp(getOpSkipSeconds());
 }
 
 const screenshotBtn = $("player-screenshot-btn");
@@ -4951,6 +5309,292 @@ if (helpModalEl) {
   };
 }
 
+// ---------- 即时弹幕发射台 ----------
+let dmSendMode = "scroll";
+let dmSendColor = "#ffffff";
+
+function initDanmakuSender() {
+  const modeBtn = $("dm-send-mode-btn");
+  const modeMenu = $("dm-send-mode-menu");
+  const colorBtn = $("dm-send-color-btn");
+  const colorMenu = $("dm-send-color-menu");
+  const sendInput = $("dm-send-input");
+  const sendBtn = $("dm-send-btn");
+
+  if (modeBtn && modeMenu) {
+    modeBtn.onclick = (e) => {
+      e.stopPropagation();
+      modeMenu.classList.toggle("hidden");
+      colorMenu?.classList.add("hidden");
+    };
+    modeMenu.querySelectorAll(".dm-popup-item").forEach((item) => {
+      item.onclick = (e) => {
+        e.stopPropagation();
+        dmSendMode = item.getAttribute("data-mode") || "scroll";
+        modeMenu.querySelectorAll(".dm-popup-item").forEach((it) => it.classList.toggle("active", it === item));
+        const labels = { scroll: "滚动 ➔", top: "顶端 ⤓", bottom: "底端 ⤒" };
+        modeBtn.textContent = labels[dmSendMode] || "滚动 ➔";
+        modeMenu.classList.add("hidden");
+      };
+    });
+  }
+
+  if (colorBtn && colorMenu) {
+    colorBtn.onclick = (e) => {
+      e.stopPropagation();
+      colorMenu.classList.toggle("hidden");
+      modeMenu?.classList.add("hidden");
+    };
+    colorMenu.querySelectorAll(".color-opt").forEach((opt) => {
+      opt.onclick = (e) => {
+        e.stopPropagation();
+        dmSendColor = opt.getAttribute("data-color") || "#ffffff";
+        colorMenu.querySelectorAll(".color-opt").forEach((it) => it.classList.toggle("active", it === opt));
+        colorBtn.style.setProperty("--cur-color", dmSendColor);
+        colorMenu.classList.add("hidden");
+      };
+    });
+  }
+
+  document.addEventListener("click", () => {
+    modeMenu?.classList.add("hidden");
+    colorMenu?.classList.add("hidden");
+  });
+
+  function doSend() {
+    if (!sendInput) return;
+    const text = sendInput.value.trim();
+    if (!text) {
+      toast("请输入弹幕内容", false);
+      return;
+    }
+    const v = $("video");
+    const sec = v && isFinite(v.currentTime) ? v.currentTime : 0;
+    const colNum = parseInt(dmSendColor.replace("#", ""), 16) || 0xffffff;
+
+    const evt = {
+      time_ms: Math.round(sec * 1000),
+      text,
+      mode: dmSendMode,
+      color: colNum,
+      sender: "me",
+      weight: 30,
+    };
+
+    DanmakuOverlay.addEvent(evt);
+    saveUserDanmaku(evt);
+    if (typeof danmakuTimeline !== "undefined" && danmakuTimeline) {
+      danmakuTimeline.push(evt);
+      if (v && v.duration > 0) {
+        renderDanmakuHeatmap(danmakuTimeline, v.duration);
+      }
+    }
+
+    sendInput.value = "";
+    sendInput.blur();
+    showPlayerOsd(`弹幕已发送 🚀（${text}）`);
+    toast("弹幕发送成功！", true);
+  }
+
+  if (sendBtn) sendBtn.onclick = doSend;
+  if (sendInput) {
+    sendInput.onkeydown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        doSend();
+      } else if (e.key === "Escape") {
+        sendInput.blur();
+      }
+    };
+  }
+}
+
+// ---------- 完整观影历史看板 ----------
+let fullHistoryCache = [];
+let historyFilterText = "";
+
+function fmtRelativeTime(timestampMs) {
+  if (!timestampMs) return "未知时间";
+  const now = Date.now();
+  const diffSec = Math.floor((now - timestampMs) / 1000);
+  if (diffSec < 60) return "刚刚";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} 小时前`;
+  if (diffSec < 86400 * 2) return "昨天";
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)} 天前`;
+  const d = new Date(timestampMs);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function fmtDuration(sec) {
+  if (!sec || isNaN(sec)) return "0:00";
+  return fmtTime(sec);
+}
+
+async function loadFullHistory() {
+  try {
+    const list = await invoke("list_full_playback_history", { limit: 200 });
+    fullHistoryCache = list || [];
+    renderFullHistoryList();
+  } catch (e) {
+    toast("拉取观影历史失败：" + e);
+  }
+}
+
+function renderFullHistoryList() {
+  const container = $("history-list");
+  const countEl = $("history-modal-count");
+  if (!container) return;
+
+  let items = fullHistoryCache;
+  if (historyFilterText) {
+    const kw = historyFilterText.toLowerCase();
+    items = items.filter(
+      (it) =>
+        (it.subject_name && it.subject_name.toLowerCase().includes(kw)) ||
+        (it.title && it.title.toLowerCase().includes(kw))
+    );
+  }
+
+  if (countEl) {
+    countEl.textContent = `共 ${fullHistoryCache.length} 条记录${historyFilterText ? `（过滤后 ${items.length} 条）` : ""}`;
+  }
+
+  if (!items.length) {
+    container.innerHTML = `<div class="empty" style="text-align:center;padding:40px;color:var(--text-muted);">${historyFilterText ? "未检索到匹配的观影记录" : "还没有观影记录，快去挑一部番剧看看吧~"}</div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  for (const item of items) {
+    const card = document.createElement("div");
+    card.className = "history-item-card";
+
+    const dur = item.duration_seconds || 0;
+    const pos = item.position_seconds || 0;
+    const pct = dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0;
+    const isFinished = item.finished || pct >= 95;
+
+    const coverHtml = item.cover_url
+      ? `<img src="${escapeAttr(item.cover_url)}" class="history-item-cover" referrerpolicy="no-referrer" onerror="this.style.opacity='0.2'" />`
+      : `<div class="history-item-cover" style="display:grid;place-items:center;font-size:24px">🎬</div>`;
+
+    const progDesc = isFinished
+      ? `已观看完毕 ✓`
+      : dur > 0
+      ? `看到 ${fmtDuration(pos)} / ${fmtDuration(dur)} (${pct}%)`
+      : `看到 ${fmtDuration(pos)}`;
+
+    const relTime = fmtRelativeTime(item.updated_at);
+
+    card.innerHTML = `
+      ${coverHtml}
+      <div class="history-item-info">
+        <div class="history-item-title-row">
+          <span class="history-item-subject" title="${escapeAttr(item.subject_name || "未知番剧")}">${escapeHtml(item.subject_name || "未知番剧")}</span>
+          <span class="history-item-ep">${escapeHtml(item.title || "")}</span>
+        </div>
+        <div class="history-progress-bar-wrap">
+          <div class="history-progress-bar-inner" style="width:${isFinished ? 100 : pct}%"></div>
+        </div>
+        <div class="history-item-meta-row">
+          <span class="history-status-tag ${isFinished ? "finished" : "watching"}">${isFinished ? "已追完" : "观看中"}</span>
+          <span>${progDesc}</span>
+          <span class="meta">${relTime}</span>
+        </div>
+      </div>
+      <div class="history-item-actions">
+        <button class="button small btn-hist-play" title="继续播放">▶ 播放</button>
+        <button class="ghost small btn-hist-del" title="删除本条记录">✕</button>
+      </div>
+    `;
+
+    card.querySelector(".btn-hist-play").onclick = () => {
+      toggleHistoryModal(false);
+      if (item.media_url) {
+        openPlayer(
+          item.media_url,
+          `${item.subject_name || ""} ${item.title || ""}`.trim()
+        );
+      } else {
+        toast("该记录未关联媒体播放链接");
+      }
+    };
+
+    card.querySelector(".btn-hist-del").onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        await invoke("remove_playback_history", { key: item.episode_id });
+        fullHistoryCache = fullHistoryCache.filter((x) => x.episode_id !== item.episode_id);
+        renderFullHistoryList();
+        loadHome();
+        toast("已删除播放记录", true);
+      } catch (err) {
+        toast("删除失败：" + err);
+      }
+    };
+
+    container.appendChild(card);
+  }
+}
+
+function toggleHistoryModal(show) {
+  const modal = $("history-modal");
+  if (!modal) return;
+  const isHidden = modal.classList.contains("hidden");
+  const next = show !== undefined ? show : isHidden;
+  modal.classList.toggle("hidden", !next);
+  if (next) {
+    historyFilterText = "";
+    const input = $("history-search-input");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+    loadFullHistory();
+  }
+}
+
+function initHistoryModal() {
+  const btn = $("history-btn");
+  if (btn) btn.onclick = () => toggleHistoryModal();
+  const closeBtn = $("history-close");
+  if (closeBtn) closeBtn.onclick = () => toggleHistoryModal(false);
+  const modal = $("history-modal");
+  if (modal) {
+    modal.onclick = (e) => {
+      if (e.target === modal) toggleHistoryModal(false);
+    };
+  }
+
+  const searchInput = $("history-search-input");
+  if (searchInput) {
+    searchInput.oninput = () => {
+      historyFilterText = searchInput.value.trim();
+      renderFullHistoryList();
+    };
+  }
+
+  const clearBtn = $("history-clear-all");
+  if (clearBtn) {
+    clearBtn.onclick = async () => {
+      if (!confirm("确定要清空全部观影历史记录吗？此操作不可恢复。")) return;
+      try {
+        await invoke("clear_playback_history");
+        fullHistoryCache = [];
+        renderFullHistoryList();
+        loadHome();
+        toast("已清空全部观影历史记录", true);
+      } catch (err) {
+        toast("清空失败：" + err);
+      }
+    };
+  }
+}
+
+initDanmakuSender();
+initHistoryModal();
+
 function triggerBossKey() {
   const v = $("video");
   if (v) {
@@ -4964,7 +5608,7 @@ function triggerBossKey() {
   showPlayerOsd("【老板键】已静音并最小化窗口");
 }
 
-// 全局桌面快捷键：/ 聚焦搜索框；? 打开帮助；Escape 退出/返回上一层；Alt+Q 老板键
+// 全局桌面快捷键：/ 聚焦搜索框；H 打开历史；Enter 发射弹幕；? 打开帮助；Escape 退出/返回上一层；Alt+Q 老板键
 document.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
@@ -4973,6 +5617,22 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     triggerBossKey();
     return;
+  }
+
+  if ((e.key === "h" || e.key === "H") && !isInput && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    toggleHistoryModal();
+    return;
+  }
+
+  if (e.key === "Enter" && !isInput && !$("view-player").classList.contains("hidden")) {
+    const dmInput = $("dm-send-input");
+    if (dmInput) {
+      e.preventDefault();
+      dmInput.focus();
+      dmInput.select();
+      return;
+    }
   }
 
   if (e.key === "/" && !isInput) {
@@ -4992,6 +5652,11 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const histModal = $("history-modal");
+    if (histModal && !histModal.classList.contains("hidden")) {
+      toggleHistoryModal(false);
+      return;
+    }
     const helpModal = $("help-modal");
     if (helpModal && !helpModal.classList.contains("hidden")) {
       toggleHelpModal(false);
@@ -5026,3 +5691,4 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
+

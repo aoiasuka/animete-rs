@@ -211,6 +211,46 @@ impl PlaybackRepo {
             .collect())
     }
 
+    /// 查询全部播放历史（包含已完成条目，新→旧）。
+    pub async fn list_all(&self, limit: i64) -> anyhow::Result<Vec<PlaybackHistoryItem>> {
+        let rows = sqlx::query_as::<_, (i64, f64, Option<f64>, i64, i64, String, String, Option<String>, String)>(
+            "SELECT episode_id, position_seconds, duration_seconds, finished, updated_at, title, subject_name, cover_url, media_url
+             FROM playback_history
+             ORDER BY updated_at DESC
+             LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    episode_id,
+                    position_seconds,
+                    duration_seconds,
+                    finished,
+                    updated_at,
+                    title,
+                    subject_name,
+                    cover_url,
+                    media_url,
+                )| PlaybackHistoryItem {
+                    episode_id,
+                    position_seconds,
+                    duration_seconds,
+                    finished: finished != 0,
+                    updated_at,
+                    title,
+                    subject_name,
+                    cover_url,
+                    media_url,
+                },
+            )
+            .collect())
+    }
+
     pub async fn remove_item(&self, episode_id: i64) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM playback_history WHERE episode_id = ?1")
             .bind(episode_id)
@@ -895,9 +935,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(repo.list_recent(10).await.unwrap().len(), 0);
+        // 但全量播放历史中仍应记录已看完的条目
+        let all = repo.list_all(10).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert!(all[0].finished);
 
         repo.remove_item(999).await.unwrap();
         assert_eq!(repo.list_recent(10).await.unwrap().len(), 0);
+        assert_eq!(repo.list_all(10).await.unwrap().len(), 0);
     }
 
     #[tokio::test]

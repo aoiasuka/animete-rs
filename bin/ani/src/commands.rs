@@ -946,6 +946,18 @@ pub async fn list_playback_history(
         .map_err(|e| e.to_string())
 }
 
+/// 获取全量播放历史（包含已看完条目，用于完整观影历史面板）。
+#[tauri::command]
+pub async fn list_full_playback_history(
+    ctx: State<'_, AppContext>,
+    limit: Option<i64>,
+) -> Result<Vec<ani_db::PlaybackHistoryItem>, String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    repo.list_all(limit.unwrap_or(100))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 删除单条播放历史。
 #[tauri::command]
 pub async fn remove_playback_history(ctx: State<'_, AppContext>, key: i64) -> Result<(), String> {
