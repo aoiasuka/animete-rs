@@ -10,18 +10,81 @@ const state = {
   subject: null,
   episodes: [],
   candidates: [],
+  currentEp: null,
+  currentEpId: null,
+  watchedEps: new Set(),
+  collectionUpdates: {},
 };
+
+const epViewState = {
+  currentTab: "main",
+  order: "asc",
+  filterText: "",
+};
+
+// 提取封面主色调（Ani 6.0 动态环境背光）
+function extractDominantColor(url) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return resolve(null);
+        canvas.width = 32;
+        canvas.height = 32;
+        ctx.drawImage(img, 0, 0, 32, 32);
+        const data = ctx.getImageData(0, 0, 32, 32).data;
+        let r = 0, g = 0, b = 0, total = 0;
+        for (let i = 0; i < data.length; i += 16) {
+          const cr = data[i], cg = data[i + 1], cb = data[i + 2], ca = data[i + 3];
+          if (ca < 128) continue;
+          const brightness = 0.299 * cr + 0.587 * cg + 0.114 * cb;
+          if (brightness > 30 && brightness < 225) {
+            const max = Math.max(cr, cg, cb);
+            const min = Math.min(cr, cg, cb);
+            const sat = max === 0 ? 0 : (max - min) / max;
+            const weight = 1 + sat * 3;
+            r += cr * weight;
+            g += cg * weight;
+            b += cb * weight;
+            total += weight;
+          }
+        }
+        if (total > 0) {
+          resolve(`rgb(${Math.round(r / total)}, ${Math.round(g / total)}, ${Math.round(b / total)})`);
+        } else {
+          resolve(null);
+        }
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
 
 // ---------- 通用 ----------
 
 function setStatus(text) {
-  $("status").textContent = text || "";
+  const el = $("status");
+  if (!el) return;
+  if (text) {
+    el.innerHTML = `<span class="status-dot"></span><span>${escapeHtml(text)}</span>`;
+  } else {
+    el.innerHTML = "";
+  }
 }
 
 let toastTimer = null;
 function toast(msg, ok = false) {
   const el = $("toast");
-  el.textContent = msg;
+  const icon = ok ? "✓ " : "⚠ ";
+  el.textContent = icon + msg;
   el.classList.toggle("ok", ok);
   el.classList.remove("hidden");
   clearTimeout(toastTimer);
@@ -53,8 +116,10 @@ function todayWeekdayId() {
 }
 
 async function loadHome(force = false) {
-  // 最近搜索总是刷新（搜索会随时产生新记录）
+  // 最近搜索、继续观看与我的追番刷新
   refreshHistory();
+  loadContinueWatching();
+  loadCollections();
   if (homeState.loaded && !force) return;
   // 时间表
   $("calendar-grid").innerHTML = `<div class="empty">加载时间表中…</div>`;
@@ -66,6 +131,124 @@ async function loadHome(force = false) {
     renderCalendar();
   } catch (e) {
     $("calendar-grid").innerHTML = `<div class="empty">时间表加载失败：${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function loadContinueWatching() {
+  const sec = $("continue-section");
+  const grid = $("continue-grid");
+  if (!sec || !grid) return;
+  try {
+    const list = await invoke("list_playback_history", { limit: 8 });
+    if (!list || !list.length) {
+      sec.classList.add("hidden");
+      grid.innerHTML = "";
+      return;
+    }
+    sec.classList.remove("hidden");
+    grid.innerHTML = "";
+    for (const it of list) {
+      const card = document.createElement("div");
+      card.className = "continue-card";
+      const dur = it.duration_seconds || 0;
+      const pct = dur > 0 ? Math.min(100, Math.round((it.position_seconds / dur) * 100)) : 0;
+      const coverImg = it.cover_url
+        ? `<img src="${escapeAttr(it.cover_url)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.opacity='0.15'" />`
+        : `<div style="display:grid;place-items:center;height:100%;color:var(--text-dim);font-size:28px">🎬</div>`;
+
+      const timeStr = dur > 0 ? `${fmtTime(it.position_seconds)} / ${fmtTime(dur)} (${pct}%)` : fmtTime(it.position_seconds);
+      const subTitle = it.title ? `${escapeHtml(it.title)} · ${timeStr}` : timeStr;
+
+      card.innerHTML = `
+        <div class="continue-cover">
+          ${coverImg}
+          <div class="continue-play-hint">
+            <div class="continue-play-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+          <button class="continue-del" title="从历史中移除">✕</button>
+          <div class="continue-progress-bar">
+            <div class="continue-progress-fill" style="width: ${pct}%"></div>
+          </div>
+        </div>
+        <div class="continue-body">
+          <div class="continue-title" title="${escapeAttr(it.subject_name || it.title)}">${escapeHtml(it.subject_name || it.title || "继续播放")}</div>
+          <div class="continue-sub">
+            <span>${subTitle}</span>
+          </div>
+        </div>`;
+
+      const delBtn = card.querySelector(".continue-del");
+      if (delBtn) {
+        delBtn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await invoke("remove_playback_history", { key: it.episode_id });
+            toast("已从继续观看中移除", true);
+            loadContinueWatching();
+          } catch (err) {
+            toast("移除失败：" + err);
+          }
+        };
+      }
+
+      card.onclick = () => {
+        if (it.media_url) {
+          openPlayer(it.media_url, it.title || it.subject_name);
+        } else {
+          toast("请从条目详情选择剧集播放");
+        }
+      };
+      grid.appendChild(card);
+    }
+  } catch {
+    sec.classList.add("hidden");
+  }
+}
+
+async function loadCollections() {
+  const sec = $("collection-section");
+  const grid = $("collection-grid");
+  const countEl = $("collection-count");
+  const refreshBtn = $("btn-refresh-collections");
+  if (!sec || !grid) return;
+
+  if (refreshBtn && !refreshBtn.__bound) {
+    refreshBtn.__bound = true;
+    refreshBtn.onclick = async () => {
+      try {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = "检查中…";
+        const updates = await invoke("check_collection_updates");
+        state.collectionUpdates = updates || {};
+        await loadCollections();
+        const count = Object.keys(state.collectionUpdates).length;
+        toast(`追更状态已更新（共检查 ${count} 部动画）`, true);
+      } catch (err) {
+        toast("检查追更失败：" + err);
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "检查追更 🔄";
+      }
+    };
+  }
+
+  try {
+    const list = await invoke("list_subject_collections");
+    if (!list || !list.length) {
+      sec.classList.add("hidden");
+      grid.innerHTML = "";
+      return;
+    }
+    sec.classList.remove("hidden");
+    if (countEl) countEl.textContent = `${list.length} 部追番`;
+    grid.innerHTML = "";
+    for (const item of list) {
+      grid.appendChild(subjectCard(item));
+    }
+  } catch {
+    sec.classList.add("hidden");
   }
 }
 
@@ -82,11 +265,26 @@ async function refreshHistory() {
     for (const kw of hist) {
       const chip = document.createElement("span");
       chip.className = "hist-chip";
-      chip.textContent = kw;
-      chip.onclick = () => {
+      chip.innerHTML = `<span>${escapeHtml(kw)}</span><span class="hist-chip-del" title="删除该记录">✕</span>`;
+      chip.onclick = (e) => {
+        if (e.target.classList.contains("hist-chip-del")) return;
         $("search-input").value = kw;
+        const clr = $("search-clear");
+        if (clr) clr.classList.remove("hidden");
         doSearch();
       };
+      const del = chip.querySelector(".hist-chip-del");
+      if (del) {
+        del.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await invoke("remove_search_history", { keyword: kw });
+            refreshHistory();
+          } catch (err) {
+            toast("删除历史失败：" + err);
+          }
+        };
+      }
       wrap.appendChild(chip);
     }
   } catch (e) {
@@ -101,9 +299,13 @@ function renderCalendar() {
   const days = [...homeState.calendar].sort((a, b) => a.weekday.id - b.weekday.id);
   let selected = homeState.selected ?? homeState.today;
   for (const day of days) {
+    const isToday = day.weekday.id === homeState.today;
     const tab = document.createElement("div");
     tab.className = "wd-tab" + (day.weekday.id === selected ? " active" : "");
-    tab.innerHTML = `${escapeHtml(day.weekday.cn)}<span class="cnt">${day.items.length}</span>${day.weekday.id === homeState.today ? " ·今天" : ""}`;
+    tab.innerHTML = `
+      ${isToday ? '<span class="today-badge" title="今天"></span>' : ""}
+      <span>${escapeHtml(day.weekday.cn)}</span>
+      <span class="cnt">${day.items.length}</span>`;
     tab.onclick = () => {
       homeState.selected = day.weekday.id;
       renderCalendar();
@@ -124,16 +326,40 @@ function renderCalendar() {
 function subjectCard(s) {
   const card = document.createElement("div");
   card.className = "card";
-  const img = s.cover_url
-    ? `<img src="${escapeAttr(s.cover_url)}" loading="lazy" referrerpolicy="no-referrer" />`
-    : `<img src="" style="visibility:hidden" />`;
+  const displayTitle = s.display_title || s.name_cn || s.name || "动画";
+  const originalTitle = s.original_title || s.name || "";
+  const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
+  const coverImg = s.cover_url
+    ? `<img src="${escapeAttr(s.cover_url)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.opacity='0.15'" />`
+    : `<div style="display:grid;place-items:center;height:100%;color:var(--text-dim);font-size:32px">🎬</div>`;
+  const airDate = s.air_date ? escapeHtml(s.air_date) : "放送中";
+  const updateInfo = state.collectionUpdates ? state.collectionUpdates[bangumiId] : null;
+  const updateBadge = updateInfo
+    ? `<div class="card-update-badge">更新至第 ${updateInfo.latest_ep} 集</div>`
+    : "";
   card.innerHTML = `
-    ${img}
+    <div class="card-cover">
+      ${coverImg}
+      ${updateBadge}
+      <div class="card-play-hint">
+        <div class="card-play-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+      </div>
+    </div>
     <div class="card-body">
-      <div class="t">${escapeHtml(s.display_title)}</div>
-      <div class="m">${escapeHtml(s.air_date ?? "")}</div>
+      <div class="t" title="${escapeAttr(displayTitle)}">${escapeHtml(displayTitle)}</div>
+      <div class="m"><span>${airDate}</span></div>
     </div>`;
-  card.onclick = () => openSubject(s);
+  card.onclick = () => openSubject({
+    id: { id: bangumiId },
+    display_title: displayTitle,
+    original_title: originalTitle,
+    name_cn: s.name_cn || displayTitle,
+    name: originalTitle,
+    cover_url: s.cover_url,
+    air_date: s.air_date,
+  });
   return card;
 }
 
@@ -141,7 +367,7 @@ function showHomeSection() {
   $("home-section").classList.remove("hidden");
   $("search-section").classList.add("hidden");
   state.subView = "home";
-  loadHome(); // 回首页时刷新最近搜索
+  loadHome(); // 回首页时刷新最近搜索、继续观看与追番
 }
 
 function showSearchSection() {
@@ -154,8 +380,8 @@ function showSearchSection() {
 
 // 请求令牌：慢返回的旧请求不得覆盖新数据
 let searchSeq = 0, subjectSeq = 0, fetchSeq = 0;
-// 候选列表过滤（字幕组/分辨率），配合选源页的筛选下拉
-const candFilter = { group: "", res: "" };
+// 候选列表过滤（字幕组/分辨率/仅看可用），配合选源页的筛选下拉
+const candFilter = { group: "", res: "", onlyAvail: true };
 let lastSelection = null;
 
 function fillSelect(sel, values, current, label) {
@@ -177,6 +403,8 @@ function updateCandFilter(sel) {
   }
   fillSelect($("cand-filter-group"), [...groups].sort(), candFilter.group, "全部字幕组");
   fillSelect($("cand-filter-res"), [...ress].sort((a, b) => b - a), candFilter.res, "全部分辨率");
+  const availEl = $("cand-filter-avail");
+  if (availEl) availEl.checked = candFilter.onlyAvail;
 }
 
 $("cand-filter-group").onchange = (e) => {
@@ -187,6 +415,13 @@ $("cand-filter-res").onchange = (e) => {
   candFilter.res = e.target.value;
   if (lastSelection) renderSelection(lastSelection);
 };
+const candAvailEl = $("cand-filter-avail");
+if (candAvailEl) {
+  candAvailEl.onchange = (e) => {
+    candFilter.onlyAvail = e.target.checked;
+    if (lastSelection) renderSelection(lastSelection);
+  };
+}
 
 async function doSearch() {
   const q = $("search-input").value.trim();
@@ -226,20 +461,98 @@ function renderSubjects(subjects, q) {
 
 // ---------- 第二步：条目详情 + 剧集 ----------
 
+let isCurrentSubjectCollected = false;
+
+async function updateCollectBtn(bangumiId, s) {
+  const btn = $("subject-collect-btn");
+  if (!btn) return;
+  try {
+    isCurrentSubjectCollected = await invoke("is_subject_collected", { bangumiId: Number(bangumiId) });
+  } catch {
+    isCurrentSubjectCollected = false;
+  }
+  setCollectBtnUI(isCurrentSubjectCollected);
+
+  btn.onclick = async () => {
+    try {
+      const isNow = await invoke("toggle_subject_collection", {
+        bangumiId: Number(bangumiId),
+        nameCn: s.name_cn || s.display_title || "",
+        name: s.original_title || s.name || "",
+        coverUrl: s.cover_url || null,
+        airDate: s.air_date || null,
+      });
+      isCurrentSubjectCollected = isNow;
+      setCollectBtnUI(isNow);
+      toast(isNow ? "已加入我的追番" : "已取消追番", true);
+      loadCollections();
+    } catch (e) {
+      toast("追番操作失败：" + e);
+    }
+  };
+}
+
+function setCollectBtnUI(collected) {
+  const btn = $("subject-collect-btn");
+  if (!btn) return;
+  btn.classList.toggle("collected", collected);
+  const txt = btn.querySelector(".collect-text");
+  if (txt) txt.textContent = collected ? "已追番" : "追番";
+  const icon = btn.querySelector(".collect-icon");
+  if (icon) icon.textContent = collected ? "♥" : "♡";
+}
+
 async function openSubject(s) {
   const my = ++subjectSeq;
+  const displayTitle = s.display_title || s.name_cn || s.name || "动画";
+  const originalTitle = s.original_title || s.name || "";
+  s.display_title = displayTitle;
+  s.original_title = originalTitle;
   state.subject = s;
-  $("subject-name").textContent = s.display_title;
-  $("subject-meta").textContent = [s.original_title, s.air_date].filter(Boolean).join(" · ");
+  state.currentEp = null;
+  state.currentEpId = null;
+  $("subject-name").textContent = displayTitle;
+  $("subject-meta").textContent = [originalTitle, s.air_date].filter(Boolean).join(" · ");
+  const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
+  updateCollectBtn(bangumiId, s);
+  const coverWrap = $("subject-cover-wrap");
+  const coverImg = $("subject-cover");
+  if (coverWrap && coverImg) {
+    if (s.cover_url) {
+      coverImg.src = s.cover_url;
+      coverWrap.classList.remove("hidden");
+      extractDominantColor(s.cover_url).then((color) => {
+        if (color && state.subject === s) {
+          document.documentElement.style.setProperty("--subject-accent", color);
+          document.documentElement.style.setProperty(
+            "--subject-accent-glow",
+            color.replace("rgb", "rgba").replace(")", ", 0.28)")
+          );
+        }
+      });
+    } else {
+      coverWrap.classList.add("hidden");
+      document.documentElement.style.removeProperty("--subject-accent");
+      document.documentElement.style.removeProperty("--subject-accent-glow");
+    }
+  }
+  const filterInput = $("ep-filter-input");
+  if (filterInput) filterInput.value = "";
+  epViewState.filterText = "";
   $("candidates").innerHTML = `<div class="empty">从下方剧集列表选择一集开始找资源</div>`;
   $("cand-count").textContent = "";
   $("source-errors").classList.add("hidden");
   $("episodes").innerHTML = `<div class="empty">加载中…</div>`;
   showView("detail");
+  loadCharacters(bangumiId, my);
   try {
-    const eps = await invoke("episode_list", { subjectId: s.id.id ?? s.id });
+    const [eps, watchedList] = await Promise.all([
+      invoke("episode_list", { subjectId: bangumiId }),
+      invoke("get_watched_episodes", { subjectId: bangumiId }).catch(() => []),
+    ]);
     if (my !== subjectSeq) return; // 用户已切换到其它条目
     state.episodes = eps;
+    state.watchedEps = new Set((watchedList || []).map(Number));
     renderEpisodes(eps);
   } catch (e) {
     if (my !== subjectSeq) return;
@@ -248,24 +561,315 @@ async function openSubject(s) {
   }
 }
 
-function renderEpisodes(eps) {
-  const wrap = $("episodes");
-  wrap.innerHTML = "";
-  const mains = eps.filter((e) => e.kind === "main");
-  const list = mains.length ? mains : eps;
-  if (!list.length) {
-    wrap.innerHTML = `<div class="empty">该条目没有剧集数据（可能是漫画/画集等非动画条目，换动画条目即可找资源）</div>`;
-    $("candidates").innerHTML = "";
+async function loadCharacters(subjectId, seq) {
+  const wrap = $("characters-wrap");
+  const listEl = $("characters-list");
+  const countEl = $("characters-count");
+  if (!wrap || !listEl) return;
+  wrap.classList.add("hidden");
+  listEl.innerHTML = "";
+  if (countEl) countEl.textContent = "";
+
+  try {
+    const chars = await invoke("get_subject_characters", { subjectId });
+    if (seq !== subjectSeq) return;
+    if (!chars || !chars.length) {
+      wrap.classList.add("hidden");
+      return;
+    }
+    if (countEl) countEl.textContent = `${chars.length} 位角色`;
+    listEl.innerHTML = chars
+      .map((c) => {
+        const avatarHtml = c.image_url
+          ? `<img class="character-avatar" src="${escapeHtml(c.image_url)}" alt="${escapeHtml(c.name)}" referrerpolicy="no-referrer" loading="lazy" />`
+          : `<div class="character-avatar" style="display:flex;align-items:center;justify-content:center;font-size:24px;background:rgba(255,255,255,0.06)">🎭</div>`;
+
+        let badgeClass = "character-role-badge";
+        if (c.relation === "主角") badgeClass += " main";
+        else if (c.relation === "配角") badgeClass += " sub";
+
+        let actorHtml = "";
+        if (c.actors && c.actors.length > 0) {
+          const a = c.actors[0];
+          const aImg = a.image_url
+            ? `<img class="actor-avatar" src="${escapeHtml(a.image_url)}" referrerpolicy="no-referrer" />`
+            : "";
+          actorHtml = `<div class="character-actor-line" title="声优: ${escapeHtml(a.name)}">${aImg}<span class="actor-name">CV: ${escapeHtml(a.name)}</span></div>`;
+        }
+
+        return `
+          <div class="character-card">
+            <div class="character-avatar-wrap">${avatarHtml}</div>
+            <div class="character-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
+            <div class="${badgeClass}">${escapeHtml(c.relation || "角色")}</div>
+            ${actorHtml}
+          </div>
+        `;
+      })
+      .join("");
+    wrap.classList.remove("hidden");
+  } catch (e) {
+    if (seq !== subjectSeq) return;
+    wrap.classList.add("hidden");
+  }
+}
+
+function updateEpisodeStats(list) {
+  const statsEl = $("episodes-stats");
+  if (!statsEl || !list || !list.length) return;
+  const watchedCount = list.filter((e) => state.watchedEps.has(Number(e.id?.id ?? e.id))).length;
+  const pct = Math.round((watchedCount / list.length) * 100);
+  statsEl.textContent = `已看 ${watchedCount} / ${list.length} 集 (${pct}%)`;
+}
+
+async function markEpisodesUpTo(targetEp, list, eps) {
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  const toMark = list.filter((x) => x.ep <= targetEp && !state.watchedEps.has(Number(x.id?.id ?? x.id)));
+  if (!toMark.length) {
+    toast(`第 1 至 ${targetEp} 集均已处于已看状态`, true);
     return;
   }
+  for (const item of toMark) {
+    const epId = Number(item.id?.id ?? item.id);
+    await invoke("mark_episode_watched", {
+      episodeId: epId,
+      subjectId,
+      ep: Number(item.ep),
+      watched: true,
+    }).catch(() => {});
+    state.watchedEps.add(epId);
+  }
+  renderEpisodes(eps);
+  toast(`已将第 1 至 ${targetEp} 集标记为已看`, true);
+}
+
+async function toggleEpisodeWatched(e, chip, list) {
+  const epId = Number(e.id?.id ?? e.id);
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  const isWatched = state.watchedEps.has(epId);
+  const nextState = !isWatched;
+  try {
+    await invoke("mark_episode_watched", {
+      episodeId: epId,
+      subjectId,
+      ep: Number(e.ep),
+      watched: nextState,
+    });
+    if (nextState) {
+      state.watchedEps.add(epId);
+      chip.classList.add("watched");
+      if (!chip.querySelector(".ep-check")) {
+        const check = document.createElement("span");
+        check.className = "ep-check";
+        check.textContent = "✓";
+        chip.appendChild(check);
+      }
+      toast(`第 ${e.ep} 集已标记为已看`, true);
+    } else {
+      state.watchedEps.delete(epId);
+      chip.classList.remove("watched");
+      chip.querySelector(".ep-check")?.remove();
+      toast(`第 ${e.ep} 集已取消已看标记`, true);
+    }
+    if (list) updateEpisodeStats(list);
+  } catch (err) {
+    toast("更新剧集已看状态失败：" + err);
+  }
+}
+
+function renderEpisodes(eps) {
+  const wrap = $("episodes");
+  const tabsEl = $("ep-type-tabs");
+  const sortBtn = $("ep-sort-btn");
+  const filterInput = $("ep-filter-input");
+  wrap.innerHTML = "";
+
+  if (!eps || !eps.length) {
+    if (tabsEl) tabsEl.classList.add("hidden");
+    wrap.innerHTML = `<div class="empty">该条目没有剧集数据（可能是漫画/画集等非动画条目，换动画条目即可找资源）</div>`;
+    $("candidates").innerHTML = "";
+    if ($("episodes-stats")) $("episodes-stats").textContent = "";
+    return;
+  }
+
+  // 剧集按类型分组（正片 / SP特别篇 / OP&ED / 其他）
+  const groups = {
+    all: { label: "全部", items: [] },
+    main: { label: "正片", items: [] },
+    special: { label: "SP特别篇", items: [] },
+    op_ed: { label: "OP/ED", items: [] },
+    other: { label: "其他", items: [] },
+  };
+
+  for (const e of eps) {
+    groups.all.items.push(e);
+    if (e.kind === "main") {
+      groups.main.items.push(e);
+    } else if (e.kind === "special") {
+      groups.special.items.push(e);
+    } else if (e.kind === "opening" || e.kind === "ending") {
+      groups.op_ed.items.push(e);
+    } else {
+      groups.other.items.push(e);
+    }
+  }
+
+  const availableKeys = ["main", "special", "op_ed", "other"].filter(
+    (k) => groups[k].items.length > 0
+  );
+
+  // 仅在存在多种类型时展示分类切换 Tab
+  if (tabsEl) {
+    if (availableKeys.length > 1) {
+      tabsEl.classList.remove("hidden");
+      const displayKeys = ["all", ...availableKeys];
+      if (!displayKeys.includes(epViewState.currentTab)) {
+        epViewState.currentTab = groups.main.items.length ? "main" : availableKeys[0];
+      }
+      tabsEl.innerHTML = displayKeys
+        .map((k) => {
+          const g = groups[k];
+          const activeClass = k === epViewState.currentTab ? " active" : "";
+          return `<div class="wd-tab${activeClass}" data-tab="${k}"><span>${g.label}</span><span class="cnt">${g.items.length}</span></div>`;
+        })
+        .join("");
+
+      tabsEl.querySelectorAll(".wd-tab").forEach((tab) => {
+        tab.onclick = () => {
+          epViewState.currentTab = tab.dataset.tab;
+          renderEpisodes(eps);
+        };
+      });
+    } else {
+      tabsEl.classList.add("hidden");
+      if (groups.main.items.length) {
+        epViewState.currentTab = "main";
+      } else if (availableKeys.length > 0) {
+        epViewState.currentTab = availableKeys[0];
+      } else {
+        epViewState.currentTab = "all";
+      }
+    }
+  }
+
+  // 当前分类剧集列表
+  let list = [...(groups[epViewState.currentTab]?.items || groups.all.items)];
+
+  // 关键字筛选（集号或标题模糊匹配）
+  if (epViewState.filterText) {
+    const q = epViewState.filterText.toLowerCase();
+    list = list.filter(
+      (e) =>
+        String(e.ep).includes(q) ||
+        (e.display_title && e.display_title.toLowerCase().includes(q))
+    );
+  }
+
+  // 排序：正序 1→N / 倒序 N→1
+  list.sort((a, b) => {
+    const diff = (a.ep || 0) - (b.ep || 0);
+    return epViewState.order === "asc" ? diff : -diff;
+  });
+
+  if (sortBtn && !sortBtn.__bound) {
+    sortBtn.__bound = true;
+    sortBtn.onclick = () => {
+      epViewState.order = epViewState.order === "asc" ? "desc" : "asc";
+      sortBtn.textContent = epViewState.order === "asc" ? "正序 1→N" : "倒序 N→1";
+      renderEpisodes(eps);
+    };
+  }
+  if (sortBtn) {
+    sortBtn.textContent = epViewState.order === "asc" ? "正序 1→N" : "倒序 N→1";
+  }
+
+  if (filterInput && !filterInput.__bound) {
+    filterInput.__bound = true;
+    filterInput.oninput = (ev) => {
+      epViewState.filterText = ev.target.value.trim();
+      renderEpisodes(eps);
+    };
+  }
+
+  updateEpisodeStats(list);
+
+  const markAllBtn = $("ep-mark-all");
+  if (markAllBtn) {
+    markAllBtn.onclick = async () => {
+      const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+      const toMark = list.filter((e) => !state.watchedEps.has(Number(e.id?.id ?? e.id)));
+      if (!toMark.length) {
+        toast("当前剧集均已处于已看状态", true);
+        return;
+      }
+      for (const e of toMark) {
+        const epId = Number(e.id?.id ?? e.id);
+        await invoke("mark_episode_watched", {
+          episodeId: epId,
+          subjectId,
+          ep: Number(e.ep),
+          watched: true,
+        }).catch(() => {});
+        state.watchedEps.add(epId);
+      }
+      renderEpisodes(eps);
+      toast(`已将当前分类全部 ${list.length} 集标记为已看`, true);
+    };
+  }
+
+  const clearAllBtn = $("ep-clear-all");
+  if (clearAllBtn) {
+    clearAllBtn.onclick = async () => {
+      const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+      const toClear = list.filter((e) => state.watchedEps.has(Number(e.id?.id ?? e.id)));
+      if (!toClear.length) return;
+      for (const e of toClear) {
+        const epId = Number(e.id?.id ?? e.id);
+        await invoke("mark_episode_watched", {
+          episodeId: epId,
+          subjectId,
+          ep: Number(e.ep),
+          watched: false,
+        }).catch(() => {});
+        state.watchedEps.delete(epId);
+      }
+      renderEpisodes(eps);
+      toast("已清空当前分类已看标记", true);
+    };
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty" style="padding:16px 0">未找到符合条件的剧集</div>`;
+    return;
+  }
+
   for (const e of list) {
+    const epId = Number(e.id?.id ?? e.id);
+    const isWatched = state.watchedEps.has(epId);
+    const isActive = state.currentEp != null && Math.abs(e.ep - state.currentEp) < 0.01;
     const chip = document.createElement("div");
-    chip.className = "ep";
-    chip.innerHTML = `<span class="epno">${e.ep}</span>${escapeHtml(e.display_title)}`;
-    chip.title = e.display_title;
-    chip.onclick = () => {
+    chip.className = "ep" + (isWatched ? " watched" : "") + (isActive ? " active" : "");
+    chip.innerHTML = `<span class="epno">${e.ep}</span>${escapeHtml(e.display_title)}${isWatched ? '<span class="ep-check">✓</span>' : ""}`;
+    chip.title = `${e.display_title} (右键/Shift+点击: 切换已看 | Alt+点击: 标记到此集)`;
+    chip.oncontextmenu = (evt) => {
+      evt.preventDefault();
+      toggleEpisodeWatched(e, chip, list);
+    };
+    chip.onclick = (evt) => {
+      if (evt.shiftKey) {
+        evt.preventDefault();
+        toggleEpisodeWatched(e, chip, list);
+        return;
+      }
+      if (evt.altKey) {
+        evt.preventDefault();
+        markEpisodesUpTo(e.ep, list, eps);
+        return;
+      }
       document.querySelectorAll(".ep.active").forEach((n) => n.classList.remove("active"));
       chip.classList.add("active");
+      state.currentEp = e.ep;
+      state.currentEpId = epId;
       fetchMedias(e.ep);
     };
     wrap.appendChild(chip);
@@ -309,12 +913,17 @@ function renderSelection(sel) {
   const excluded = sel.candidates.filter((c) => c.type === "excluded");
   const filtered = sel.candidates.filter(
     (c) =>
+      (!candFilter.onlyAvail || c.type === "available") &&
       (!candFilter.group || c.media.properties.subtitle_group === candFilter.group) &&
       (!candFilter.res ||
         (c.media.properties.resolution &&
           String(c.media.properties.resolution.height) === candFilter.res)),
   );
-  const filterNote = candFilter.group || candFilter.res ? `（筛选后 ${filtered.length} 条）` : "";
+  const filterParts = [];
+  if (candFilter.onlyAvail) filterParts.push("仅可用");
+  if (candFilter.group) filterParts.push(candFilter.group);
+  if (candFilter.res) filterParts.push(candFilter.res + "p");
+  const filterNote = filterParts.length ? `（${filterParts.join(" · ")} 筛选后 ${filtered.length} 条）` : "";
   const clipped = filtered.length > 40 ? `（显示前 40 条）` : "";
   $("cand-count").textContent = `${avail.length} 可用 · ${excluded.length} 已排除${filterNote}${clipped}`;
 
@@ -325,7 +934,20 @@ function renderSelection(sel) {
     return;
   }
   if (!filtered.length) {
-    wrap.innerHTML = `<div class="empty">没有符合筛选条件的候选，调整上方字幕组/分辨率筛选</div>`;
+    wrap.innerHTML = `<div class="empty">没有符合筛选条件的候选 <button id="reset-cand-filter" class="btn small secondary" style="margin-left:10px">重置筛选</button></div>`;
+    const resetBtn = $("reset-cand-filter");
+    if (resetBtn) {
+      resetBtn.onclick = () => {
+        candFilter.group = "";
+        candFilter.res = "";
+        candFilter.onlyAvail = false;
+        $("cand-filter-group").value = "";
+        $("cand-filter-res").value = "";
+        const availEl = $("cand-filter-avail");
+        if (availEl) availEl.checked = false;
+        renderSelection(sel);
+      };
+    }
     return;
   }
 
@@ -380,8 +1002,12 @@ function renderSelection(sel) {
   });
   wrap.querySelectorAll("[data-copy]").forEach((b) => {
     b.onclick = async () => {
-      await navigator.clipboard.writeText(b.dataset.copy);
-      toast("磁力链接已复制", true);
+      try {
+        await navigator.clipboard.writeText(b.dataset.copy);
+        toast("磁力链接已复制", true);
+      } catch (e) {
+        toast("复制失败：" + e);
+      }
     };
   });
   wrap.querySelectorAll("[data-cachebtn]").forEach((b) => {
@@ -507,6 +1133,14 @@ function rebuildDlActions(node, t) {
         await invoke("reveal_path", { path });
       } catch (e) { toast("打开失败：" + e); }
     }, true);
+    mkBtn("复制路径", async () => {
+      try {
+        const path = await invoke("download_video_path", { id: t.id });
+        if (!path) return toast("未找到视频文件");
+        await navigator.clipboard.writeText(path);
+        toast("文件路径已复制", true);
+      } catch (e) { toast("复制失败：" + e); }
+    }, true);
   } else {
     mkBtn(t.paused ? "▶ 继续" : "⏸ 暂停", async () => {
       try {
@@ -531,6 +1165,45 @@ function renderDownloads() {
   const wrap = $("dl-list");
   const tasks = [...dlTasks.values()];
   $("dl-count").textContent = tasks.length ? `(${tasks.length})` : "";
+  const activeCount = tasks.filter((t) => !t.finished && !t.paused).length;
+  const finishedTasks = tasks.filter((t) => t.finished);
+  const badge = $("dl-badge");
+  if (badge) {
+    if (activeCount > 0) {
+      badge.textContent = String(activeCount);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  }
+
+  // 聚合总上传/下载速度
+  const totalDl = tasks.reduce((s, t) => s + (t.download_speed_bps || 0), 0);
+  const totalUl = tasks.reduce((s, t) => s + (t.upload_speed_bps || 0), 0);
+  const speedEl = $("dl-total-speed");
+  if (speedEl) {
+    if (totalDl > 0 || totalUl > 0) {
+      speedEl.textContent = `↓ ${fmtSpeed(totalDl)} · ↑ ${fmtSpeed(totalUl)}`;
+      speedEl.classList.remove("hidden");
+    } else {
+      speedEl.classList.add("hidden");
+    }
+  }
+
+  // 清空已完成任务按钮
+  const clearBtn = $("dl-clear-finished");
+  if (clearBtn) {
+    clearBtn.classList.toggle("hidden", finishedTasks.length === 0);
+    clearBtn.onclick = async () => {
+      for (const t of finishedTasks) {
+        await invoke("remove_download", { id: t.id }).catch(() => {});
+        dlTasks.delete(t.id);
+      }
+      renderDownloads();
+      toast("已清理已完成任务记录", true);
+    };
+  }
+
   // 移除已消失任务的节点
   for (const [id, node] of [...dlNodes]) {
     if (!dlTasks.has(id)) {
@@ -562,9 +1235,27 @@ function renderDownloads() {
 }
 
 listen("downloads-progress", (ev) => {
-  if (!dlVisible) return;
-  for (const t of ev.payload) dlTasks.set(t.id, t);
-  renderDownloads();
+  for (const t of ev.payload) {
+    dlTasks.set(t.id, t);
+    if (t.finished && !finishedToasted.has(t.id)) {
+      finishedToasted.add(t.id);
+      toast("下载完成：" + (t.title || t.id), true);
+    }
+  }
+  // 即使面板隐藏，也保持角标与后台完成通知生效
+  const activeCount = [...dlTasks.values()].filter((t) => !t.finished && !t.paused).length;
+  const badge = $("dl-badge");
+  if (badge) {
+    if (activeCount > 0) {
+      badge.textContent = String(activeCount);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  }
+  if (dlVisible) {
+    renderDownloads();
+  }
 }).catch(() => {});
 
 async function startTorrent(uri, title) {
@@ -605,7 +1296,27 @@ function escapeAttr(s) {
 }
 
 $("search-btn").onclick = doSearch;
+const searchInput = $("search-input");
+const searchClear = $("search-clear");
+if (searchInput && searchClear) {
+  searchInput.addEventListener("input", () => {
+    searchClear.classList.toggle("hidden", !searchInput.value);
+  });
+  searchClear.onclick = () => {
+    searchInput.value = "";
+    searchClear.classList.add("hidden");
+    searchInput.focus();
+  };
+}
 $("search-input").addEventListener("keydown", (e) => e.key === "Enter" && doSearch());
+const brandEl = document.querySelector(".brand");
+if (brandEl) {
+  brandEl.onclick = () => {
+    state.subject = null;
+    showView("subjects");
+    showHomeSection();
+  };
+}
 $("back-btn").onclick = () => {
   state.subject = null;
   showView("subjects");
@@ -625,6 +1336,29 @@ $("dl-close").onclick = () => {
   dlVisible = false;
   $("download-panel").classList.add("hidden");
 };
+const dlBtn = $("dl-btn");
+if (dlBtn) {
+  dlBtn.onclick = () => {
+    if (dlVisible) {
+      dlVisible = false;
+      $("download-panel").classList.add("hidden");
+    } else {
+      openDlPanel();
+    }
+  };
+}
+const clearContinueBtn = $("clear-continue");
+if (clearContinueBtn) {
+  clearContinueBtn.onclick = async () => {
+    try {
+      await invoke("clear_playback_history");
+      toast("播放历史已清空", true);
+      loadContinueWatching();
+    } catch (e) {
+      toast("清空历史失败：" + e);
+    }
+  };
+}
 
 // ---------- 窗口控制（无边框窗口，顶栏即标题栏） ----------
 // 走应用自己的 invoke/listen 通道，不依赖注入时机不稳定的 __TAURI__.window 全局包
@@ -660,8 +1394,15 @@ $("dl-close").onclick = () => {
   syncMaxIcon();
 })();
 
-// 启动：进入首页
+// 启动：进入首页 + 预查下载任务更新角标
 showHomeSection();
+invoke("list_downloads")
+  .then((tasks) => {
+    dlTasks.clear();
+    tasks.forEach((t) => dlTasks.set(t.id, t));
+    renderDownloads();
+  })
+  .catch(() => {});
 
 // ---------- 设置界面 ----------
 
@@ -673,6 +1414,10 @@ function showView(name) {
   if (name !== "player" && !$("view-player").classList.contains("hidden")) {
     saveProgress(false);
     destroyPlayer();
+  }
+  if (name !== "detail") {
+    document.documentElement.style.removeProperty("--subject-accent");
+    document.documentElement.style.removeProperty("--subject-accent-glow");
   }
   $("view-subjects").classList.toggle("hidden", name !== "subjects");
   $("view-detail").classList.toggle("hidden", name !== "detail");
@@ -916,6 +1661,100 @@ function bindSettings() {
   bindTagEditor("tags-danmaku-kw", d.danmaku.keywords, "添加关键词");
   bindTagEditor("tags-danmaku-user", d.danmaku.blocked_users, "添加用户");
 
+  // --- 备份与恢复 ---
+  const exportBtn = $("btn-export-backup");
+  if (exportBtn) {
+    exportBtn.onclick = async () => {
+      try {
+        exportBtn.disabled = true;
+        exportBtn.textContent = "导出中…";
+        const backup = await invoke("export_user_data");
+        const jsonStr = JSON.stringify(backup, null, 2);
+        const blob = new Blob([jsonStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const nowStr = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `ani-rs-backup-${nowStr}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast("追番与播放历史备份已导出！", true);
+      } catch (err) {
+        toast("导出备份失败：" + err);
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = "⤓ 导出数据备份 (JSON)";
+      }
+    };
+  }
+
+  const importBtn = $("btn-import-backup");
+  const fileInput = $("backup-file-input");
+  if (importBtn && fileInput) {
+    importBtn.onclick = () => fileInput.click();
+    fileInput.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+        if (!backup.collections && !backup.playback_history) {
+          throw new Error("无效的备份文件格式（缺少 collections/playback_history）");
+        }
+        const stats = await invoke("import_user_data", { backup });
+        toast(`导入成功：${stats.collections_imported} 条追番，${stats.playback_imported} 条播放历史已合并！`, true);
+        const statusEl = $("backup-status");
+        if (statusEl) {
+          statusEl.textContent = `最近导入：${file.name}（${stats.collections_imported} 追番 / ${stats.playback_imported} 历史）`;
+        }
+        loadCollections();
+        loadContinueWatching();
+      } catch (err) {
+        toast("导入备份失败：" + err);
+      } finally {
+        fileInput.value = "";
+      }
+    };
+  }
+
+  // --- 检查更新 ---
+  const checkBtn = $("btn-check-update");
+  if (checkBtn) {
+    checkBtn.onclick = async () => {
+      const statusEl = $("update-status");
+      const banner = $("update-banner");
+      const titleEl = $("update-title");
+      const msgEl = $("update-msg");
+      const openRelBtn = $("btn-open-release");
+      if (statusEl) statusEl.textContent = "检查中…";
+      checkBtn.disabled = true;
+      try {
+        const info = await invoke("check_update");
+        if (info.has_update) {
+          if (statusEl) statusEl.textContent = "";
+          if (banner) banner.classList.remove("hidden");
+          if (titleEl) titleEl.textContent = `发现新版本 v${info.latest_version}（当前 v${info.current_version}）`;
+          if (msgEl) msgEl.textContent = info.release_notes || "新版本已发布，点击下方按钮前往下载。";
+          if (openRelBtn) {
+            openRelBtn.onclick = () => invoke("open_url", { url: info.release_url });
+          }
+          toast(`发现新版本 v${info.latest_version}！`, true);
+        } else {
+          if (statusEl) statusEl.textContent = `已是最新版本 (v${info.current_version}) ✓`;
+          if (banner) banner.classList.add("hidden");
+          toast("当前已是最新版本", true);
+        }
+      } catch (err) {
+        if (statusEl) statusEl.textContent = "检查失败";
+        toast("检查更新失败：" + err);
+      } finally {
+        checkBtn.disabled = false;
+      }
+    };
+  }
+
   // --- 关于 ---
   $("path-settings").textContent = settingsState.paths.settings ?? "";
   $("path-db").textContent = settingsState.paths.db ?? "";
@@ -1032,6 +1871,40 @@ const cacheDownloading = new Map(); // id -> {downloaded, total}
 
 async function refreshCacheList() {
   const wrap = $("cache-list");
+  const openCacheRootBtn = $("btn-open-cache-root");
+  if (openCacheRootBtn && !openCacheRootBtn.__bound) {
+    openCacheRootBtn.__bound = true;
+    openCacheRootBtn.onclick = async () => {
+      try {
+        const rootPath = await invoke("cache_root_path");
+        await invoke("reveal_path", { path: rootPath });
+      } catch (err) {
+        toast("打开缓存目录失败：" + err);
+      }
+    };
+  }
+
+  const clearAllCachesBtn = $("btn-clear-all-caches");
+  if (clearAllCachesBtn && !clearAllCachesBtn.__bound) {
+    clearAllCachesBtn.__bound = true;
+    clearAllCachesBtn.onclick = async () => {
+      if (!confirm("确定要清空全部离线缓存文件和记录吗？此操作不可恢复。")) return;
+      try {
+        clearAllCachesBtn.disabled = true;
+        clearAllCachesBtn.textContent = "清空中…";
+        await invoke("cache_clear_all");
+        cacheDownloading.clear();
+        await refreshCacheList();
+        toast("已清空全部离线缓存", true);
+      } catch (err) {
+        toast("清空缓存失败：" + err);
+      } finally {
+        clearAllCachesBtn.disabled = false;
+        clearAllCachesBtn.textContent = "🗑 清空全部缓存";
+      }
+    };
+  }
+
   try {
     const items = await invoke("cache_list");
     if (!items.length) {
@@ -1142,6 +2015,8 @@ const DanmakuOverlay = (() => {
   let items = [];    // 活动中的弹幕 {text,color,mode,lane,born,width}
   let scrollLanes = [], staticLanes = [];  // 各轨道的占用截止时刻（video 时间秒）
   let raf = null, lastT = 0, W = 0, H = 0, fontPx = 24;
+  let timeOffsetSec = 0;
+  let opacity = 1.0;
 
   const cv = () => $("danmaku-canvas");
   const vid = () => $("video");
@@ -1149,9 +2024,24 @@ const DanmakuOverlay = (() => {
   function resize() {
     const c = cv(), v = vid();
     if (!c || !v) return;
-    W = c.width = v.clientWidth;
-    H = c.height = v.clientHeight;
-    fontPx = Math.max(16, Math.min(32, Math.round(H / 22)));
+    const isFs = !!document.fullscreenElement;
+    W = c.width = v.clientWidth || window.innerWidth;
+    H = c.height = v.clientHeight || window.innerHeight;
+    const rect = v.getBoundingClientRect();
+    if (isFs && rect.width > 0 && rect.height > 0) {
+      W = c.width = rect.width;
+      H = c.height = rect.height;
+      c.style.left = `${rect.left}px`;
+      c.style.top = `${rect.top}px`;
+      c.style.width = `${rect.width}px`;
+      c.style.height = `${rect.height}px`;
+    } else {
+      c.style.left = "0";
+      c.style.top = "0";
+      c.style.width = "100%";
+      c.style.height = "100%";
+    }
+    fontPx = Math.max(16, Math.min(36, Math.round(H / 22)));
   }
 
   function resetLanes() {
@@ -1183,8 +2073,8 @@ const DanmakuOverlay = (() => {
     const ctx = c.getContext("2d");
     const now = v.currentTime;
     // 上屏 (lastT, now] 内的弹幕；暂停时 now 不前进自然冻结
-    while (cursor < events.length && events[cursor].time_ms / 1000 <= now) {
-      const t = events[cursor].time_ms / 1000;
+    while (cursor < events.length && (events[cursor].time_ms / 1000 + timeOffsetSec) <= now) {
+      const t = events[cursor].time_ms / 1000 + timeOffsetSec;
       if (t > lastT) spawn(events[cursor], now);
       cursor++;
     }
@@ -1209,7 +2099,7 @@ const DanmakuOverlay = (() => {
         y = it.mode === "top" ? it.lane * (fontPx + 4) + 2 : H - (it.lane + 1) * (fontPx + 4) - 6;
         x = (W - w) / 2;
       }
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha * opacity));
       ctx.strokeText(it.text, x, y);
       ctx.fillStyle = "#" + (it.color || 0xffffff).toString(16).padStart(6, "0");
       ctx.fillText(it.text, x, y);
@@ -1228,6 +2118,7 @@ const DanmakuOverlay = (() => {
     /** 载入弹幕（升序数组），并按当前开关决定是否显示 */
     load(list) {
       this.clear();
+      timeOffsetSec = 0;
       events = [...list].sort((a, b) => a.time_ms - b.time_ms);
       this.setEnabled(this.enabled);
     },
@@ -1241,7 +2132,10 @@ const DanmakuOverlay = (() => {
       lastT = sec;
       items = [];
       let lo = 0, hi = events.length;
-      while (lo < hi) { const mid = (lo + hi) >> 1; events[mid].time_ms / 1000 <= sec ? lo = mid + 1 : hi = mid; }
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        (events[mid].time_ms / 1000 + timeOffsetSec) <= sec ? lo = mid + 1 : hi = mid;
+      }
       cursor = lo;
     },
     setEnabled(on) {
@@ -1252,14 +2146,100 @@ const DanmakuOverlay = (() => {
       if (on && events.length) { resize(); resetLanes(); ensureRunning(); }
       if (!on && raf != null) { cancelAnimationFrame(raf); raf = null; }
     },
+    adjustOffset(deltaSec) {
+      timeOffsetSec += deltaSec;
+      this.seekTo(vid().currentTime);
+      const sign = timeOffsetSec > 0 ? "+" : "";
+      showPlayerOsd(`弹幕时间微调：${sign}${timeOffsetSec}s`);
+    },
+    setOpacity(val) {
+      opacity = val;
+    },
     enabled: false,
     resize,
   };
 })();
 
+let playerOsdTimer = null;
+function showPlayerOsd(msg) {
+  const osd = $("player-osd");
+  if (osd) {
+    osd.textContent = msg;
+    osd.classList.remove("hidden");
+    clearTimeout(playerOsdTimer);
+    playerOsdTimer = setTimeout(() => osd.classList.add("hidden"), 1800);
+  } else {
+    toast(msg, true);
+  }
+}
+
+let statsOsdVisible = false;
+
+function toggleStatsOsd(force) {
+  const osd = $("player-stats-osd");
+  if (!osd) return;
+  statsOsdVisible = typeof force === "boolean" ? force : !statsOsdVisible;
+  osd.classList.toggle("hidden", !statsOsdVisible);
+  if (statsOsdVisible) {
+    updateStatsOsd();
+  }
+}
+
+function updateStatsOsd() {
+  if (!statsOsdVisible) return;
+  const grid = $("stats-osd-grid");
+  const v = $("video");
+  if (!grid || !v) return;
+
+  const res = v.videoWidth ? `${v.videoWidth} × ${v.videoHeight}` : "检测中…";
+  const vp = `${v.clientWidth} × ${v.clientHeight}`;
+  const cur = fmtTime(v.currentTime);
+  const dur = fmtTime(v.duration);
+  const rate = `${v.playbackRate}x`;
+  const vol = `${Math.round(v.volume * 100)}%${v.muted ? " (静音)" : ""}`;
+
+  let proto = "直链播放 (HTTP)";
+  const src = v.currentSrc || v.src || currentMediaUrl || "";
+  if (src.includes("anibt.localhost")) proto = "BT 边下边播 (anibt://)";
+  else if (src.includes("anicache.localhost")) proto = "离线缓存 (anicache://)";
+  else if (src.startsWith("blob:") || src.includes(".m3u8")) proto = "HLS 流式分段 (hls.js)";
+
+  let bufferedPct = "0%";
+  if (v.duration > 0 && v.buffered.length > 0) {
+    let totalBuf = 0;
+    for (let i = 0; i < v.buffered.length; i++) {
+      totalBuf += v.buffered.end(i) - v.buffered.start(i);
+    }
+    bufferedPct = `${Math.min(100, Math.round((totalBuf / v.duration) * 100))}%`;
+  }
+
+  let dropInfo = "—";
+  if (typeof v.getVideoPlaybackQuality === "function") {
+    const q = v.getVideoPlaybackQuality();
+    const dropped = q.droppedVideoFrames || 0;
+    const total = q.totalVideoFrames || 0;
+    dropInfo = total > 0 ? `${dropped} / ${total} (${((dropped / total) * 100).toFixed(1)}%)` : "0";
+  }
+
+  const dmCount = typeof danmakuTimeline !== "undefined" && danmakuTimeline ? danmakuTimeline.length : 0;
+
+  grid.innerHTML = `
+    <div class="stats-row"><span class="stats-label">媒体协议</span><span class="stats-val">${escapeHtml(proto)}</span></div>
+    <div class="stats-row"><span class="stats-label">视频分辨率</span><span class="stats-val">${res}</span></div>
+    <div class="stats-row"><span class="stats-label">视口尺寸</span><span class="stats-val">${vp}</span></div>
+    <div class="stats-row"><span class="stats-label">播放进度</span><span class="stats-val">${cur} / ${dur}</span></div>
+    <div class="stats-row"><span class="stats-label">缓冲进度</span><span class="stats-val">${bufferedPct}</span></div>
+    <div class="stats-row"><span class="stats-label">丢帧统计</span><span class="stats-val">${dropInfo}</span></div>
+    <div class="stats-row"><span class="stats-label">当前倍速</span><span class="stats-val">${rate}</span></div>
+    <div class="stats-row"><span class="stats-label">音频音量</span><span class="stats-val">${vol}</span></div>
+    <div class="stats-row"><span class="stats-label">弹幕池数量</span><span class="stats-val">${dmCount > 0 ? dmCount + " 条" : "未加载"}</span></div>
+  `;
+}
+
 let hls = null;
 let playerPrev = "subjects";
 let currentMediaKey = null;
+let currentMediaUrl = "";
 let resumeListener = null;
 let lastSavedSec = -10;
 // 应用内 BT 播放（anibt://）失败时回落外部播放器用的本地路径
@@ -1281,22 +2261,155 @@ function fmtTime(sec) {
   return h ? `${h}:${mm}:${ss2}` : `${m}:${ss2}`;
 }
 
+let autoPlayTimer = null;
+let isSwitchingEp = false;
+
+function getNextEpisode() {
+  if (!state.episodes || !state.episodes.length || state.currentEp == null) return null;
+  const mains = state.episodes.filter((e) => e.kind === "main");
+  const list = mains.length ? mains : state.episodes;
+  const sorted = [...list].sort((a, b) => a.ep - b.ep);
+  return sorted.find((e) => e.ep > state.currentEp) || null;
+}
+
+function updatePlayerNextBtn() {
+  const btn = $("player-next-ep");
+  if (!btn) return;
+  const nextEp = getNextEpisode();
+  if (nextEp) {
+    btn.classList.remove("hidden");
+    btn.textContent = `下一集 ${nextEp.ep} ⏭`;
+    btn.title = `播放第 ${nextEp.ep} 集 (${nextEp.display_title || ""}) (快捷键 N)`;
+  } else {
+    btn.classList.add("hidden");
+  }
+}
+
+async function playNextEpisode() {
+  const nextEp = getNextEpisode();
+  if (!nextEp) {
+    toast("已经是最后一集了");
+    showPlayerOsd("已经是最后一集了");
+    return;
+  }
+  if (isSwitchingEp) return;
+  isSwitchingEp = true;
+  clearTimeout(autoPlayTimer);
+  autoPlayTimer = null;
+  const epNo = nextEp.ep;
+  const epId = Number(nextEp.id?.id ?? nextEp.id);
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  state.currentEp = epNo;
+  state.currentEpId = epId;
+
+  const chips = $("episodes")?.querySelectorAll(".ep");
+  if (chips) {
+    chips.forEach((c) => {
+      const noEl = c.querySelector(".epno");
+      if (noEl && parseFloat(noEl.textContent) === epNo) {
+        c.classList.add("active");
+      } else {
+        c.classList.remove("active");
+      }
+    });
+  }
+
+  updatePlayerNextBtn();
+  showPlayerOsd(`准备第 ${epNo} 集：${nextEp.display_title}…`);
+  toast(`正在准备第 ${epNo} 集：${nextEp.display_title}…`);
+  try {
+    const sel = await invoke("fetch_medias", { subjectId, ep: epNo });
+    state.candidates = sel.candidates;
+    const best = sel.candidates.find((c) => c.type === "available") || sel.candidates[0];
+    if (!best) {
+      toast(`第 ${epNo} 集暂无可用资源`);
+      return;
+    }
+    const m = best.media;
+    const magnet = m.download?.type === "torrent" ? m.download.uri : null;
+    const httpUrl = m.download?.type === "http" ? m.download.url : null;
+    if (httpUrl) {
+      openPlayer(httpUrl, m.title);
+    } else if (magnet) {
+      startStream(magnet, m.title);
+    } else {
+      toast(`第 ${epNo} 集未找到可播放链接`);
+    }
+  } catch (err) {
+    toast(`加载第 ${epNo} 集失败：` + err);
+  } finally {
+    isSwitchingEp = false;
+  }
+}
+
 function saveProgress(finished = false) {
   if (!currentMediaKey) return;
   const v = $("video");
   if (!v.duration || !isFinite(v.duration)) return;
+  const title = $("player-title")?.textContent || "";
+  const subjectName = state.subject?.display_title || state.subject?.name_cn || "";
+  const coverUrl = state.subject?.cover_url || null;
   invoke("save_progress", {
-    key: currentMediaKey,
-    positionSeconds: v.currentTime,
-    durationSeconds: v.duration,
-    finished,
+    payload: {
+      key: currentMediaKey,
+      positionSeconds: v.currentTime,
+      durationSeconds: v.duration,
+      finished,
+      title,
+      subjectName,
+      coverUrl,
+      mediaUrl: currentMediaUrl || "",
+    },
   }).catch(() => {});
+
+  if (finished && state.subject) {
+    let epId = state.currentEpId;
+    let epNo = state.currentEp;
+    if (!epId && state.episodes && epNo != null) {
+      const found = state.episodes.find((e) => Math.abs(e.ep - epNo) < 0.01);
+      if (found) epId = Number(found.id?.id ?? found.id);
+    }
+    if (epId) {
+      const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+      invoke("mark_episode_watched", {
+        episodeId: Number(epId),
+        subjectId,
+        ep: Number(epNo ?? 0),
+        watched: true,
+      }).then(() => {
+        state.watchedEps.add(Number(epId));
+        const activeChip = $("episodes")?.querySelector(".ep.active");
+        if (activeChip) {
+          activeChip.classList.add("watched");
+          if (!activeChip.querySelector(".ep-check")) {
+            const check = document.createElement("span");
+            check.className = "ep-check";
+            check.textContent = "✓";
+            activeChip.appendChild(check);
+          }
+        }
+      }).catch(() => {});
+    }
+  }
 }
 
 function destroyPlayer() {
   const v = $("video");
   v.pause();
   DanmakuOverlay.clear();
+  clearTimeout(autoPlayTimer);
+  autoPlayTimer = null;
+  const nextBtn = $("player-next-ep");
+  if (nextBtn) nextBtn.classList.add("hidden");
+  const osd = $("player-osd");
+  if (osd) osd.classList.add("hidden");
+  toggleStatsOsd(false);
+  const sp = $("player-spinner");
+  if (sp) sp.classList.add("hidden");
+  clearTimeout(stageIdleTimer);
+  stageIdleTimer = null;
+  const stage = document.querySelector(".player-stage");
+  if (stage) stage.classList.remove("idle");
   // 媒体加载失败的 once 监听器不会自焚，滞留会污染下一次播放的 seek
   if (resumeListener) {
     v.removeEventListener("loadedmetadata", resumeListener);
@@ -1328,8 +2441,10 @@ function showPlayerEmpty() {
 
 function showPlayer(url, title) {
   destroyPlayer();
+  currentMediaUrl = url || "";
   $("player-title").textContent = title || "在线播放";
   showView("player");
+  updatePlayerNextBtn();
   const v = $("video");
   if (!url) return;
 
@@ -1350,7 +2465,7 @@ function showPlayer(url, title) {
   };
   invoke("load_progress", { key: currentMediaKey })
     .then((pos) => {
-      if (pos && pos > 30) resumeAt = pos;
+      if (pos && pos > 10) resumeAt = pos;
       tryResume();
     })
     .catch(() => {});
@@ -1396,9 +2511,12 @@ function showPlayer(url, title) {
           return;
         }
         toast("应用内播放失败，改用外部播放器…");
-        invoke("spawn_player", { path: btFallbackPath })
-          .then((via) => toast("已在" + via + "中播放", true))
-          .catch(() => {});
+        const fallback = btFallbackPath;
+        destroyPlayer();
+        showView(playerPrev);
+        invoke("spawn_player", { path: fallback })
+          .then((via) => toast("已在" + via + "中播放（边下边播，请勿关闭下载面板）", true))
+          .catch((e) => toast("启动播放器失败：" + e));
       };
       v.addEventListener("error", btErrorListener, { once: true });
     }
@@ -1419,7 +2537,7 @@ function showPlayer(url, title) {
   // 弹幕：有番剧上下文时按 番名+集号 从 dandanplay 拉取（未配置时后端静默返回未匹配）
   syncDanmakuToggle();
   DanmakuOverlay.clear();
-  const subjectName = state.subject?.display_title;
+  const subjectName = state.subject?.display_title || state.subject?.name_cn || state.subject?.name;
   if (subjectName && state.currentEp != null) {
     invoke("danmaku_fetch", { subjectName, ep: state.currentEp })
       .then((r) => {
@@ -1500,6 +2618,7 @@ $("player-url-input").addEventListener("keydown", (e) => e.key === "Enter" && $(
 $("video").addEventListener("timeupdate", () => {
   const v = $("video");
   $("player-time").textContent = `${fmtTime(v.currentTime)} / ${fmtTime(v.duration)}`;
+  if (statsOsdVisible) updateStatsOsd();
   if (v.currentTime - lastSavedSec >= 5) {
     lastSavedSec = v.currentTime;
     saveProgress(false);
@@ -1508,46 +2627,115 @@ $("video").addEventListener("timeupdate", () => {
 $("video").addEventListener("volumechange", () => {
   localStorage.setItem("ani_vol", String($("video").volume));
 });
-$("video").addEventListener("waiting", () => setStatus("缓冲中…"));
-$("video").addEventListener("playing", () => setStatus(""));
+const setPlayerSpinner = (show) => {
+  const sp = $("player-spinner");
+  if (sp) sp.classList.toggle("hidden", !show);
+};
+
+let stageIdleTimer = null;
+const stageEl = document.querySelector(".player-stage");
+if (stageEl) {
+  stageEl.addEventListener("mousemove", () => {
+    stageEl.classList.remove("idle");
+    clearTimeout(stageIdleTimer);
+    const v = $("video");
+    if (v && !v.paused) {
+      stageIdleTimer = setTimeout(() => {
+        if (v && !v.paused) stageEl.classList.add("idle");
+      }, 2500);
+    }
+  });
+  stageEl.addEventListener("mouseleave", () => {
+    clearTimeout(stageIdleTimer);
+    stageEl.classList.remove("idle");
+  });
+}
+
+$("video").addEventListener("waiting", () => {
+  setStatus("缓冲中…");
+  setPlayerSpinner(true);
+});
+$("video").addEventListener("playing", () => {
+  setStatus("");
+  setPlayerSpinner(false);
+});
+$("video").addEventListener("canplay", () => setPlayerSpinner(false));
+$("video").addEventListener("pause", () => {
+  if (stageEl) stageEl.classList.remove("idle");
+  clearTimeout(stageIdleTimer);
+});
 $("video").addEventListener("click", (e) => {
   const v = $("video");
   // 原生控制条在 shadow DOM 里，click 会重定向到 video 元素本身；
   // 命中底部控制条区域时不翻转播放状态，否则"点暂停=没点"
   const rect = v.getBoundingClientRect();
   if (e.clientY - rect.top > rect.height - 60) return;
-  v.paused ? v.play().catch(() => {}) : v.pause();
+  if (v.paused) {
+    v.play().catch(() => {});
+    showPlayerOsd("▶ 播放");
+  } else {
+    v.pause();
+    showPlayerOsd("⏸ 暂停");
+  }
 });
 $("video").addEventListener("dblclick", () => toggleFullscreen());
 
 function toggleFullscreen() {
-  const v = $("video");
-  if (document.fullscreenElement) document.exitFullscreen();
-  else v.requestFullscreen?.().catch(() => {});
+  const stage = document.querySelector(".player-stage") || $("video");
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else {
+    stage.requestFullscreen?.().catch(() => {
+      $("video").requestFullscreen?.().catch(() => {});
+    });
+  }
 }
 $("player-fs").onclick = toggleFullscreen;
+$("player-next-ep").onclick = () => playNextEpisode();
 
-// ---------- 弹幕开关与联动 ----------
+// ---------- 弹幕开关、不透明度循环与联动 ----------
 
-function danmakuEnabled() {
-  if (settingsState.data?.danmaku_source) return !!settingsState.data.danmaku_source.enabled;
-  return localStorage.getItem("ani_dm") === "1";
+const DM_OPACITIES = [1.0, 0.7, 0.4, 0];
+
+function danmakuOpacity() {
+  if (settingsState.data?.danmaku_source) {
+    if (!settingsState.data.danmaku_source.enabled) return 0;
+    const saved = localStorage.getItem("ani_dm_opacity");
+    const val = saved !== null ? parseFloat(saved) : 1.0;
+    return val > 0 ? val : 1.0;
+  }
+  const saved = localStorage.getItem("ani_dm_opacity");
+  if (saved !== null) return parseFloat(saved);
+  return localStorage.getItem("ani_dm") === "0" ? 0 : 1.0;
 }
 
 function syncDanmakuToggle() {
-  const on = danmakuEnabled();
-  $("player-danmaku").textContent = on ? "弹幕 开" : "弹幕 关";
+  const op = danmakuOpacity();
+  const on = op > 0;
+  $("player-danmaku").textContent = on ? `弹幕 ${Math.round(op * 100)}%` : "弹幕 关";
+  DanmakuOverlay.setOpacity(op);
   DanmakuOverlay.setEnabled(on);
 }
 
 $("player-danmaku").onclick = () => {
-  const on = !danmakuEnabled();
-  localStorage.setItem("ani_dm", on ? "1" : "0");
+  const cur = danmakuOpacity();
+  const idx = DM_OPACITIES.findIndex((o) => Math.abs(o - cur) < 0.05);
+  const nextIdx = (idx + 1) % DM_OPACITIES.length;
+  const next = DM_OPACITIES[nextIdx];
+  localStorage.setItem("ani_dm_opacity", String(next));
+  localStorage.setItem("ani_dm", next > 0 ? "1" : "0");
   if (settingsState.data?.danmaku_source) {
-    settingsState.data.danmaku_source.enabled = on;
+    settingsState.data.danmaku_source.enabled = next > 0;
     scheduleSave();
   }
   syncDanmakuToggle();
+  if (next > 0) {
+    toast(`弹幕不透明度：${Math.round(next * 100)}%`, true);
+    showPlayerOsd(`弹幕不透明度: ${Math.round(next * 100)}%`);
+  } else {
+    toast("弹幕已关闭", true);
+    showPlayerOsd("弹幕已关闭");
+  }
 };
 
 // seek 后重定位弹幕游标；窗口尺寸变化时重排画布
@@ -1560,38 +2748,116 @@ $("player-quality").onchange = (e) => {
   if (hls) hls.currentLevel = +e.target.value;
 };
 
-// 键盘快捷键：空格暂停 / ←→ 快退快进 10s / ↑↓ 音量 / F 全屏
+// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / F 全屏 / N 下一集 / [ ] 弹幕时间微调
 document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
   const v = $("video");
-  const keys = [" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "f", "F"];
-  if (!keys.includes(e.key)) return;
+  const isDigit = /^[0-9]$/.test(e.key);
+  const keys = [
+    " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+    "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
+    "[", "]", ",", "<", ".", ">", "i", "I"
+  ];
+  if (!keys.includes(e.key) && !isDigit) return;
   e.preventDefault();
+
+  if (isDigit) {
+    if (v.duration && isFinite(v.duration)) {
+      const pct = parseInt(e.key, 10) * 0.1;
+      v.currentTime = v.duration * pct;
+      showPlayerOsd(`⏩ 跳转至 ${Math.round(pct * 100)}% · ${fmtTime(v.currentTime)}`);
+    }
+    return;
+  }
+
   switch (e.key) {
     case " ":
-      v.paused ? v.play().catch(() => {}) : v.pause();
+      if (v.paused) {
+        v.play().catch(() => {});
+        showPlayerOsd("▶ 播放");
+      } else {
+        v.pause();
+        showPlayerOsd("⏸ 暂停");
+      }
       break;
-    case "ArrowLeft": v.currentTime = Math.max(0, v.currentTime - 10); break;
-    case "ArrowRight": v.currentTime += 10; break;
-    case "ArrowUp": v.volume = Math.min(1, v.volume + 0.1); break;
-    case "ArrowDown": v.volume = Math.max(0, v.volume - 0.1); break;
+    case "ArrowLeft": case "j": case "J":
+      v.currentTime = Math.max(0, v.currentTime - 10);
+      showPlayerOsd("⏪ 快退 10s · " + fmtTime(v.currentTime));
+      break;
+    case "ArrowRight": case "l": case "L":
+      v.currentTime += 10;
+      showPlayerOsd("⏩ 快进 10s · " + fmtTime(v.currentTime));
+      break;
+    case "ArrowUp":
+      v.muted = false;
+      v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10);
+      showPlayerOsd("🔊 音量: " + Math.round(v.volume * 100) + "%");
+      break;
+    case "ArrowDown":
+      v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10);
+      showPlayerOsd("🔉 音量: " + Math.round(v.volume * 100) + "%");
+      break;
+    case "m": case "M":
+      v.muted = !v.muted;
+      showPlayerOsd(v.muted ? "🔇 静音" : `🔊 音量: ${Math.round(v.volume * 100)}%`);
+      break;
+    case "<": case ",": {
+      const curIdx = RATES.indexOf(v.playbackRate);
+      const prevIdx = (curIdx - 1 + RATES.length) % RATES.length;
+      v.playbackRate = RATES[prevIdx];
+      $("player-rate").textContent = `倍速 ${RATES[prevIdx]}x`;
+      showPlayerOsd(`倍速: ${RATES[prevIdx]}x`);
+      localStorage.setItem("ani_rate", String(RATES[prevIdx]));
+      break;
+    }
+    case ">": case ".": {
+      const curIdx = RATES.indexOf(v.playbackRate);
+      const nextIdx = (curIdx + 1) % RATES.length;
+      v.playbackRate = RATES[nextIdx];
+      $("player-rate").textContent = `倍速 ${RATES[nextIdx]}x`;
+      showPlayerOsd(`倍速: ${RATES[nextIdx]}x`);
+      localStorage.setItem("ani_rate", String(RATES[nextIdx]));
+      break;
+    }
     case "f": case "F": toggleFullscreen(); break;
+    case "n": case "N": playNextEpisode(); break;
+    case "i": case "I": toggleStatsOsd(); break;
+    case "[": DanmakuOverlay.adjustOffset(-1); break;
+    case "]": DanmakuOverlay.adjustOffset(1); break;
   }
 });
+
+const statsBtn = $("player-stats-btn");
+if (statsBtn) statsBtn.onclick = () => toggleStatsOsd();
+const statsClose = $("stats-osd-close");
+if (statsClose) statsClose.onclick = () => toggleStatsOsd(false);
 $("video").addEventListener("ended", () => {
   saveProgress(true);
   toast("已看完，进度已记录", true);
   // Bangumi 云同步：标记「看过」（未登录时后端拒绝，静默忽略）
   const subjectId = state.subject?.id?.id ?? state.subject?.id;
-  if (subjectId && state.currentEp != null) {
+  if (subjectId && state.currentEp != null && state.episodes) {
     const epInfo = state.episodes.find((e) => Math.abs(e.ep - state.currentEp) < 0.01);
     if (epInfo) {
       invoke("bangumi_mark_watched", { subjectId, episodeId: epInfo.id.id ?? epInfo.id })
         .then(() => toast("已同步到 Bangumi：标记看过", true))
         .catch(() => {});
     }
+  }
+  // 自动连播下一集（3 秒倒计时）
+  const nextEp = getNextEpisode();
+  if (nextEp) {
+    toast(`3 秒后自动播放下一集（第 ${nextEp.ep} 集）…`, true);
+    showPlayerOsd(`3 秒后自动播放第 ${nextEp.ep} 集…`);
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = setTimeout(() => {
+      if (!$("view-player").classList.contains("hidden")) {
+        playNextEpisode();
+      }
+    }, 3000);
   }
 });
 
@@ -1601,5 +2867,81 @@ $("player-rate").onclick = () => {
   const idx = (RATES.indexOf(v.playbackRate) + 1) % RATES.length;
   v.playbackRate = RATES[idx];
   $("player-rate").textContent = `倍速 ${RATES[idx]}x`;
+  showPlayerOsd(`倍速: ${RATES[idx]}x`);
   localStorage.setItem("ani_rate", String(RATES[idx]));
 };
+
+function toggleHelpModal(show) {
+  const modal = $("help-modal");
+  if (!modal) return;
+  if (show === undefined) {
+    modal.classList.toggle("hidden");
+  } else if (show) {
+    modal.classList.remove("hidden");
+  } else {
+    modal.classList.add("hidden");
+  }
+}
+
+const helpBtn = $("help-btn");
+if (helpBtn) helpBtn.onclick = () => toggleHelpModal();
+const helpClose = $("help-close");
+if (helpClose) helpClose.onclick = () => toggleHelpModal(false);
+const helpModalEl = $("help-modal");
+if (helpModalEl) {
+  helpModalEl.onclick = (e) => {
+    if (e.target === helpModalEl) toggleHelpModal(false);
+  };
+}
+
+// 全局桌面快捷键：/ 聚焦搜索框；? 打开帮助；Escape 退出/返回上一层
+document.addEventListener("keydown", (e) => {
+  const tag = e.target?.tagName;
+  const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+  if (e.key === "/" && !isInput) {
+    e.preventDefault();
+    const sInput = $("search-input");
+    if (sInput) {
+      sInput.focus();
+      sInput.select();
+    }
+    return;
+  }
+
+  if (e.key === "?" && !isInput) {
+    e.preventDefault();
+    toggleHelpModal();
+    return;
+  }
+
+  if (e.key === "Escape") {
+    const helpModal = $("help-modal");
+    if (helpModal && !helpModal.classList.contains("hidden")) {
+      toggleHelpModal(false);
+      return;
+    }
+    if (isInput) {
+      if (e.target.id === "search-input" && e.target.value) {
+        e.target.value = "";
+        const clr = $("search-clear");
+        if (clr) clr.classList.add("hidden");
+      } else {
+        e.target.blur();
+      }
+    } else if (dlVisible) {
+      dlVisible = false;
+      $("download-panel").classList.add("hidden");
+    } else if (!$("view-player").classList.contains("hidden")) {
+      if (!document.fullscreenElement) {
+        $("player-back").click();
+      }
+    } else if (!$("view-settings").classList.contains("hidden")) {
+      $("settings-back").click();
+    } else if (!$("view-detail").classList.contains("hidden")) {
+      $("back-btn").click();
+    } else if (state.subView === "results") {
+      showHomeSection();
+    }
+  }
+});

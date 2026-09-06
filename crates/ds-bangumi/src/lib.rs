@@ -40,13 +40,36 @@ pub fn upgrade_cover_url(url: &str) -> Option<Url> {
     Url::parse(&u).ok()
 }
 
-/// 从 images 对象里挑最高清的封面：large 优先，common 兜底并升级。
+/// 从 images 对象里挑最高清的封面：large 优先，medium，common 升级兜底，small，grid。
 fn best_cover(images: &Images) -> Option<Url> {
     images
         .large
         .as_deref()
         .and_then(|u| Url::parse(u).ok())
+        .or_else(|| images.medium.as_deref().and_then(|u| Url::parse(u).ok()))
         .or_else(|| images.common.as_deref().and_then(upgrade_cover_url))
+        .or_else(|| images.small.as_deref().and_then(|u| Url::parse(u).ok()))
+        .or_else(|| images.grid.as_deref().and_then(|u| Url::parse(u).ok()))
+}
+
+/// 条目关联的角色与配音演员（CV）信息。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CharacterActor {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub image_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubjectCharacter {
+    pub id: u64,
+    pub name: String,
+    pub relation: String,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub actors: Vec<CharacterActor>,
 }
 
 /// 一天的放送日程（对应 /calendar 的数组元素）。
@@ -56,12 +79,18 @@ pub struct CalendarDay {
     pub items: Vec<SubjectSummary>,
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, Clone)]
 pub struct Images {
     #[serde(default)]
     pub large: Option<String>,
     #[serde(default, rename = "common")]
     pub common: Option<String>,
+    #[serde(default)]
+    pub medium: Option<String>,
+    #[serde(default)]
+    pub small: Option<String>,
+    #[serde(default)]
+    pub grid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +311,81 @@ impl BangumiSource {
             })
             .collect())
     }
+
+    /// 查询条目角色与声优列表（主角与配角排在前面）。
+    pub async fn characters(
+        &self,
+        SubjectId(id): SubjectId,
+    ) -> Result<Vec<SubjectCharacter>, UserError> {
+        #[derive(serde::Deserialize)]
+        struct ActorItem {
+            id: u64,
+            name: String,
+            #[serde(default)]
+            images: Option<Images>,
+        }
+        #[derive(serde::Deserialize)]
+        struct CharacterItem {
+            id: u64,
+            name: String,
+            #[serde(default)]
+            relation: String,
+            #[serde(default)]
+            images: Option<Images>,
+            #[serde(default)]
+            actors: Vec<ActorItem>,
+        }
+
+        let resp: Vec<CharacterItem> = self
+            .http
+            .get(format!("{API}/v0/subjects/{id}/characters"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut list: Vec<SubjectCharacter> = resp
+            .into_iter()
+            .map(|item| {
+                let image_url = item
+                    .images
+                    .and_then(|img| best_cover(&img))
+                    .map(|u| u.to_string());
+                let actors = item
+                    .actors
+                    .into_iter()
+                    .map(|a| {
+                        let actor_img = a
+                            .images
+                            .and_then(|img| best_cover(&img))
+                            .map(|u| u.to_string());
+                        CharacterActor {
+                            id: a.id,
+                            name: a.name,
+                            image_url: actor_img,
+                        }
+                    })
+                    .collect();
+                SubjectCharacter {
+                    id: item.id,
+                    name: item.name,
+                    relation: item.relation,
+                    image_url,
+                    actors,
+                }
+            })
+            .collect();
+
+        // 排序规则：主角 (0) > 配角 (1) > 其它 (2)
+        list.sort_by_key(|c| match c.relation.as_str() {
+            "主角" => 0,
+            "配角" => 1,
+            _ => 2,
+        });
+
+        Ok(list)
+    }
 }
 
 #[async_trait]
@@ -325,6 +429,7 @@ mod tests {
         let img = Images {
             large: Some("http://lain.bgm.tv/pic/cover/l/12/34/1.jpg".into()),
             common: Some("http://lain.bgm.tv/pic/cover/c/12/34/1.jpg".into()),
+            ..Default::default()
         };
         assert_eq!(
             best_cover(&img).map(|u| u.to_string()),
@@ -334,10 +439,53 @@ mod tests {
         let img2 = Images {
             large: None,
             common: Some("http://lain.bgm.tv/pic/cover/c/12/34/1.jpg".into()),
+            ..Default::default()
         };
         assert_eq!(
             best_cover(&img2).map(|u| u.to_string()),
             Some("http://lain.bgm.tv/pic/cover/l/12/34/1.jpg".to_string())
         );
+    }
+
+    #[test]
+    fn characters_sorting_priority() {
+        let mut chars = [
+            SubjectCharacter {
+                id: 3,
+                name: "闲人甲".into(),
+                relation: "闲角".into(),
+                image_url: None,
+                actors: vec![],
+            },
+            SubjectCharacter {
+                id: 1,
+                name: "芙莉莲".into(),
+                relation: "主角".into(),
+                image_url: Some("http://example.com/frieren.jpg".into()),
+                actors: vec![CharacterActor {
+                    id: 101,
+                    name: "种崎敦美".into(),
+                    image_url: None,
+                }],
+            },
+            SubjectCharacter {
+                id: 2,
+                name: "费伦".into(),
+                relation: "配角".into(),
+                image_url: None,
+                actors: vec![],
+            },
+        ];
+
+        chars.sort_by_key(|c| match c.relation.as_str() {
+            "主角" => 0,
+            "配角" => 1,
+            _ => 2,
+        });
+
+        assert_eq!(chars[0].name, "芙莉莲");
+        assert_eq!(chars[1].name, "费伦");
+        assert_eq!(chars[2].name, "闲人甲");
+        assert_eq!(chars[0].actors[0].name, "种崎敦美");
     }
 }

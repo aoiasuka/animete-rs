@@ -44,11 +44,13 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::search_subjects,
             commands::episode_list,
+            commands::get_subject_characters,
             commands::fetch_medias,
             commands::start_torrent,
             commands::get_settings,
             commands::get_calendar,
             commands::list_search_history,
+            commands::remove_search_history,
             commands::clear_search_history,
             commands::save_settings,
             commands::reveal_path,
@@ -56,6 +58,18 @@ fn main() {
             commands::spawn_player,
             commands::save_progress,
             commands::load_progress,
+            commands::list_playback_history,
+            commands::remove_playback_history,
+            commands::clear_playback_history,
+            commands::is_subject_collected,
+            commands::toggle_subject_collection,
+            commands::list_subject_collections,
+            commands::check_collection_updates,
+            commands::mark_episode_watched,
+            commands::get_watched_episodes,
+            commands::export_user_data,
+            commands::import_user_data,
+            commands::check_update,
             commands::list_downloads,
             commands::set_download_paused,
             commands::remove_download,
@@ -67,6 +81,8 @@ fn main() {
             commands::cache_list,
             commands::cache_delete,
             commands::cache_dir_path,
+            commands::cache_root_path,
+            commands::cache_clear_all,
             commands::danmaku_fetch,
             commands::learn_media_preference,
             commands::bangumi_status,
@@ -84,8 +100,13 @@ fn main() {
         // 离线缓存回放：http://anicache.localhost/<id>/<file>（对应 Ani 的本地缓存 MediaSource）
         .register_asynchronous_uri_scheme_protocol("anicache", |_ctx, request, responder| {
             let path = request.uri().path().to_string();
+            let range = request
+                .headers()
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
             tauri::async_runtime::spawn(async move {
-                responder.respond(cache::serve_file(&path));
+                responder.respond(cache::serve_file_with_range(&path, range.as_deref()));
             });
         })
         // BT 渐进播放：http://anibt.localhost/v/<info_hash>/<file_index>，

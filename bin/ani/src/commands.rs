@@ -52,6 +52,17 @@ pub async fn list_search_history(ctx: State<'_, AppContext>) -> Result<Vec<Strin
 }
 
 #[tauri::command]
+pub async fn remove_search_history(
+    ctx: State<'_, AppContext>,
+    keyword: String,
+) -> Result<(), String> {
+    ani_db::SearchHistoryRepo::new(ctx.db.clone())
+        .remove(&keyword)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn clear_search_history(ctx: State<'_, AppContext>) -> Result<(), String> {
     ani_db::SearchHistoryRepo::new(ctx.db.clone())
         .clear()
@@ -66,6 +77,17 @@ pub async fn episode_list(
 ) -> Result<Vec<Episode>, String> {
     ctx.bgm
         .episodes(ani_core::SubjectId(subject_id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_subject_characters(
+    ctx: State<'_, AppContext>,
+    subject_id: u32,
+) -> Result<Vec<ds_bangumi::SubjectCharacter>, String> {
+    ctx.bgm
+        .characters(ani_core::SubjectId(subject_id))
         .await
         .map_err(|e| e.to_string())
 }
@@ -480,23 +502,52 @@ pub fn win_is_maximized(win: tauri::WebviewWindow) -> bool {
     win.is_maximized().unwrap_or(false)
 }
 
-/// 在资源管理器中打开：目录直接打开；文件定位到所在目录并选中（Windows：explorer）。
+/// 在资源管理器中打开：目录直接打开；文件定位到所在目录并选中（Windows：explorer；macOS：open -R；Linux：xdg-open）。
 #[tauri::command]
 pub async fn reveal_path(path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    // CREATE_NO_WINDOW：GUI 进程不闪控制台窗口
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let p = std::path::Path::new(&path);
-    let mut cmd = std::process::Command::new("explorer");
-    if p.is_dir() {
-        cmd.arg(&path);
-    } else {
-        cmd.arg(format!("/select,{path}"));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW：GUI 进程不闪控制台窗口
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let p = std::path::Path::new(&path);
+        let mut cmd = std::process::Command::new("explorer");
+        if p.is_dir() {
+            cmd.arg(&path);
+        } else {
+            cmd.arg(format!("/select,{path}"));
+        }
+        cmd.creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
-    cmd.creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    #[cfg(target_os = "macos")]
+    {
+        let p = std::path::Path::new(&path);
+        let mut cmd = std::process::Command::new("open");
+        if p.is_file() {
+            cmd.arg("-R").arg(&path);
+        } else {
+            cmd.arg(&path);
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let p = std::path::Path::new(&path);
+        let target = if p.is_file() {
+            p.parent().unwrap_or(p)
+        } else {
+            p
+        };
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 fn tier_of(source_id: &str) -> ani_core::MediaSourceTier {
@@ -612,16 +663,21 @@ pub async fn start_torrent_stream(
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         let path = download_dir.join(&video.name);
+        let url = if is_webview_video(&video.name) {
+            Some(format!(
+                "http://anibt.localhost/v/{}/{}",
+                handle.info_hash().as_string(),
+                video.index
+            ))
+        } else {
+            None
+        };
         let _ = app.emit(
             "stream-ready",
             &serde_json::json!({
                 // url = 应用内播放（anibt:// 协议，btstream 模块）；path = 外部播放器兜底
                 "path": path.to_string_lossy(),
-                "url": format!(
-                    "http://anibt.localhost/v/{}/{}",
-                    handle.info_hash().as_string(),
-                    video.index
-                ),
+                "url": url,
                 "title": title,
                 "file": video.name,
             }),
@@ -637,6 +693,14 @@ fn is_video(name: &str) -> bool {
     ]
     .iter()
     .any(|ext| n.ends_with(ext))
+}
+
+/// 格式是否受 WebView2 原生 HTML5 播放器支持。
+/// Chromium 原生仅支持 MP4/WebM 容器；MKV 等容器在 WebView2 中无法解码，
+/// 必须直接走外部播放器避免黑屏报错。
+fn is_webview_video(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [".mp4", ".m4v", ".webm"].iter().any(|ext| n.ends_with(ext))
 }
 
 /// 用外部播放器打开本地文件：优先 mpv（设置里可配路径，自动探测 PATH/常见位置），
@@ -657,24 +721,80 @@ pub async fn spawn_player(ctx: State<'_, AppContext>, path: String) -> Result<St
         .map_err(|e| e.to_string())?;
     match mpv {
         Some(mpv) => {
-            spawn_hidden(std::process::Command::new(&mpv).arg(&path))
-                .map_err(|e| format!("启动 mpv 失败：{e}"))?;
-            Ok(format!("mpv：{mpv}"))
+            // 播放器是 GUI 进程，必须正常显示窗口，不能用 spawn_hidden
+            std::process::Command::new(&mpv)
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("启动播放器失败：{e}"))?;
+            Ok(format!("外部播放器（{mpv}）"))
         }
         None => {
-            let mut cmd = std::process::Command::new("cmd");
-            cmd.args(["/C", "start", "", &path]);
-            spawn_hidden(&mut cmd).map_err(|e| format!("启动系统播放器失败：{e}"))?;
+            open_with_system_player(&path)?;
             Ok("系统默认播放器".into())
         }
     }
 }
 
-/// GUI 进程 spawn 子进程时隐藏控制台窗口（cmd/where 等会闪黑框）。
-fn spawn_hidden(cmd: &mut std::process::Command) -> std::io::Result<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NO_WINDOW).spawn().map(|_| ())
+#[cfg(windows)]
+fn open_with_system_player(path: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: usize,
+            lpOperation: *const u16,
+            lpFile: *const u16,
+            lpParameters: *const u16,
+            lpDirectory: *const u16,
+            nShowCmd: i32,
+        ) -> usize;
+    }
+
+    let path_wide: Vec<u16> = OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let op_wide: Vec<u16> = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    const SW_SHOWNORMAL: i32 = 1;
+
+    let res = unsafe {
+        ShellExecuteW(
+            0,
+            op_wide.as_ptr(),
+            path_wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if res > 32 {
+        Ok(())
+    } else {
+        match res {
+            31 => Err("未找到与该文件关联的默认打开方式，请在系统设置中关联播放器或在设置中指定播放器路径".into()),
+            2 => Err("未找到目标文件".into()),
+            _ => Err(format!("启动系统默认播放器失败（错误码 {res}）")),
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn open_with_system_player(path: &str) -> Result<(), String> {
+    let mut cmd = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    cmd.arg(path)
+        .spawn()
+        .map_err(|e| format!("启动系统播放器失败：{e}"))?;
+    Ok(())
 }
 
 fn resolve_mpv(configured: &str) -> Option<String> {
@@ -682,7 +802,18 @@ fn resolve_mpv(configured: &str) -> Option<String> {
     if !configured.is_empty() && PathBuf::from(configured).exists() {
         return Some(configured.to_string());
     }
-    if let Ok(out) = std::process::Command::new("where").arg("mpv").output() {
+
+    #[cfg(windows)]
+    let out = {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("where");
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.arg("mpv").output()
+    };
+    #[cfg(not(windows))]
+    let out = std::process::Command::new("which").arg("mpv").output();
+
+    if let Ok(out) = out {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
             if let Some(first) = s.lines().next() {
@@ -704,6 +835,16 @@ fn resolve_mpv(configured: &str) -> Option<String> {
         }),
         Some(PathBuf::from(r"C:\Program Files\mpv\mpv.exe")),
         Some(PathBuf::from(r"C:\Program Files (x86)\mpv\mpv.exe")),
+        Some(PathBuf::from(
+            r"C:\Program Files\DAUM\PotPlayer\PotPlayer64.exe",
+        )),
+        Some(PathBuf::from(
+            r"C:\Program Files (x86)\DAUM\PotPlayer\PotPlayer.exe",
+        )),
+        Some(PathBuf::from(r"C:\Program Files\VideoLAN\VLC\vlc.exe")),
+        Some(PathBuf::from(
+            r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+        )),
     ];
     candidates
         .into_iter()
@@ -714,23 +855,46 @@ fn resolve_mpv(configured: &str) -> Option<String> {
 
 // ---------- 播放进度（断点续播） ----------
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveProgressPayload {
+    pub key: i64,
+    #[serde(alias = "position_seconds")]
+    pub position_seconds: f64,
+    #[serde(default, alias = "duration_seconds")]
+    pub duration_seconds: Option<f64>,
+    pub finished: bool,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default, alias = "subject_name")]
+    pub subject_name: Option<String>,
+    #[serde(default, alias = "cover_url")]
+    pub cover_url: Option<String>,
+    #[serde(default, alias = "media_url")]
+    pub media_url: Option<String>,
+}
+
 /// 媒体 key：前端对 url/磁力做 32 位哈希，映射到 playback_history 的 episode_id 槽位。
 #[tauri::command]
 pub async fn save_progress(
     ctx: State<'_, AppContext>,
-    key: i64,
-    position_seconds: f64,
-    duration_seconds: Option<f64>,
-    finished: bool,
+    payload: SaveProgressPayload,
 ) -> Result<(), String> {
     let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
-    repo.save_position(&ani_core::PlaybackPosition {
-        episode_id: ani_core::EpisodeId(key as u64),
-        position_seconds,
-        duration_seconds,
-        finished,
+    let pos = ani_core::PlaybackPosition {
+        episode_id: ani_core::EpisodeId(payload.key as u64),
+        position_seconds: payload.position_seconds,
+        duration_seconds: payload.duration_seconds,
+        finished: payload.finished,
         updated_at: chrono::Utc::now().timestamp_millis(),
-    })
+    };
+    repo.save_position_with_meta(
+        &pos,
+        payload.title.as_deref().unwrap_or_default(),
+        payload.subject_name.as_deref().unwrap_or_default(),
+        payload.cover_url.as_deref(),
+        payload.media_url.as_deref().unwrap_or_default(),
+    )
     .await
     .map_err(|e| e.to_string())
 }
@@ -744,8 +908,174 @@ pub async fn load_progress(ctx: State<'_, AppContext>, key: i64) -> Result<Optio
         .await
         .map_err(|e| e.to_string())?;
     Ok(pos
-        .filter(|p| !p.finished && p.position_seconds > 30.0)
+        .filter(|p| !p.finished && p.position_seconds > 10.0)
         .map(|p| p.position_seconds))
+}
+
+/// 获取最近播放历史（用于首页「继续观看」与播放记录）。
+#[tauri::command]
+pub async fn list_playback_history(
+    ctx: State<'_, AppContext>,
+    limit: Option<i64>,
+) -> Result<Vec<ani_db::PlaybackHistoryItem>, String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    repo.list_recent(limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 删除单条播放历史。
+#[tauri::command]
+pub async fn remove_playback_history(ctx: State<'_, AppContext>, key: i64) -> Result<(), String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    repo.remove_item(key).await.map_err(|e| e.to_string())
+}
+
+/// 清空全部播放历史。
+#[tauri::command]
+pub async fn clear_playback_history(ctx: State<'_, AppContext>) -> Result<(), String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    repo.clear_all().await.map_err(|e| e.to_string())
+}
+
+// ---------- 我的追番 / 收藏 ----------
+
+/// 检查某条目是否已加入追番收藏。
+#[tauri::command]
+pub async fn is_subject_collected(
+    ctx: State<'_, AppContext>,
+    bangumi_id: i64,
+) -> Result<bool, String> {
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    repo.is_collected(bangumi_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 切换追番收藏状态（已收藏则取消，未收藏则加入）。返回最新状态（true=已收藏）。
+#[tauri::command]
+pub async fn toggle_subject_collection(
+    ctx: State<'_, AppContext>,
+    bangumi_id: i64,
+    name_cn: String,
+    name: String,
+    cover_url: Option<String>,
+    air_date: Option<String>,
+) -> Result<bool, String> {
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    let collected = repo
+        .is_collected(bangumi_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if collected {
+        repo.remove(bangumi_id).await.map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        let item = ani_db::SubjectCollectionItem {
+            bangumi_id,
+            name_cn,
+            name,
+            cover_url,
+            air_date,
+            updated_at: chrono::Utc::now().timestamp_millis(),
+        };
+        repo.save(&item).await.map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+/// 列出所有本地追番收藏（按收藏时间新→旧）。
+#[tauri::command]
+pub async fn list_subject_collections(
+    ctx: State<'_, AppContext>,
+) -> Result<Vec<ani_db::SubjectCollectionItem>, String> {
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    repo.list().await.map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CollectionUpdateInfo {
+    pub total_episodes: usize,
+    pub latest_ep: f32,
+    pub latest_title: String,
+}
+
+/// 检查全部追番条目的最新更新状态（并发拉取 Bangumi 剧集数据）。
+#[tauri::command]
+pub async fn check_collection_updates(
+    ctx: State<'_, AppContext>,
+) -> Result<std::collections::HashMap<i64, CollectionUpdateInfo>, String> {
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    let list = repo.list().await.map_err(|e| e.to_string())?;
+
+    let mut map = std::collections::HashMap::new();
+    let mut tasks = Vec::new();
+    for item in list {
+        let bgm = ctx.bgm.clone();
+        let bangumi_id = item.bangumi_id;
+        tasks.push(tokio::spawn(async move {
+            let eps = bgm.episodes(ani_core::SubjectId(bangumi_id as u32)).await;
+            (bangumi_id, eps)
+        }));
+    }
+
+    for task in tasks {
+        if let Ok((bangumi_id, Ok(eps))) = task.await {
+            let mains: Vec<_> = eps
+                .iter()
+                .filter(|e| e.kind == ani_core::EpisodeKind::Main)
+                .collect();
+            let target_list = if !mains.is_empty() {
+                mains
+            } else {
+                eps.iter().collect()
+            };
+            if let Some(latest) = target_list
+                .iter()
+                .max_by(|a, b| a.ep.partial_cmp(&b.ep).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                map.insert(
+                    bangumi_id,
+                    CollectionUpdateInfo {
+                        total_episodes: target_list.len(),
+                        latest_ep: latest.ep,
+                        latest_title: latest.display_title.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    Ok(map)
+}
+
+// ---------- 剧集已看状态标记 ----------
+
+/// 标记某剧集已看/未看状态。
+#[tauri::command]
+pub async fn mark_episode_watched(
+    ctx: State<'_, AppContext>,
+    episode_id: i64,
+    subject_id: i64,
+    ep: f64,
+    watched: bool,
+) -> Result<(), String> {
+    let repo = ani_db::EpisodeRepo::new(ctx.db.clone());
+    repo.mark_watched(episode_id, subject_id, ep, watched)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 查询某条目下所有已看的剧集 ID 列表。
+#[tauri::command]
+pub async fn get_watched_episodes(
+    ctx: State<'_, AppContext>,
+    subject_id: i64,
+) -> Result<Vec<i64>, String> {
+    let repo = ani_db::EpisodeRepo::new(ctx.db.clone());
+    repo.list_watched_by_subject(subject_id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ---------- 设置辅助：源测试 / Jellyfin 测试 / mpv 检测 ----------
@@ -1062,6 +1392,64 @@ pub async fn bangumi_mark_watched(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(windows)]
+fn open_in_browser(url: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: usize,
+            lpOperation: *const u16,
+            lpFile: *const u16,
+            lpParameters: *const u16,
+            lpDirectory: *const u16,
+            nShowCmd: i32,
+        ) -> usize;
+    }
+
+    let path_wide: Vec<u16> = OsStr::new(url)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let op_wide: Vec<u16> = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    const SW_SHOWNORMAL: i32 = 1;
+
+    let res = unsafe {
+        ShellExecuteW(
+            0,
+            op_wide.as_ptr(),
+            path_wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if res > 32 {
+        Ok(())
+    } else {
+        Err(format!("启动默认浏览器失败（错误码 {res}）"))
+    }
+}
+
+#[cfg(not(windows))]
+fn open_in_browser(url: &str) -> Result<(), String> {
+    let mut cmd = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    cmd.arg(url)
+        .spawn()
+        .map_err(|e| format!("启动默认浏览器失败：{e}"))?;
+    Ok(())
+}
+
 /// 用系统默认浏览器打开 URL（授权页等）。
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
@@ -1070,9 +1458,7 @@ pub fn open_url(url: String) -> Result<(), String> {
     {
         return Err("非法 URL".into());
     }
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/C", "start", "", &url]);
-    spawn_hidden(&mut cmd).map_err(|e| e.to_string())
+    open_in_browser(&url)
 }
 
 // ---------- 离线缓存（M5 HTTP/HLS 引擎） ----------
@@ -1237,6 +1623,37 @@ pub async fn cache_delete(ctx: State<'_, AppContext>, id: String) -> Result<(), 
     Ok(())
 }
 
+/// 缓存根目录路径（打开目录/展示用）。
+#[tauri::command]
+pub fn cache_root_path() -> Result<String, String> {
+    let root = crate::cache::cache_root();
+    if !root.exists() {
+        let _ = std::fs::create_dir_all(&root);
+    }
+    Ok(root.to_string_lossy().into_owned())
+}
+
+/// 清空全部离线缓存（清理目录内容 + 清空数据库记录）。
+#[tauri::command]
+pub async fn cache_clear_all(ctx: State<'_, AppContext>) -> Result<(), String> {
+    let root = crate::cache::cache_root();
+    if root.exists() {
+        if let Ok(mut entries) = tokio::fs::read_dir(&root).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let p = entry.path();
+                if p.is_dir() {
+                    let _ = tokio::fs::remove_dir_all(&p).await;
+                } else {
+                    let _ = tokio::fs::remove_file(&p).await;
+                }
+            }
+        }
+    }
+    let repo = ani_db::CacheItemRepo::new(ctx.db.clone());
+    repo.clear_all().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---------- 偏好学习（对应 MediaSelectorEventSavePreferenceUseCase） ----------
 
 /// 用户手选某个候选（下载/播放）时调用：把它的字幕组/分辨率记为偏好，参与后续自动选源。
@@ -1270,4 +1687,188 @@ pub async fn learn_media_preference(
         .map_err(|e| e.to_string())?;
     *ctx.settings.write().unwrap() = settings;
     Ok(())
+}
+
+// ---------- 用户数据备份与恢复 ----------
+
+#[tauri::command]
+pub async fn export_user_data(
+    ctx: State<'_, AppContext>,
+) -> Result<ani_db::UserDataBackup, String> {
+    let repo = ani_db::UserDataRepo::new(ctx.db.clone());
+    repo.export_backup().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn import_user_data(
+    ctx: State<'_, AppContext>,
+    backup: ani_db::UserDataBackup,
+) -> Result<ani_db::ImportStats, String> {
+    let repo = ani_db::UserDataRepo::new(ctx.db.clone());
+    repo.import_backup(&backup).await.map_err(|e| e.to_string())
+}
+
+// ---------- 检查更新 ----------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub release_url: String,
+    pub release_notes: Option<String>,
+    pub published_at: Option<String>,
+}
+
+pub fn is_newer_version(latest: &str, current: &str) -> bool {
+    let parse_parts = |s: &str| -> Vec<u64> {
+        s.split(|c: char| !c.is_ascii_digit())
+            .filter_map(|p| p.parse::<u64>().ok())
+            .collect()
+    };
+    let l_parts = parse_parts(latest);
+    let c_parts = parse_parts(current);
+    for (l, c) in l_parts.iter().zip(c_parts.iter()) {
+        if l > c {
+            return true;
+        }
+        if l < c {
+            return false;
+        }
+    }
+    l_parts.len() > c_parts.len()
+}
+
+#[tauri::command]
+pub async fn check_update() -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let client = reqwest::Client::builder()
+        .user_agent("ani-rs/updater")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct GhRelease {
+        tag_name: String,
+        html_url: String,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        published_at: Option<String>,
+    }
+
+    let url = "https://api.github.com/repos/aoiasuka/animete-rs/releases/latest";
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("检查更新失败：网络连接错误 ({e})"))?;
+
+    if resp.status().as_u16() == 404 {
+        return Ok(UpdateInfo {
+            current_version: current_version.clone(),
+            latest_version: current_version,
+            has_update: false,
+            release_url: "https://github.com/aoiasuka/animete-rs/releases".into(),
+            release_notes: Some("当前已是最新版本".into()),
+            published_at: None,
+        });
+    }
+
+    let rel: GhRelease = resp
+        .error_for_status()
+        .map_err(|e| format!("获取发布信息失败 ({e})"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析版本信息失败 ({e})"))?;
+
+    let latest_tag = rel.tag_name.trim().trim_start_matches('v').to_string();
+    let has_update = is_newer_version(&latest_tag, &current_version);
+
+    Ok(UpdateInfo {
+        current_version,
+        latest_version: latest_tag,
+        has_update,
+        release_url: rel.html_url,
+        release_notes: rel.body,
+        published_at: rel.published_at,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_webview_video() {
+        assert!(is_webview_video("ep01.mp4"));
+        assert!(is_webview_video("ep01.MP4"));
+        assert!(is_webview_video("ep01.webm"));
+        assert!(is_webview_video("ep01.m4v"));
+
+        // Non-webview video containers must route to external player
+        assert!(!is_webview_video("ep01.mkv"));
+        assert!(!is_webview_video("ep01.MKV"));
+        assert!(!is_webview_video("ep01.avi"));
+        assert!(!is_webview_video("ep01.ts"));
+        assert!(!is_webview_video("ep01.flv"));
+    }
+
+    #[test]
+    fn test_is_video() {
+        assert!(is_video("ep01.mkv"));
+        assert!(is_video("ep01.mp4"));
+        assert!(is_video("ep01.ts"));
+        assert!(!is_video("ep01.nfo"));
+        assert!(!is_video("ep01.torrent"));
+    }
+
+    #[test]
+    fn test_save_progress_payload_deserialization() {
+        // camelCase payload as sent by frontend app.js
+        let json = r#"{
+            "key": 12345,
+            "positionSeconds": 45.5,
+            "durationSeconds": 1420.0,
+            "finished": false,
+            "title": "第 1 集",
+            "subjectName": "葬送的芙莉莲",
+            "coverUrl": "http://example.com/cover.jpg",
+            "mediaUrl": "http://example.com/video.mp4"
+        }"#;
+        let payload: SaveProgressPayload =
+            serde_json::from_str(json).expect("should deserialize camelCase");
+        assert_eq!(payload.key, 12345);
+        assert_eq!(payload.position_seconds, 45.5);
+        assert_eq!(payload.duration_seconds, Some(1420.0));
+        assert!(!payload.finished);
+        assert_eq!(payload.title.as_deref(), Some("第 1 集"));
+        assert_eq!(payload.subject_name.as_deref(), Some("葬送的芙莉莲"));
+
+        // snake_case payload compatibility test
+        let json_snake = r#"{
+            "key": 67890,
+            "position_seconds": 120.0,
+            "finished": true
+        }"#;
+        let payload_snake: SaveProgressPayload =
+            serde_json::from_str(json_snake).expect("should deserialize snake_case");
+        assert_eq!(payload_snake.key, 67890);
+        assert_eq!(payload_snake.position_seconds, 120.0);
+        assert!(payload_snake.finished);
+        assert_eq!(payload_snake.duration_seconds, None);
+    }
+
+    #[test]
+    fn test_is_newer_version() {
+        assert!(is_newer_version("0.2.0", "0.1.0"));
+        assert!(is_newer_version("0.1.1", "0.1.0"));
+        assert!(is_newer_version("1.0.0", "0.9.9"));
+        assert!(is_newer_version("0.1.0.1", "0.1.0"));
+
+        assert!(!is_newer_version("0.1.0", "0.1.0"));
+        assert!(!is_newer_version("0.1.0", "0.2.0"));
+        assert!(!is_newer_version("0.1.0", "0.1.1"));
+    }
 }

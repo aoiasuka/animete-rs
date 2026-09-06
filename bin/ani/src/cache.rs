@@ -307,8 +307,18 @@ async fn fetch_bytes_with_progress(
 }
 
 /// 自定义协议回放：按相对路径读缓存文件（拒绝目录穿越）。
+#[allow(dead_code)]
 pub fn serve_file(rel_path: &str) -> tauri::http::Response<Vec<u8>> {
+    serve_file_with_range(rel_path, None)
+}
+
+pub fn serve_file_with_range(
+    rel_path: &str,
+    range_hdr: Option<&str>,
+) -> tauri::http::Response<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
     use tauri::http::{Response, StatusCode};
+
     let bad = |code: StatusCode| {
         Response::builder()
             .status(code)
@@ -320,14 +330,105 @@ pub fn serve_file(rel_path: &str) -> tauri::http::Response<Vec<u8>> {
         return bad(StatusCode::NOT_FOUND);
     }
     let p = cache_root().join(rel);
-    match std::fs::read(&p) {
-        Ok(bytes) => Response::builder()
-            .header("Content-Type", mime_of(&p))
+    let mut file = match std::fs::File::open(&p) {
+        Ok(f) => f,
+        Err(_) => return bad(StatusCode::NOT_FOUND),
+    };
+    let meta = match file.metadata() {
+        Ok(m) => m,
+        Err(_) => return bad(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    if !meta.is_file() {
+        return bad(StatusCode::NOT_FOUND);
+    }
+
+    let len = meta.len();
+    let mime = mime_of(&p);
+
+    if len == 0 {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", mime)
+            .header("Content-Length", "0")
+            .header("Accept-Ranges", "bytes")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(Vec::new())
+            .expect("valid response");
+    }
+
+    // Range 支持：允许视频拖动进度条，且避免把数 GiB 视频读入内存
+    if let Some(range_spec) = range_hdr.and_then(|h| h.trim().strip_prefix("bytes=")) {
+        let first = range_spec.split(',').next().unwrap_or("").trim();
+        if let Some((start_s, end_s)) = first.split_once('-') {
+            let parsed_range: Option<(u64, u64)> = if start_s.trim().is_empty() {
+                // 后缀区间 bytes=-N
+                end_s
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|&n| n > 0)
+                    .map(|n| {
+                        let start = len.saturating_sub(n);
+                        (start, len - 1)
+                    })
+            } else if let Ok(start) = start_s.trim().parse::<u64>() {
+                if start < len {
+                    let end = end_s.trim().parse::<u64>().unwrap_or(len - 1).min(len - 1);
+                    if end >= start {
+                        Some((start, end))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((start, end)) = parsed_range {
+                // 每次最多回 4MiB，客户端媒体栈会自动按需发起后续 Range 请求
+                const CHUNK: u64 = 4 * 1024 * 1024;
+                let end = end.min(start + CHUNK - 1);
+                let chunk_len = (end - start + 1) as usize;
+                if file.seek(SeekFrom::Start(start)).is_ok() {
+                    let mut buf = vec![0u8; chunk_len];
+                    if file.read_exact(&mut buf).is_ok() {
+                        return Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header("Content-Type", mime)
+                            .header("Content-Length", chunk_len.to_string())
+                            .header("Content-Range", format!("bytes {start}-{end}/{len}"))
+                            .header("Accept-Ranges", "bytes")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                            .body(buf)
+                            .expect("valid response");
+                    }
+                }
+            } else {
+                return Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header("Content-Range", format!("bytes */{len}"))
+                    .body(Vec::new())
+                    .expect("static response");
+            }
+        }
+    }
+
+    // 全量回传（小文件或无 Range 头）
+    let mut bytes = Vec::with_capacity(len.min(8 * 1024 * 1024) as usize);
+    if file.read_to_end(&mut bytes).is_ok() {
+        Response::builder()
+            .header("Content-Type", mime)
+            .header("Content-Length", bytes.len().to_string())
+            .header("Accept-Ranges", "bytes")
             .header("Access-Control-Allow-Origin", "*")
             .header("Access-Control-Allow-Methods", "GET, OPTIONS")
             .body(bytes)
-            .expect("valid response"),
-        Err(_) => bad(StatusCode::NOT_FOUND),
+            .expect("valid response")
+    } else {
+        bad(StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
