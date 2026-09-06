@@ -22,10 +22,11 @@
           <circle cx="11" cy="11" r="8"></circle>
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
-        <input id="search-input" type="text" placeholder="搜索番剧、动画名称（回车）" autofocus />
+        <input id="search-input" type="text" placeholder="搜索番剧、动画名称（回车）" autocomplete="off" autofocus />
         <button id="search-clear" class="search-clear-btn hidden" title="清空搜索内容 (Esc)">✕</button>
         <kbd class="search-kbd">↵</kbd>
         <button id="search-btn" class="search-submit-btn">搜索</button>
+        <div id="search-dropdown" class="search-dropdown hidden"></div>
       </div>
     </div>
     <div id="status" class="status"></div>
@@ -487,6 +488,32 @@
         <select id="player-quality" class="select hidden" title="画质"></select>
         <button id="player-next-ep" class="ghost small hidden" title="下一集 (快捷键 N)">下一集 ⏭</button>
         <button id="player-danmaku" class="ghost small" title="切换弹幕透明度">弹幕 关</button>
+        <div class="player-sub-wrap">
+          <button id="player-sub-btn" class="ghost small" title="外挂字幕设置与加载 (支持拖拽 .srt/.vtt 到播放器)">字幕 关</button>
+          <div id="sub-menu" class="sub-menu hidden">
+            <div class="sub-menu-title">外挂字幕</div>
+            <button id="sub-load-file-btn" class="sub-menu-item">📂 加载本地字幕 (.srt / .vtt)</button>
+            <button id="sub-clear-btn" class="sub-menu-item hidden">✕ 卸载当前字幕</button>
+            <input type="file" id="sub-file-input" accept=".srt,.vtt,.ass" class="hidden" />
+            <div class="sub-menu-sep"></div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">延迟微调</span>
+              <div class="sub-sync-btns">
+                <button id="sub-delay-minus" class="ghost small" title="提前 0.5s (快捷键 Z)">-0.5s</button>
+                <span id="sub-delay-val" class="meta mono">0.0s</span>
+                <button id="sub-delay-plus" class="ghost small" title="延后 0.5s (快捷键 X)">+0.5s</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">字号大小</span>
+              <div class="sub-size-btns">
+                <button class="ghost small sub-size-opt" data-size="sm">小</button>
+                <button class="ghost small sub-size-opt active" data-size="md">中</button>
+                <button class="ghost small sub-size-opt" data-size="lg">大</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
         <button id="player-stats-btn" class="ghost small" title="播放统计信息 (I)">ℹ 统计</button>
@@ -560,6 +587,11 @@
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">弹幕提前 1 秒 / 延后 1 秒</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">循环切换透明度 (100% / 70% / 40% / 关)</span><span>控制栏「弹幕」</span></div>
+        </div>
+        <div class="shortcut-group">
+          <div class="sg-title">外挂字幕</div>
+          <div class="sg-item"><span class="sg-desc">字幕提前 0.5 秒 / 延后 0.5 秒</span><div class="kbds"><kbd>Z</kbd> <kbd>X</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">加载本地字幕</span><span>拖拽 .srt / .vtt 至播放器 或 控制栏「字幕」</span></div>
         </div>
         <div class="shortcut-group">
           <div class="sg-title">追番与剧集打卡</div>

@@ -150,6 +150,96 @@ pub fn ext_of(url: &url::Url, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+/// 广告切片识别（对标蓝图 3.7）：关键词或跨站异常广告域。
+pub fn is_ad_segment_uri(uri: &str, base_host: Option<&str>) -> bool {
+    let lower = uri.to_ascii_lowercase();
+    let ad_patterns = [
+        "/ads/",
+        "/ad/",
+        "advert",
+        "doubleclick",
+        "pagead",
+        "googlesyndication",
+        "adservice",
+        "_ad_",
+        "-ad-",
+        "ad_segment",
+        "ad-segment",
+        "union-ad",
+        "ad.mp4",
+        "ad.ts",
+    ];
+    if ad_patterns.iter().any(|pat| lower.contains(pat)) {
+        return true;
+    }
+    if let Ok(u) = url::Url::parse(uri) {
+        if let Some(host) = u.host_str() {
+            let host_lower = host.to_ascii_lowercase();
+            if host_lower.contains("ad")
+                || host_lower.contains("track")
+                || host_lower.contains("union")
+            {
+                if let Some(base) = base_host {
+                    if host_lower != base.to_ascii_lowercase() {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// 净化 HLS 媒体 playlist（剔除广告切片及配套的 #EXTINF 标签）。
+/// 返回 (净化后的 playlist 文本, 被剔除的广告分段数量)。
+pub fn sanitize_hls_playlist(text: &str, base_url: Option<&url::Url>) -> (String, usize) {
+    let base_host = base_url.and_then(|u| u.host_str());
+    let mut out = String::with_capacity(text.len());
+    let mut removed_count = 0;
+
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("#EXTINF:") {
+            let mut next_seg_idx = i + 1;
+            while next_seg_idx < lines.len()
+                && (lines[next_seg_idx].trim().is_empty()
+                    || lines[next_seg_idx]
+                        .trim()
+                        .starts_with("#EXT-X-DISCONTINUITY"))
+            {
+                next_seg_idx += 1;
+            }
+            if next_seg_idx < lines.len() {
+                let seg_uri = lines[next_seg_idx].trim();
+                if !seg_uri.starts_with('#') && is_ad_segment_uri(seg_uri, base_host) {
+                    removed_count += 1;
+                    i = next_seg_idx + 1;
+                    continue;
+                }
+            }
+        } else if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && is_ad_segment_uri(trimmed, base_host)
+        {
+            removed_count += 1;
+            i += 1;
+            continue;
+        }
+
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+
+    (out, removed_count)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DownloadOutcome {
     /// 播放入口文件名（index.m3u8 / video.mp4）
@@ -175,7 +265,7 @@ pub async fn download(
         return download_direct(http, &base, dir, on_progress).await;
     }
 
-    // HLS：master → 最高码率变体 → 媒体 playlist → 分段
+    // HLS：master → 最高码率变体 → 媒体 playlist → 广告切片净化 → 分段
     let (media_url, media_text) = if is_master_playlist(&text) {
         let variant = pick_best_variant(&text, &base).context("master playlist 里没有可用画质")?;
         let t = fetch_text(http, &variant).await?;
@@ -183,7 +273,11 @@ pub async fn download(
     } else {
         (base.clone(), text)
     };
-    let (init_uri, seg_uris) = parse_media_playlist(&media_text).context("解析 m3u8 失败")?;
+    let (sanitized_text, ad_count) = sanitize_hls_playlist(&media_text, Some(&media_url));
+    if ad_count > 0 {
+        tracing::info!("HLS 启发式广告过滤：已剔除 {ad_count} 个推广/广告切片");
+    }
+    let (init_uri, seg_uris) = parse_media_playlist(&sanitized_text).context("解析 m3u8 失败")?;
     if seg_uris.is_empty() {
         anyhow::bail!("m3u8 里没有分段");
     }
@@ -205,23 +299,67 @@ pub async fn download(
         init_name = Some(name);
     }
 
-    let mut seg_names = Vec::with_capacity(seg_uris.len());
+    let seg_names: Vec<String> = seg_uris
+        .iter()
+        .enumerate()
+        .map(|(i, uri)| {
+            let u = media_url.join(uri).unwrap_or_else(|_| media_url.clone());
+            format!("seg_{i:05}{}", ext_of(&u, ".ts"))
+        })
+        .collect();
+
+    // 默认 6 并发高速分段下载通道（保序落盘 + 实时进度汇聚）
+    const CONCURRENCY: usize = 6;
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, u64)>();
+    let mut join_set = tokio::task::JoinSet::new();
+    let total_segs = seg_uris.len();
+
     for (i, uri) in seg_uris.iter().enumerate() {
         let u = media_url.join(uri)?;
-        let name = format!("seg_{i:05}{}", ext_of(&u, ".ts"));
-        let bytes = fetch_bytes_with_progress(http, &u, &mut |n, known| {
-            on_progress(done + n, total.saturating_add(known))
-        })
-        .await
-        .with_context(|| format!("下载分段 {}/{} 失败", i + 1, seg_uris.len()))?;
-        total += bytes.len() as u64;
-        done += bytes.len() as u64;
-        on_progress(done, total);
-        tokio::fs::write(dir.join(&name), bytes).await?;
-        seg_names.push(name);
+        let out_path = dir.join(&seg_names[i]);
+        let http = http.clone();
+        let sem = sem.clone();
+        let tx = tx.clone();
+        join_set.spawn(async move {
+            let _permit = sem.acquire().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+            let mut seg_done = 0u64;
+            let bytes = fetch_bytes_with_progress(&http, &u, &mut |n, known| {
+                let delta = n.saturating_sub(seg_done);
+                seg_done = n;
+                let _ = tx.send((delta, known));
+            })
+            .await
+            .with_context(|| format!("下载分段 {}/{} 失败", i + 1, total_segs))?;
+            tokio::fs::write(&out_path, bytes).await?;
+            Ok::<(), anyhow::Error>(())
+        });
+    }
+    drop(tx);
+
+    while let Some(res) = tokio::select! {
+        msg = rx.recv() => {
+            if let Some((delta, known)) = msg {
+                done += delta;
+                total = total.max(done).max(known);
+                on_progress(done, total);
+            }
+            None
+        }
+        res = join_set.join_next() => {
+            res
+        }
+    } {
+        res.map_err(|e| anyhow::anyhow!("分段任务异常：{e}"))??;
     }
 
-    let rewritten = rewrite_media_playlist(&media_text, init_name.as_deref(), &seg_names)?;
+    while let Some((delta, known)) = rx.recv().await {
+        done += delta;
+        total = total.max(done).max(known);
+        on_progress(done, total);
+    }
+
+    let rewritten = rewrite_media_playlist(&sanitized_text, init_name.as_deref(), &seg_names)?;
     tokio::fs::write(dir.join("index.m3u8"), rewritten).await?;
     on_progress(done, total);
     Ok(DownloadOutcome {
@@ -551,5 +689,48 @@ seg-2.ts
         assert_eq!(r.status(), 404);
         let r = serve_file("");
         assert_eq!(r.status(), 404);
+    }
+
+    #[test]
+    fn test_ad_segment_detection() {
+        assert!(is_ad_segment_uri(
+            "https://ad-cdn.example.com/ad_segment_01.ts",
+            Some("video.cdn.com")
+        ));
+        assert!(is_ad_segment_uri("/static/ads/promoted.ts", None));
+        assert!(is_ad_segment_uri(
+            "https://traffic.track.io/delivery.ts",
+            Some("video.cdn.com")
+        ));
+        assert!(is_ad_segment_uri("video_part_ad.ts", None));
+
+        // 正常分段不应被判定为广告
+        assert!(!is_ad_segment_uri("seg_00001.ts", Some("video.cdn.com")));
+        assert!(!is_ad_segment_uri(
+            "https://video.cdn.com/1080p/ep01_part1.ts",
+            Some("video.cdn.com")
+        ));
+    }
+
+    #[test]
+    fn test_sanitize_hls_playlist() {
+        let dirty_playlist = r#"#EXTM3U
+#EXT-X-VERSION:3
+#EXTINF:5.0,
+main_seg_0.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:10.0,
+https://ad-network.com/ads/promo.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:5.0,
+main_seg_1.ts
+#EXT-X-ENDLIST
+"#;
+        let base = url::Url::parse("https://video.cdn.com/stream/index.m3u8").unwrap();
+        let (clean, removed) = sanitize_hls_playlist(dirty_playlist, Some(&base));
+        assert_eq!(removed, 1);
+        assert!(clean.contains("main_seg_0.ts"));
+        assert!(clean.contains("main_seg_1.ts"));
+        assert!(!clean.contains("promo.ts"));
     }
 }

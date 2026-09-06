@@ -265,6 +265,58 @@ impl PlaybackRepo {
             .await?;
         Ok(())
     }
+
+    /// 查询全部待同步的离线挂起操作（按创建时间升序）。
+    pub async fn list_pending_ops(&self) -> anyhow::Result<Vec<PlaybackPendingOp>> {
+        let rows = sqlx::query_as::<_, (i64, i64, String, String, i64, i64)>(
+            "SELECT id, episode_id, op_kind, op_json, created_at, attempts FROM playback_pending_op ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, episode_id, op_kind, op_json, created_at, attempts)| PlaybackPendingOp {
+                    id,
+                    episode_id,
+                    op_kind,
+                    op_json,
+                    created_at,
+                    attempts,
+                },
+            )
+            .collect())
+    }
+
+    /// 标记一次同步重试（累加 attempts 尝试次数）。
+    pub async fn inc_pending_op_attempts(&self, id: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE playback_pending_op SET attempts = attempts + 1 WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// 成功同步后从挂起队列移除。
+    pub async fn remove_pending_op(&self, id: i64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM playback_pending_op WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// 离线挂起操作记录项。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct PlaybackPendingOp {
+    pub id: i64,
+    pub episode_id: i64,
+    pub op_kind: String,
+    pub op_json: String,
+    pub created_at: i64,
+    pub attempts: i64,
 }
 
 /// 弹幕缓存（整包 JSON，按查询键去重请求）。
@@ -975,5 +1027,42 @@ mod tests {
 
         cache_repo.clear_all().await.unwrap();
         assert_eq!(cache_repo.list().await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_playback_pending_ops() {
+        let pool = open(&std::path::PathBuf::from(":memory:")).await.unwrap();
+        let pb_repo = PlaybackRepo::new(pool);
+
+        // 初始无挂起任务
+        let pending = pb_repo.list_pending_ops().await.unwrap();
+        assert!(pending.is_empty());
+
+        // 入账挂起打卡操作
+        let op_payload = serde_json::json!({
+            "subject_id": 400602,
+            "episode_id": 12345
+        });
+        pb_repo
+            .enqueue_pending_op(ani_core::EpisodeId(12345), "mark_watched", &op_payload)
+            .await
+            .unwrap();
+
+        let pending = pb_repo.list_pending_ops().await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].episode_id, 12345);
+        assert_eq!(pending[0].op_kind, "mark_watched");
+        assert_eq!(pending[0].attempts, 0);
+
+        // 模拟失败并累加尝试次数
+        let id = pending[0].id;
+        pb_repo.inc_pending_op_attempts(id).await.unwrap();
+        let pending = pb_repo.list_pending_ops().await.unwrap();
+        assert_eq!(pending[0].attempts, 1);
+
+        // 模拟同步成功并移除
+        pb_repo.remove_pending_op(id).await.unwrap();
+        let pending = pb_repo.list_pending_ops().await.unwrap();
+        assert!(pending.is_empty());
     }
 }

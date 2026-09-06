@@ -90,6 +90,7 @@ fn main() {
             commands::bangumi_auth_exchange,
             commands::bangumi_logout,
             commands::bangumi_mark_watched,
+            commands::sync_pending_playback_ops,
             commands::open_url,
             commands::app_quit,
             commands::win_minimize,

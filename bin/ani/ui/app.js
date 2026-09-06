@@ -120,6 +120,16 @@ async function loadHome(force = false) {
   refreshHistory();
   loadContinueWatching();
   loadCollections();
+
+  // 离线打卡挂起队列自动重试同步
+  invoke("sync_pending_playback_ops")
+    .then((res) => {
+      if (res && res.succeeded > 0) {
+        toast(`已自动同步 ${res.succeeded} 条离线打卡记录到 Bangumi`, true);
+      }
+    })
+    .catch(() => {});
+
   if (homeState.loaded && !force) return;
   // 时间表
   $("calendar-grid").innerHTML = `<div class="empty">加载时间表中…</div>`;
@@ -1295,20 +1305,178 @@ function escapeAttr(s) {
   return escapeHtml(s).replace(/`/g, "&#96;");
 }
 
-$("search-btn").onclick = doSearch;
+$("search-btn").onclick = () => {
+  hideSearchDropdown();
+  doSearch();
+};
 const searchInput = $("search-input");
 const searchClear = $("search-clear");
+let searchDropdownActiveIdx = -1;
+
+async function renderSearchDropdown(query = "") {
+  const dd = $("search-dropdown");
+  if (!dd) return;
+  const q = query.trim().toLowerCase();
+
+  let hist = [];
+  try {
+    hist = await invoke("list_search_history");
+  } catch {}
+
+  let matchedHist = hist;
+  if (q) {
+    matchedHist = hist.filter((k) => k.toLowerCase().includes(q));
+  }
+
+  let cols = [];
+  try {
+    cols = await invoke("list_subject_collections");
+  } catch {}
+
+  let html = "";
+  let itemCount = 0;
+
+  if (matchedHist && matchedHist.length > 0) {
+    html += `
+      <div class="search-dropdown-group">
+        <div class="search-dropdown-title">
+          <span>搜索历史</span>
+          <span class="meta" style="font-size:10px">最近 ${matchedHist.length} 条</span>
+        </div>`;
+    for (const h of matchedHist.slice(0, 6)) {
+      html += `
+        <div class="search-dropdown-item" data-idx="${itemCount}" data-keyword="${escapeAttr(h)}">
+          <div class="search-dropdown-item-left">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>${escapeHtml(h)}</span>
+          </div>
+          <button class="search-dropdown-del-btn" title="删除记录">✕</button>
+        </div>`;
+      itemCount++;
+    }
+    html += `</div>`;
+  }
+
+  if (cols && cols.length > 0) {
+    html += `
+      <div class="search-dropdown-group">
+        <div class="search-dropdown-title">
+          <span>我的追番快捷检索</span>
+        </div>
+        <div class="search-tag-chips">`;
+    for (const c of cols.slice(0, 8)) {
+      const name = c.name_cn || c.name || "动画";
+      html += `<span class="search-tag-chip" data-keyword="${escapeAttr(name)}">${escapeHtml(name)}</span>`;
+    }
+    html += `</div></div>`;
+  }
+
+  if (!html) {
+    html = `<div class="meta" style="padding:12px;text-align:center">输入番剧或动画名称并回车搜索</div>`;
+  }
+
+  dd.innerHTML = html;
+  searchDropdownActiveIdx = -1;
+
+  dd.querySelectorAll(".search-dropdown-item").forEach((item) => {
+    item.onclick = (e) => {
+      if (e.target.classList.contains("search-dropdown-del-btn")) return;
+      const kw = item.dataset.keyword;
+      searchInput.value = kw;
+      if (searchClear) searchClear.classList.remove("hidden");
+      hideSearchDropdown();
+      doSearch();
+    };
+    const delBtn = item.querySelector(".search-dropdown-del-btn");
+    if (delBtn) {
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const kw = item.dataset.keyword;
+        try {
+          await invoke("remove_search_history", { keyword: kw });
+          refreshHistory();
+          renderSearchDropdown(searchInput.value);
+        } catch {}
+      };
+    }
+  });
+
+  dd.querySelectorAll(".search-tag-chip").forEach((chip) => {
+    chip.onclick = () => {
+      const kw = chip.dataset.keyword;
+      searchInput.value = kw;
+      if (searchClear) searchClear.classList.remove("hidden");
+      hideSearchDropdown();
+      doSearch();
+    };
+  });
+}
+
+function showSearchDropdown() {
+  const dd = $("search-dropdown");
+  if (!dd) return;
+  renderSearchDropdown(searchInput.value);
+  dd.classList.remove("hidden");
+}
+
+function hideSearchDropdown() {
+  const dd = $("search-dropdown");
+  if (dd) dd.classList.add("hidden");
+  searchDropdownActiveIdx = -1;
+}
+
 if (searchInput && searchClear) {
+  searchInput.addEventListener("focus", () => showSearchDropdown());
   searchInput.addEventListener("input", () => {
     searchClear.classList.toggle("hidden", !searchInput.value);
+    showSearchDropdown();
   });
   searchClear.onclick = () => {
     searchInput.value = "";
     searchClear.classList.add("hidden");
     searchInput.focus();
+    renderSearchDropdown("");
   };
+  searchInput.addEventListener("keydown", (e) => {
+    const dd = $("search-dropdown");
+    if (!dd || dd.classList.contains("hidden")) {
+      if (e.key === "Enter") {
+        hideSearchDropdown();
+        doSearch();
+      }
+      return;
+    }
+    const items = dd.querySelectorAll(".search-dropdown-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (items.length > 0) {
+        searchDropdownActiveIdx = (searchDropdownActiveIdx + 1) % items.length;
+        items.forEach((it, idx) => it.classList.toggle("active", idx === searchDropdownActiveIdx));
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (items.length > 0) {
+        searchDropdownActiveIdx = (searchDropdownActiveIdx - 1 + items.length) % items.length;
+        items.forEach((it, idx) => it.classList.toggle("active", idx === searchDropdownActiveIdx));
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (searchDropdownActiveIdx >= 0 && items[searchDropdownActiveIdx]) {
+        searchInput.value = items[searchDropdownActiveIdx].dataset.keyword;
+      }
+      hideSearchDropdown();
+      doSearch();
+    } else if (e.key === "Escape") {
+      hideSearchDropdown();
+    }
+  });
 }
-$("search-input").addEventListener("keydown", (e) => e.key === "Enter" && doSearch());
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-input-wrapper")) {
+    hideSearchDropdown();
+  }
+});
 const brandEl = document.querySelector(".brand");
 if (brandEl) {
   brandEl.onclick = () => {
@@ -2423,6 +2591,9 @@ function destroyPlayer() {
     hls.destroy();
     hls = null;
   }
+  unloadSubtitle(true);
+  const subMenu = $("sub-menu");
+  if (subMenu) subMenu.classList.add("hidden");
   v.removeAttribute("src");
   v.load();
 }
@@ -2748,7 +2919,248 @@ $("player-quality").onchange = (e) => {
   if (hls) hls.currentLevel = +e.target.value;
 };
 
-// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / F 全屏 / N 下一集 / [ ] 弹幕时间微调
+// ---------- 外挂字幕系统（WebVTT / SRT / ASS） ----------
+
+const subState = {
+  loaded: false,
+  filename: "",
+  rawVtt: "",
+  cues: [],
+  offsetSec: 0.0,
+  size: "md",
+  trackEl: null,
+  blobUrl: null,
+};
+
+function srtToVtt(srtText) {
+  let vtt = "WEBVTT\n\n";
+  const clean = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\uFEFF/, "");
+  vtt += clean.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return vtt;
+}
+
+function parseVttCues(vttText) {
+  const cues = [];
+  const lines = vttText.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    const match = line.match(/(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})/);
+    if (match) {
+      const parseSec = (h, m, s, ms) => (parseInt(h || "0", 10) * 3600) + (parseInt(m, 10) * 60) + parseInt(s, 10) + (parseInt(ms, 10) / 1000);
+      const start = parseSec(match[1], match[2], match[3], match[4]);
+      const end = parseSec(match[5], match[6], match[7], match[8]);
+      let text = "";
+      i++;
+      while (i < lines.length && lines[i].trim() !== "") {
+        text += (text ? "\n" : "") + lines[i];
+        i++;
+      }
+      cues.push({ start, end, text });
+    } else {
+      i++;
+    }
+  }
+  return cues;
+}
+
+function buildShiftedVtt(cues, offsetSec) {
+  let out = "WEBVTT\n\n";
+  const fmtVttTime = (sec) => {
+    sec = Math.max(0, sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    const ms = Math.floor((sec % 1) * 1000);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+  };
+  for (const cue of cues) {
+    const s = cue.start + offsetSec;
+    const e = cue.end + offsetSec;
+    if (e > 0) {
+      out += `${fmtVttTime(s)} --> ${fmtVttTime(e)}\n${cue.text}\n\n`;
+    }
+  }
+  return out;
+}
+
+function applySubtitleTrack(vttContent) {
+  const v = $("video");
+  if (!v) return;
+  if (subState.blobUrl) {
+    URL.revokeObjectURL(subState.blobUrl);
+    subState.blobUrl = null;
+  }
+  if (subState.trackEl) {
+    subState.trackEl.remove();
+    subState.trackEl = null;
+  }
+  const blob = new Blob([vttContent], { type: "text/vtt;charset=utf-8" });
+  subState.blobUrl = URL.createObjectURL(blob);
+  const track = document.createElement("track");
+  track.kind = "subtitles";
+  track.label = subState.filename || "外挂字幕";
+  track.srclang = "zh";
+  track.src = subState.blobUrl;
+  track.default = true;
+  v.appendChild(track);
+  subState.trackEl = track;
+
+  if (v.textTracks && v.textTracks.length > 0) {
+    for (let i = 0; i < v.textTracks.length; i++) {
+      v.textTracks[i].mode = "showing";
+    }
+  }
+}
+
+function updateSubUI() {
+  const btn = $("player-sub-btn");
+  const clearBtn = $("sub-clear-btn");
+  const valEl = $("sub-delay-val");
+  if (btn) {
+    btn.textContent = subState.loaded ? "字幕 开" : "字幕 关";
+    btn.classList.toggle("active", subState.loaded);
+  }
+  if (clearBtn) {
+    clearBtn.classList.toggle("hidden", !subState.loaded);
+  }
+  if (valEl) {
+    const sign = subState.offsetSec > 0 ? "+" : "";
+    valEl.textContent = `${sign}${subState.offsetSec.toFixed(1)}s`;
+  }
+}
+
+function loadSubtitleFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let content = e.target.result;
+    if (file.name.toLowerCase().endsWith(".srt")) {
+      content = srtToVtt(content);
+    }
+    subState.cues = parseVttCues(content);
+    subState.rawVtt = content;
+    subState.filename = file.name;
+    subState.loaded = true;
+    subState.offsetSec = 0.0;
+    applySubtitleTrack(content);
+    updateSubUI();
+    toast("已加载外挂字幕：" + file.name, true);
+    showPlayerOsd("已加载字幕: " + file.name);
+  };
+  reader.readAsText(file, "utf-8");
+}
+
+function unloadSubtitle(silent = false) {
+  if (subState.blobUrl) {
+    URL.revokeObjectURL(subState.blobUrl);
+    subState.blobUrl = null;
+  }
+  if (subState.trackEl) {
+    subState.trackEl.remove();
+    subState.trackEl = null;
+  }
+  subState.loaded = false;
+  subState.filename = "";
+  subState.cues = [];
+  subState.offsetSec = 0.0;
+  updateSubUI();
+  const subMenu = $("sub-menu");
+  if (subMenu) subMenu.classList.add("hidden");
+  if (!silent) {
+    toast("已卸载外挂字幕", true);
+    showPlayerOsd("已关闭外挂字幕");
+  }
+}
+
+function adjustSubOffset(delta) {
+  if (!subState.loaded || subState.cues.length === 0) {
+    toast("当前未加载外挂字幕");
+    return;
+  }
+  subState.offsetSec = Math.round((subState.offsetSec + delta) * 10) / 10;
+  const shifted = buildShiftedVtt(subState.cues, subState.offsetSec);
+  applySubtitleTrack(shifted);
+  updateSubUI();
+  const sign = subState.offsetSec > 0 ? "+" : "";
+  showPlayerOsd(`字幕延迟: ${sign}${subState.offsetSec.toFixed(1)}s`);
+}
+
+function setSubSize(size) {
+  subState.size = size;
+  const sizes = { sm: "17px", md: "21px", lg: "26px" };
+  document.documentElement.style.setProperty("--sub-font-size", sizes[size] || "21px");
+  document.querySelectorAll(".sub-size-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-size") === size);
+  });
+  showPlayerOsd(`字幕字号: ${size === "sm" ? "小" : size === "lg" ? "大" : "中"}`);
+}
+
+const subBtn = $("player-sub-btn");
+const subMenu = $("sub-menu");
+if (subBtn && subMenu) {
+  subBtn.onclick = (e) => {
+    e.stopPropagation();
+    subMenu.classList.toggle("hidden");
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".player-sub-wrap")) {
+      subMenu.classList.add("hidden");
+    }
+  });
+}
+
+const subLoadBtn = $("sub-load-file-btn");
+const subFileInput = $("sub-file-input");
+if (subLoadBtn && subFileInput) {
+  subLoadBtn.onclick = () => subFileInput.click();
+  subFileInput.onchange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadSubtitleFile(file);
+      subMenu?.classList.add("hidden");
+    }
+    subFileInput.value = "";
+  };
+}
+
+const subClearBtn = $("sub-clear-btn");
+if (subClearBtn) subClearBtn.onclick = () => unloadSubtitle();
+
+const subDelayMinus = $("sub-delay-minus");
+if (subDelayMinus) subDelayMinus.onclick = () => adjustSubOffset(-0.5);
+const subDelayPlus = $("sub-delay-plus");
+if (subDelayPlus) subDelayPlus.onclick = () => adjustSubOffset(0.5);
+
+document.querySelectorAll(".sub-size-opt").forEach((btn) => {
+  btn.onclick = () => setSubSize(btn.getAttribute("data-size"));
+});
+
+// 播放器区域支持直接拖拽挂载字幕文件
+const pStage = document.querySelector(".player-stage");
+if (pStage) {
+  pStage.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    pStage.classList.add("drag-over");
+  });
+  pStage.addEventListener("dragleave", () => {
+    pStage.classList.remove("drag-over");
+  });
+  pStage.addEventListener("drop", (e) => {
+    e.preventDefault();
+    pStage.classList.remove("drag-over");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      const n = file.name.toLowerCase();
+      if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass")) {
+        loadSubtitleFile(file);
+      } else {
+        toast("仅支持拖入 .srt 或 .vtt 外挂字幕文件");
+      }
+    }
+  });
+}
+
+// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / F 全屏 / N 下一集 / [ ] 弹幕时间微调 / Z X 字幕延迟微调
 document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
@@ -2759,7 +3171,7 @@ document.addEventListener("keydown", (e) => {
   const keys = [
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
-    "[", "]", ",", "<", ".", ">", "i", "I"
+    "[", "]", ",", "<", ".", ">", "i", "I", "z", "Z", "x", "X"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
   e.preventDefault();
@@ -2827,6 +3239,8 @@ document.addEventListener("keydown", (e) => {
     case "i": case "I": toggleStatsOsd(); break;
     case "[": DanmakuOverlay.adjustOffset(-1); break;
     case "]": DanmakuOverlay.adjustOffset(1); break;
+    case "z": case "Z": adjustSubOffset(-0.5); break;
+    case "x": case "X": adjustSubOffset(0.5); break;
   }
 });
 

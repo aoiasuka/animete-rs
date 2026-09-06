@@ -1378,18 +1378,101 @@ pub async fn bangumi_logout(ctx: State<'_, AppContext>) -> Result<(), String> {
 }
 
 /// 看完一集后同步到 Bangumi：标记「看过」；条目未收藏时自动建立「在看」。
+/// 若未登录或网络失败，自动记入离线挂起队列（playback_pending_op），待联网/重新授权后自动回放。
 #[tauri::command]
 pub async fn bangumi_mark_watched(
     ctx: State<'_, AppContext>,
     subject_id: u32,
     episode_id: u64,
 ) -> Result<(), String> {
-    let token = valid_bangumi_token(&ctx).await?;
+    let res = async {
+        let token = valid_bangumi_token(&ctx).await?;
+        let oauth = ds_bangumi::oauth::BangumiOAuth::new().map_err(|e| e.to_string())?;
+        oauth
+            .mark_episode_watched(&token, subject_id, episode_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    .await;
+
+    if let Err(e) = &res {
+        tracing::warn!("标记 Bangumi 已看失败，已记入离线挂起队列：{e}");
+        let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+        let payload = serde_json::json!({
+            "subject_id": subject_id,
+            "episode_id": episode_id,
+        });
+        let _ = repo
+            .enqueue_pending_op(ani_core::EpisodeId(episode_id), "mark_watched", &payload)
+            .await;
+    }
+    res
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PendingSyncResult {
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
+/// 回放并同步所有离线挂起的打卡操作到 Bangumi。
+#[tauri::command]
+pub async fn sync_pending_playback_ops(
+    ctx: State<'_, AppContext>,
+) -> Result<PendingSyncResult, String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    let pending = repo.list_pending_ops().await.map_err(|e| e.to_string())?;
+    if pending.is_empty() {
+        return Ok(PendingSyncResult {
+            total: 0,
+            succeeded: 0,
+            failed: 0,
+        });
+    }
+
+    let token = match valid_bangumi_token(&ctx).await {
+        Ok(t) => t,
+        Err(e) => {
+            return Err(format!("无法同步离线进度：未登录或认证失败（{e}）"));
+        }
+    };
     let oauth = ds_bangumi::oauth::BangumiOAuth::new().map_err(|e| e.to_string())?;
-    oauth
-        .mark_episode_watched(&token, subject_id, episode_id)
-        .await
-        .map_err(|e| e.to_string())
+
+    let total = pending.len();
+    let mut succeeded = 0;
+    let mut failed = 0;
+
+    for op in pending {
+        if op.op_kind == "mark_watched" {
+            let data: serde_json::Value = serde_json::from_str(&op.op_json).unwrap_or_default();
+            let subject_id = data.get("subject_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let episode_id = op.episode_id as u64;
+            if subject_id > 0 && episode_id > 0 {
+                match oauth
+                    .mark_episode_watched(&token, subject_id, episode_id)
+                    .await
+                {
+                    Ok(_) => {
+                        let _ = repo.remove_pending_op(op.id).await;
+                        succeeded += 1;
+                    }
+                    Err(_) => {
+                        let _ = repo.inc_pending_op_attempts(op.id).await;
+                        failed += 1;
+                    }
+                }
+            } else {
+                let _ = repo.remove_pending_op(op.id).await;
+            }
+        }
+    }
+
+    Ok(PendingSyncResult {
+        total,
+        succeeded,
+        failed,
+    })
 }
 
 #[cfg(windows)]
