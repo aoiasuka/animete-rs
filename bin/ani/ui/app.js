@@ -572,6 +572,7 @@ async function openSubject(s) {
   $("episodes").innerHTML = `<div class="empty">加载中…</div>`;
   showView("detail");
   loadCharacters(bangumiId, my);
+  loadRelatedSubjects(bangumiId, my);
   try {
     const [eps, watchedList] = await Promise.all([
       invoke("episode_list", { subjectId: bangumiId }),
@@ -634,6 +635,64 @@ async function loadCharacters(subjectId, seq) {
         `;
       })
       .join("");
+    wrap.classList.remove("hidden");
+  } catch (e) {
+    if (seq !== subjectSeq) return;
+    wrap.classList.add("hidden");
+  }
+}
+
+async function loadRelatedSubjects(subjectId, seq) {
+  const wrap = $("detail-related-wrap");
+  const listEl = $("related-list");
+  const countEl = $("related-count");
+  if (!wrap || !listEl) return;
+  wrap.classList.add("hidden");
+  listEl.innerHTML = "";
+  if (countEl) countEl.textContent = "";
+
+  try {
+    const list = await invoke("get_related_subjects", { subjectId });
+    if (seq !== subjectSeq) return;
+    if (!list || !list.length) {
+      wrap.classList.add("hidden");
+      return;
+    }
+    if (countEl) countEl.textContent = `${list.length} 部关联`;
+    listEl.innerHTML = list
+      .map((item) => {
+        let badgeClass = "related-badge";
+        if (item.relation === "续集") badgeClass += " sequel";
+        else if (item.relation === "前传") badgeClass += " prequel";
+        else if (item.relation.includes("剧场版") || item.relation === "总集篇") badgeClass += " movie";
+        else badgeClass += " other";
+
+        const title = item.name_cn || item.name;
+        const subTitle = item.name_cn ? item.name : "";
+        const coverHtml = item.cover_url
+          ? `<img class="related-cover" src="${escapeHtml(item.cover_url)}" alt="${escapeHtml(title)}" referrerpolicy="no-referrer" loading="lazy" />`
+          : `<div class="related-cover" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.06);font-size:24px">🎬</div>`;
+
+        return `
+          <div class="related-card" data-subject-id="${item.id}" title="${escapeHtml(title)}${subTitle ? " (" + escapeHtml(subTitle) + ")" : ""}">
+            <div class="related-cover-wrap">
+              ${coverHtml}
+              <span class="${badgeClass}">${escapeHtml(item.relation)}</span>
+            </div>
+            <div class="related-title">${escapeHtml(title)}</div>
+            ${subTitle ? `<div class="related-sub-title">${escapeHtml(subTitle)}</div>` : ""}
+          </div>
+        `;
+      })
+      .join("");
+
+    listEl.querySelectorAll(".related-card").forEach((card) => {
+      card.onclick = () => {
+        const id = parseInt(card.dataset.subjectId, 10);
+        if (id) loadSubject(id);
+      };
+    });
+
     wrap.classList.remove("hidden");
   } catch (e) {
     if (seq !== subjectSeq) return;
@@ -2247,14 +2306,18 @@ $("settings-back").onclick = () => {
 
 // ---------- 弹幕渲染层（Canvas 覆盖层；过滤已在后端完成，这里只管画） ----------
 const DanmakuOverlay = (() => {
-  const SCROLL_MS = 9000, STATIC_MS = 5000, MAX_ITEMS = 80;
+  let scrollMs = parseInt(localStorage.getItem("ani_dm_speed") || "6000", 10);
+  let staticMs = 4000;
+  const MAX_ITEMS = 100;
   let events = [];   // 按时间升序
   let cursor = 0;    // 下一条待上屏的下标
   let items = [];    // 活动中的弹幕 {text,color,mode,lane,born,width}
   let scrollLanes = [], staticLanes = [];  // 各轨道的占用截止时刻（video 时间秒）
   let raf = null, lastT = 0, W = 0, H = 0, fontPx = 24;
   let timeOffsetSec = 0;
-  let opacity = 1.0;
+  let opacity = 0.5;
+  let areaRatio = parseFloat(localStorage.getItem("ani_dm_area") || "0.5");
+  let fontScale = localStorage.getItem("ani_dm_size") || "md";
 
   const cv = () => $("danmaku-canvas");
   const vid = () => $("video");
@@ -2279,11 +2342,12 @@ const DanmakuOverlay = (() => {
       c.style.width = "100%";
       c.style.height = "100%";
     }
-    fontPx = Math.max(16, Math.min(36, Math.round(H / 22)));
+    const mult = fontScale === "sm" ? 0.75 : fontScale === "lg" ? 1.3 : 1.0;
+    fontPx = Math.round(Math.max(16, Math.min(36, Math.round(H / 22))) * mult);
   }
 
   function resetLanes() {
-    const scrollLaneCount = Math.max(4, Math.floor((H * 0.8) / (fontPx + 4)));
+    const scrollLaneCount = Math.max(2, Math.floor((H * areaRatio) / (fontPx + 4)));
     scrollLanes = Array(scrollLaneCount).fill(0);
     staticLanes = Array(3).fill(0);
   }
@@ -2298,8 +2362,8 @@ const DanmakuOverlay = (() => {
   function spawn(e, now) {
     if (items.length >= MAX_ITEMS) return;
     const lane = e.mode === "scroll"
-      ? takeLane(scrollLanes, now, SCROLL_MS / 1000)
-      : takeLane(staticLanes, now, STATIC_MS / 1000);
+      ? takeLane(scrollLanes, now, scrollMs / 1000)
+      : takeLane(staticLanes, now, staticMs / 1000);
     if (lane === -1) return; // 轨道满则丢弃（高峰期自动限流）
     items.push({ text: e.text, color: e.color, mode: e.mode, lane, born: now });
   }
@@ -2328,12 +2392,12 @@ const DanmakuOverlay = (() => {
       const w = ctx.measureText(it.text).width;
       let alpha = 1, x = 0, y = 0;
       if (it.mode === "scroll") {
-        x = W - (age / SCROLL_MS) * (W + w);
+        x = W - (age / scrollMs) * (W + w);
         y = it.lane * (fontPx + 4) + 2;
         if (x < -w) continue;
       } else {
-        if (age > STATIC_MS) continue;
-        alpha = age > STATIC_MS - 600 ? (STATIC_MS - age) / 600 : 1;
+        if (age > staticMs) continue;
+        alpha = age > staticMs - 600 ? (staticMs - age) / 600 : 1;
         y = it.mode === "top" ? it.lane * (fontPx + 4) + 2 : H - (it.lane + 1) * (fontPx + 4) - 6;
         x = (W - w) / 2;
       }
@@ -2357,6 +2421,8 @@ const DanmakuOverlay = (() => {
     load(list) {
       this.clear();
       timeOffsetSec = 0;
+      const delayEl = $("dm-delay-val");
+      if (delayEl) delayEl.textContent = "0.0s";
       events = [...list].sort((a, b) => a.time_ms - b.time_ms);
       this.setEnabled(this.enabled);
     },
@@ -2385,13 +2451,34 @@ const DanmakuOverlay = (() => {
       if (!on && raf != null) { cancelAnimationFrame(raf); raf = null; }
     },
     adjustOffset(deltaSec) {
-      timeOffsetSec += deltaSec;
+      timeOffsetSec = Math.round((timeOffsetSec + deltaSec) * 10) / 10;
       this.seekTo(vid().currentTime);
       const sign = timeOffsetSec > 0 ? "+" : "";
-      showPlayerOsd(`弹幕时间微调：${sign}${timeOffsetSec}s`);
+      const delayEl = $("dm-delay-val");
+      if (delayEl) delayEl.textContent = `${sign}${timeOffsetSec.toFixed(1)}s`;
+      showPlayerOsd(`弹幕时间微调：${sign}${timeOffsetSec.toFixed(1)}s`);
+    },
+    resetOffset() {
+      timeOffsetSec = 0.0;
+      this.seekTo(vid().currentTime);
+      const delayEl = $("dm-delay-val");
+      if (delayEl) delayEl.textContent = "0.0s";
+      showPlayerOsd("弹幕时间已重置为 0.0s");
     },
     setOpacity(val) {
       opacity = val;
+    },
+    setAreaRatio(ratio) {
+      areaRatio = ratio;
+      resetLanes();
+    },
+    setFontScale(scale) {
+      fontScale = scale;
+      resize();
+      resetLanes();
+    },
+    setSpeedMs(ms) {
+      scrollMs = ms;
     },
     enabled: false,
     resize,
@@ -2782,10 +2869,12 @@ const visualState = {
   rotateDeg: 0,
   filter: localStorage.getItem("ani_visual_filter") || "none",
   autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
+  autoSkipEd: parseInt(localStorage.getItem("ani_auto_skip_ed") || "0", 10),
   abLoop: { a: null, b: null, active: false },
 };
 
 let opAutoSkipped = false;
+let edAutoSkipped = false;
 
 const ASPECT_LABELS = {
   default: "自适应",
@@ -2880,8 +2969,13 @@ function applyVisualEffects(notify = false) {
   }
   const autoSkipBtn = $("btn-auto-skip-op");
   if (autoSkipBtn) {
-    autoSkipBtn.textContent = `自动跳过: ${visualState.autoSkipOp ? "开" : "关"}`;
+    autoSkipBtn.textContent = `自动跳过 OP: ${visualState.autoSkipOp ? "开" : "关"}`;
     autoSkipBtn.classList.toggle("active", visualState.autoSkipOp);
+  }
+  const autoSkipEdBtn = $("btn-auto-skip-ed");
+  if (autoSkipEdBtn) {
+    autoSkipEdBtn.textContent = visualState.autoSkipEd > 0 ? `跳过片尾: ${visualState.autoSkipEd}s` : "跳过片尾: 关";
+    autoSkipEdBtn.classList.toggle("active", visualState.autoSkipEd > 0);
   }
 
   if (notify) {
@@ -3191,6 +3285,7 @@ function destroyPlayer() {
   if (pipBtn) pipBtn.classList.remove("active");
   clearAbLoop(false);
   opAutoSkipped = false;
+  edAutoSkipped = false;
   v.removeAttribute("src");
   v.load();
 }
@@ -3407,6 +3502,20 @@ $("video").addEventListener("timeupdate", () => {
     skipOp(90);
   }
 
+  // 自动跳过片尾（若开启，在离结尾还有 autoSkipEd 秒时自动跳过并连播）
+  if (
+    visualState.autoSkipEd > 0 &&
+    !edAutoSkipped &&
+    v.duration > 180 &&
+    v.currentTime >= (v.duration - visualState.autoSkipEd) &&
+    !v.paused
+  ) {
+    edAutoSkipped = true;
+    showPlayerOsd(`⏭ 已自动跳过片尾 (-${visualState.autoSkipEd}s)`);
+    toast("已跳过片尾，自动连播下一集…", true);
+    v.currentTime = v.duration;
+  }
+
   // 开播 0.5s ~ 15s 展示悬浮跳过片头胶囊（自动跳过开启时不展示）
   const capsule = $("player-skip-capsule");
   if (capsule) {
@@ -3516,31 +3625,115 @@ function danmakuOpacity() {
 function syncDanmakuToggle() {
   const op = danmakuOpacity();
   const on = op > 0;
-  $("player-danmaku").textContent = on ? `弹幕 ${Math.round(op * 100)}%` : "弹幕 关";
+  const btn = $("player-danmaku");
+  if (btn) {
+    btn.textContent = on ? `弹幕 ${Math.round(op * 100)}%` : "弹幕 关";
+    btn.classList.toggle("active", on);
+  }
   DanmakuOverlay.setOpacity(op);
   DanmakuOverlay.setEnabled(on);
+  syncDanmakuMenuUI();
 }
 
-$("player-danmaku").onclick = () => {
-  const cur = danmakuOpacity();
-  const idx = DM_OPACITIES.findIndex((o) => Math.abs(o - cur) < 0.05);
-  const nextIdx = (idx + 1) % DM_OPACITIES.length;
-  const next = DM_OPACITIES[nextIdx];
-  localStorage.setItem("ani_dm_opacity", String(next));
-  localStorage.setItem("ani_dm", next > 0 ? "1" : "0");
+function syncDanmakuMenuUI() {
+  const op = danmakuOpacity();
+  const curArea = parseFloat(localStorage.getItem("ani_dm_area") || "0.5");
+  const curSize = localStorage.getItem("ani_dm_size") || "md";
+  const curSpeed = parseInt(localStorage.getItem("ani_dm_speed") || "6000", 10);
+
+  document.querySelectorAll(".dm-opacity-opt").forEach((btn) => {
+    btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.opacity) - op) < 0.05);
+  });
+  document.querySelectorAll(".dm-area-opt").forEach((btn) => {
+    btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.area) - curArea) < 0.05);
+  });
+  document.querySelectorAll(".dm-size-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.size === curSize);
+  });
+  document.querySelectorAll(".dm-speed-opt").forEach((btn) => {
+    btn.classList.toggle("active", parseInt(btn.dataset.speed, 10) === curSpeed);
+  });
+}
+
+function setDanmakuOpacity(op, notify = true) {
+  localStorage.setItem("ani_dm_opacity", String(op));
+  localStorage.setItem("ani_dm", op > 0 ? "1" : "0");
   if (settingsState.data?.danmaku_source) {
-    settingsState.data.danmaku_source.enabled = next > 0;
+    settingsState.data.danmaku_source.enabled = op > 0;
     scheduleSave();
   }
   syncDanmakuToggle();
-  if (next > 0) {
-    toast(`弹幕不透明度：${Math.round(next * 100)}%`, true);
-    showPlayerOsd(`弹幕不透明度: ${Math.round(next * 100)}%`);
-  } else {
-    toast("弹幕已关闭", true);
-    showPlayerOsd("弹幕已关闭");
+  if (notify) {
+    if (op > 0) {
+      toast(`弹幕不透明度：${Math.round(op * 100)}%`, true);
+      showPlayerOsd(`弹幕不透明度: ${Math.round(op * 100)}%`);
+    } else {
+      toast("弹幕已关闭", true);
+      showPlayerOsd("弹幕已关闭");
+    }
   }
-};
+}
+
+function setDanmakuArea(area) {
+  localStorage.setItem("ani_dm_area", String(area));
+  DanmakuOverlay.setAreaRatio(area);
+  syncDanmakuMenuUI();
+  const names = { "0.25": "1/4 顶", "0.5": "半屏", "1": "满屏", "1.0": "满屏" };
+  showPlayerOsd(`弹幕显示区域: ${names[String(area)] || area}`);
+}
+
+function setDanmakuSize(size) {
+  localStorage.setItem("ani_dm_size", size);
+  DanmakuOverlay.setFontScale(size);
+  syncDanmakuMenuUI();
+  const names = { sm: "小", md: "中", lg: "大" };
+  showPlayerOsd(`弹幕字号: ${names[size] || size}`);
+}
+
+function setDanmakuSpeed(speedMs) {
+  localStorage.setItem("ani_dm_speed", String(speedMs));
+  DanmakuOverlay.setSpeedMs(speedMs);
+  syncDanmakuMenuUI();
+  const names = { 8000: "慢速", 6000: "正常", 4000: "快速" };
+  showPlayerOsd(`弹幕飘字速度: ${names[speedMs] || (speedMs + "ms")}`);
+}
+
+const dmBtn = $("player-danmaku");
+const dmMenu = $("danmaku-menu");
+if (dmBtn && dmMenu) {
+  dmBtn.onclick = (e) => {
+    e.stopPropagation();
+    dmMenu.classList.toggle("hidden");
+    syncDanmakuMenuUI();
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".player-danmaku-wrap")) {
+      dmMenu.classList.add("hidden");
+    }
+  });
+}
+
+document.querySelectorAll(".dm-opacity-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuOpacity(parseFloat(btn.dataset.opacity));
+});
+document.querySelectorAll(".dm-area-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuArea(parseFloat(btn.dataset.area));
+});
+document.querySelectorAll(".dm-size-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuSize(btn.dataset.size);
+});
+document.querySelectorAll(".dm-speed-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuSpeed(parseInt(btn.dataset.speed, 10));
+});
+
+const dmDelayMinus = $("dm-delay-minus");
+if (dmDelayMinus) dmDelayMinus.onclick = () => DanmakuOverlay.adjustOffset(-0.5);
+const dmDelayPlus = $("dm-delay-plus");
+if (dmDelayPlus) dmDelayPlus.onclick = () => DanmakuOverlay.adjustOffset(0.5);
+const dmDelayReset = $("dm-delay-reset");
+if (dmDelayReset) dmDelayReset.onclick = () => DanmakuOverlay.resetOffset();
+
+syncDanmakuMenuUI();
 
 // seek 后重定位弹幕游标；窗口尺寸变化时重排画布
 $("video").addEventListener("seeked", () => DanmakuOverlay.seekTo($("video").currentTime));
@@ -3950,6 +4143,19 @@ if (btnAutoSkipOp) {
   };
 }
 
+const btnAutoSkipEd = $("btn-auto-skip-ed");
+if (btnAutoSkipEd) {
+  const ED_CYCLE = [0, 60, 90];
+  btnAutoSkipEd.onclick = () => {
+    const idx = ED_CYCLE.indexOf(visualState.autoSkipEd);
+    const next = ED_CYCLE[(idx + 1) % ED_CYCLE.length];
+    visualState.autoSkipEd = next;
+    localStorage.setItem("ani_auto_skip_ed", String(next));
+    applyVisualEffects();
+    showPlayerOsd(next > 0 ? `跳过片尾: ${next}s` : "跳过片尾: 关闭");
+  };
+}
+
 const btnAbA = $("btn-ab-a");
 if (btnAbA) btnAbA.onclick = () => setAbPointA();
 const btnAbB = $("btn-ab-b");
@@ -4000,7 +4206,7 @@ document.addEventListener("keydown", (e) => {
   const keys = [
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
-    "w", "W", "s", "S", "c", "C", "p", "P", "[", "]", "\\", "-", "=", "_", "+",
+    "w", "W", "s", "S", "c", "C", "p", "P", "d", "D", "[", "]", "\\", "-", "=", "_", "+",
     ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
@@ -4076,11 +4282,19 @@ document.addEventListener("keydown", (e) => {
     case "s": case "S": skipOp(90); break;
     case "c": case "C": captureVideoFrame(); break;
     case "p": case "P": togglePiP(); break;
+    case "d": case "D": {
+      const dmMenu = $("danmaku-menu");
+      if (dmMenu) {
+        dmMenu.classList.toggle("hidden");
+        syncDanmakuMenuUI();
+      }
+      break;
+    }
     case "[": setAbPointA(); break;
     case "]": setAbPointB(); break;
     case "\\": clearAbLoop(); break;
-    case "-": case "_": DanmakuOverlay.adjustOffset(-1); break;
-    case "=": case "+": DanmakuOverlay.adjustOffset(1); break;
+    case "-": case "_": DanmakuOverlay.adjustOffset(-0.5); break;
+    case "=": case "+": DanmakuOverlay.adjustOffset(0.5); break;
     case "f": case "F": toggleFullscreen(); break;
     case "n": case "N": playNextEpisode(); break;
     case "e": case "E": toggleEpDrawer(); break;

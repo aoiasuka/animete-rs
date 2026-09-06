@@ -72,6 +72,19 @@ pub struct SubjectCharacter {
     pub actors: Vec<CharacterActor>,
 }
 
+/// 条目关联作品信息（前传/续集/剧场版/外传等）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RelatedSubject {
+    pub id: u32,
+    pub name: String,
+    #[serde(default)]
+    pub name_cn: String,
+    pub relation: String,
+    pub subject_type: u8,
+    #[serde(default)]
+    pub cover_url: Option<String>,
+}
+
 /// 一天的放送日程（对应 /calendar 的数组元素）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarDay {
@@ -386,6 +399,67 @@ impl BangumiSource {
 
         Ok(list)
     }
+
+    /// 查询条目关联作品列表（前传/续集/总集篇/衍生等，动画优先）。
+    pub async fn related_subjects(
+        &self,
+        SubjectId(id): SubjectId,
+    ) -> Result<Vec<RelatedSubject>, UserError> {
+        #[derive(serde::Deserialize)]
+        struct RelatedItem {
+            id: u32,
+            name: String,
+            #[serde(default)]
+            name_cn: String,
+            relation: String,
+            #[serde(rename = "type")]
+            subject_type: u8,
+            #[serde(default)]
+            images: Option<Images>,
+        }
+
+        let resp: Vec<RelatedItem> = self
+            .http
+            .get(format!("{API}/v0/subjects/{id}/subjects"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut list: Vec<RelatedSubject> = resp
+            .into_iter()
+            .map(|item| {
+                let cover_url = item
+                    .images
+                    .and_then(|img| best_cover(&img))
+                    .map(|u| u.to_string());
+                RelatedSubject {
+                    id: item.id,
+                    name: item.name,
+                    name_cn: item.name_cn,
+                    relation: item.relation,
+                    subject_type: item.subject_type,
+                    cover_url,
+                }
+            })
+            .collect();
+
+        // 排序规则：动画 (subject_type == 2) 优先排前，
+        // 关系优先级：续集 (0) = 前传 (0) > 总集篇 (1) = 番外篇 (1) > 相同世界观 (2) = 衍生 (2) > 其它 (3)
+        list.sort_by_key(|r| {
+            let type_rank = if r.subject_type == 2 { 0 } else { 1 };
+            let relation_rank = match r.relation.as_str() {
+                "前传" | "续集" => 0,
+                "总集篇" | "番外篇" | "片头片尾" => 1,
+                "相同世界观" | "衍生" | "系列" => 2,
+                _ => 3,
+            };
+            (type_rank, relation_rank)
+        });
+
+        Ok(list)
+    }
 }
 
 #[async_trait]
@@ -487,5 +561,59 @@ mod tests {
         assert_eq!(chars[1].name, "费伦");
         assert_eq!(chars[2].name, "闲人甲");
         assert_eq!(chars[0].actors[0].name, "种崎敦美");
+    }
+
+    #[test]
+    fn related_subjects_sorting_priority() {
+        let mut list = [
+            RelatedSubject {
+                id: 10,
+                name: "原声音乐集".into(),
+                name_cn: "".into(),
+                relation: "原声集".into(),
+                subject_type: 3, // 音乐
+                cover_url: None,
+            },
+            RelatedSubject {
+                id: 20,
+                name: "第二季".into(),
+                name_cn: "第二季".into(),
+                relation: "续集".into(),
+                subject_type: 2, // 动画
+                cover_url: Some("http://example.com/s2.jpg".into()),
+            },
+            RelatedSubject {
+                id: 30,
+                name: "剧场版 总集篇".into(),
+                name_cn: "剧场版".into(),
+                relation: "总集篇".into(),
+                subject_type: 2, // 动画
+                cover_url: None,
+            },
+            RelatedSubject {
+                id: 40,
+                name: "衍生同人小说".into(),
+                name_cn: "".into(),
+                relation: "衍生".into(),
+                subject_type: 1, // 书籍
+                cover_url: None,
+            },
+        ];
+
+        list.sort_by_key(|r| {
+            let type_rank = if r.subject_type == 2 { 0 } else { 1 };
+            let relation_rank = match r.relation.as_str() {
+                "前传" | "续集" => 0,
+                "总集篇" | "番外篇" | "片头片尾" => 1,
+                "相同世界观" | "衍生" | "系列" => 2,
+                _ => 3,
+            };
+            (type_rank, relation_rank)
+        });
+
+        assert_eq!(list[0].id, 20); // 动画 续集
+        assert_eq!(list[1].id, 30); // 动画 总集篇
+        assert_eq!(list[2].id, 40); // 书籍 衍生
+        assert_eq!(list[3].id, 10); // 音乐 原声集
     }
 }

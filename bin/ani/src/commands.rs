@@ -92,6 +92,17 @@ pub async fn get_subject_characters(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn get_related_subjects(
+    ctx: State<'_, AppContext>,
+    subject_id: u32,
+) -> Result<Vec<ds_bangumi::RelatedSubject>, String> {
+    ctx.bgm
+        .related_subjects(ani_core::SubjectId(subject_id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 向所有启用源并发检索 + 自动选源（对应 domain/media/fetch + MediaSelectorAutoSelect）。
 #[tauri::command]
 pub async fn fetch_medias(

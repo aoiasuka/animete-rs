@@ -1799,6 +1799,74 @@ main {
   background: var(--accent-gradient);
 }
 
+/* 弹幕高级调谐控制与菜单 */
+.player-danmaku-wrap {
+  position: relative;
+}
+
+.danmaku-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(20px);
+  z-index: 1000;
+  padding: 12px;
+  animation: fadeInDown 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.danmaku-menu-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.danmaku-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.danmaku-menu-row:last-child {
+  margin-bottom: 0;
+}
+
+.danmaku-menu-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.dm-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dm-btn-group button {
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+.dm-opacity-opt.active,
+.dm-area-opt.active,
+.dm-size-opt.active,
+.dm-speed-opt.active {
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  font-weight: 600;
+}
+
 /* 外挂字幕控制与菜单 */
 .player-sub-wrap {
   position: relative;
@@ -2813,6 +2881,141 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 90px;
+}
+
+/* ---------- 关联作品展台 (Ani 6.0 特性) ---------- */
+.related-wrap {
+  margin-top: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+}
+
+.related-head-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.related-head-row h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+}
+
+.related-list {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+}
+
+.related-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.related-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+
+.related-card {
+  flex: 0 0 130px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.2s, border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+}
+
+.related-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px var(--accent-glow, rgba(139, 92, 246, 0.2));
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.related-cover-wrap {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.4);
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.related-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s;
+}
+
+.related-card:hover .related-cover {
+  transform: scale(1.05);
+}
+
+.related-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.9);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.related-badge.sequel {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+}
+
+.related-badge.prequel {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.related-badge.movie {
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+}
+
+.related-badge.other {
+  background: rgba(100, 116, 139, 0.85);
+}
+
+.related-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.related-sub-title {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 114px;
+  margin-top: 3px;
 }
 
 /* ---------- 播放统计信息面板 (Stats for Nerds) ---------- */
