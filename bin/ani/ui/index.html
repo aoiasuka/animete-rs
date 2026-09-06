@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ani-rs 追番</title>
   <link rel="stylesheet" href="style.css" />
+  <script>
+    (function() {
+      try {
+        const theme = localStorage.getItem("ani_theme_mode") || "dark";
+        const accent = localStorage.getItem("ani_accent_color") || "violet";
+        document.documentElement.setAttribute("data-theme", theme);
+        document.documentElement.setAttribute("data-accent", accent);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar" data-tauri-drag-region>
@@ -200,6 +210,7 @@
       <div class="settings-layout">
         <nav class="settings-nav">
           <div class="nav-item active" data-pane="selector">选源偏好</div>
+          <div class="nav-item" data-pane="appearance">外观与主题</div>
           <div class="nav-item" data-pane="sources">数据源</div>
           <div class="nav-item" data-pane="torrent">BT 下载</div>
           <div class="nav-item" data-pane="danmaku">弹幕</div>
@@ -211,6 +222,18 @@
         <div class="settings-panes">
           <!-- 选源偏好 -->
           <div class="pane" id="pane-selector">
+            <div class="row">
+              <div class="row-label">
+                <div class="row-title">字幕语言偏好</div>
+                <div class="row-desc">优先匹配指定语言版本（自动加权打分）</div>
+              </div>
+              <select id="set-sub-lang" class="select">
+                <option value="any">不限 (默认)</option>
+                <option value="simplified">简体中文 (CHS/GB/简日)</option>
+                <option value="traditional">繁体中文 (CHT/BIG5/繁日)</option>
+                <option value="raw">生肉 / 无字幕 (RAW)</option>
+              </select>
+            </div>
             <div class="row">
               <div class="row-label">
                 <div class="row-title">字幕组偏好</div>
@@ -256,6 +279,76 @@
                 <div class="row-desc">命中的字幕组资源直接排除</div>
               </div>
               <div class="tag-editor" id="tags-blacklist-group"></div>
+            </div>
+          </div>
+
+          <!-- 外观与主题 -->
+          <div class="pane hidden" id="pane-appearance">
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">主题视觉模式</div>
+                <div class="row-desc">切换契合环境的界面基调与对比度</div>
+              </div>
+              <div class="theme-cards-grid">
+                <div class="theme-card active" data-theme="dark">
+                  <div class="theme-preview theme-preview-dark">
+                    <span class="preview-bar"></span>
+                    <span class="preview-box"></span>
+                  </div>
+                  <div class="theme-info">
+                    <span class="theme-name">深邃夜空 (默认)</span>
+                    <span class="theme-sub">优雅深蓝灰质感与流光半透明</span>
+                  </div>
+                </div>
+                <div class="theme-card" data-theme="oled">
+                  <div class="theme-preview theme-preview-oled">
+                    <span class="preview-bar"></span>
+                    <span class="preview-box"></span>
+                  </div>
+                  <div class="theme-info">
+                    <span class="theme-name">极夜 OLED</span>
+                    <span class="theme-sub">纯黑高对比度，极致省电护眼</span>
+                  </div>
+                </div>
+                <div class="theme-card" data-theme="light">
+                  <div class="theme-preview theme-preview-light">
+                    <span class="preview-bar"></span>
+                    <span class="preview-box"></span>
+                  </div>
+                  <div class="theme-info">
+                    <span class="theme-name">晨曦雅白</span>
+                    <span class="theme-sub">明快清雅，白天环境阅读更舒适</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="row col">
+              <div class="row-label">
+                <div class="row-title">个性化强调色</div>
+                <div class="row-desc">全应用按钮高亮、焦点光环与渐变流光色调</div>
+              </div>
+              <div class="accent-palette-row">
+                <button class="accent-pill active" data-accent="violet" title="赛博紫罗兰 (默认)" style="--pill-color: #8b5cf6;">
+                  <span class="accent-dot"></span>
+                  <span class="accent-name">紫罗兰</span>
+                </button>
+                <button class="accent-pill" data-accent="blue" title="蔚蓝苍穹" style="--pill-color: #38bdf8;">
+                  <span class="accent-dot"></span>
+                  <span class="accent-name">蔚蓝</span>
+                </button>
+                <button class="accent-pill" data-accent="emerald" title="极光翡翠" style="--pill-color: #10b981;">
+                  <span class="accent-dot"></span>
+                  <span class="accent-name">翡翠</span>
+                </button>
+                <button class="accent-pill" data-accent="sakura" title="落樱浪漫" style="--pill-color: #ec4899;">
+                  <span class="accent-dot"></span>
+                  <span class="accent-name">落樱</span>
+                </button>
+                <button class="accent-pill" data-accent="amber" title="琥珀日落" style="--pill-color: #f59e0b;">
+                  <span class="accent-dot"></span>
+                  <span class="accent-name">琥珀</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -487,6 +580,7 @@
         <span id="player-time" class="meta mono">0:00 / 0:00</span>
         <select id="player-quality" class="select hidden" title="画质"></select>
         <button id="player-next-ep" class="ghost small hidden" title="下一集 (快捷键 N)">下一集 ⏭</button>
+        <button id="player-ep-drawer-btn" class="ghost small" title="选集列表 (快捷键 E)">选集 📑</button>
         <button id="player-danmaku" class="ghost small" title="切换弹幕透明度">弹幕 关</button>
         <div class="player-sub-wrap">
           <button id="player-sub-btn" class="ghost small" title="外挂字幕设置与加载 (支持拖拽 .srt/.vtt 到播放器)">字幕 关</button>
@@ -532,6 +626,21 @@
             <button id="stats-osd-close" class="ghost small" title="关闭 (I)">✕</button>
           </div>
           <div id="stats-osd-grid" class="stats-osd-grid"></div>
+        </div>
+        <div id="player-ep-drawer" class="player-ep-drawer hidden">
+          <div class="ep-drawer-head">
+            <div class="ep-drawer-title">
+              <span>快速选集</span>
+              <span id="ep-drawer-count" class="meta"></span>
+            </div>
+            <button id="ep-drawer-close" class="ghost small" title="关闭 (Esc / E)">✕</button>
+          </div>
+          <div class="ep-drawer-tabs">
+            <button class="ep-drawer-tab active" data-kind="all">全部</button>
+            <button class="ep-drawer-tab" data-kind="main">正片</button>
+            <button class="ep-drawer-tab" data-kind="sp">SP/特别</button>
+          </div>
+          <div id="ep-drawer-list" class="ep-drawer-list"></div>
         </div>
       </div>
       <div class="player-url">
@@ -580,6 +689,7 @@
           <div class="sg-item"><span class="sg-desc">降低 / 提高播放倍速</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">全屏 / 退出全屏（弹幕跟随）</span><kbd>F</kbd></div>
           <div class="sg-item"><span class="sg-desc">播放下一集</span><kbd>N</kbd></div>
+          <div class="sg-item"><span class="sg-desc">滑出 / 收起选集抽屉</span><kbd>E</kbd></div>
           <div class="sg-item"><span class="sg-desc">显示 / 隐藏播放统计信息</span><kbd>I</kbd></div>
           <div class="sg-item"><span class="sg-desc">双击视频区域</span><span>全屏切换</span></div>
         </div>

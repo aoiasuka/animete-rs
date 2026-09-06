@@ -62,6 +62,105 @@
   --transition-normal: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* ==================== 多主题模式 (Theme Modes) ==================== */
+/* 极夜 OLED 模式 (纯黑省电、极致对比) */
+html[data-theme="oled"] {
+  --bg-base: #000000;
+  --bg-subtle: #080808;
+  --bg-surface: #101010;
+  --bg-surface-hover: #181818;
+  --bg-card: rgba(16, 16, 16, 0.9);
+  --bg-card-hover: rgba(26, 26, 26, 0.95);
+  --bg-glass: rgba(0, 0, 0, 0.88);
+  --bg-glass-card: rgba(16, 16, 16, 0.85);
+
+  --line-subtle: rgba(255, 255, 255, 0.08);
+  --line: rgba(255, 255, 255, 0.14);
+  --line-strong: rgba(255, 255, 255, 0.22);
+
+  --text-main: #ffffff;
+  --text-sub: #d1d5db;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.8);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.9);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.95);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.9);
+}
+
+/* 晨曦雅白 模式 (明亮温润、清雅护眼) */
+html[data-theme="light"] {
+  --bg-base: #f8fafc;
+  --bg-subtle: #f1f5f9;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #e2e8f0;
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --bg-card-hover: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.85);
+  --bg-glass-card: rgba(255, 255, 255, 0.88);
+
+  --line-subtle: rgba(0, 0, 0, 0.05);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --line-focus: rgba(99, 102, 241, 0.5);
+
+  --text-main: #0f172a;
+  --text-sub: #334155;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.09);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* ==================== 个性化强调色系统 (Accent Color Palettes) ==================== */
+/* 蔚蓝苍穹 (Blue) */
+html[data-accent="blue"] {
+  --accent: #0ea5e9;
+  --accent-light: #38bdf8;
+  --accent-secondary: #2563eb;
+  --accent-gradient: linear-gradient(135deg, #0284c7 0%, #38bdf8 55%, #60a5fa 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #0369a1 0%, #0ea5e9 55%, #3b82f6 100%);
+  --accent-glow: 0 4px 20px rgba(56, 189, 248, 0.35);
+  --line-focus: rgba(56, 189, 248, 0.55);
+}
+
+/* 极光翡翠 (Emerald) */
+html[data-accent="emerald"] {
+  --accent: #10b981;
+  --accent-light: #34d399;
+  --accent-secondary: #059669;
+  --accent-gradient: linear-gradient(135deg, #059669 0%, #10b981 55%, #34d399 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #047857 0%, #059669 55%, #10b981 100%);
+  --accent-glow: 0 4px 20px rgba(16, 185, 129, 0.35);
+  --line-focus: rgba(16, 185, 129, 0.55);
+}
+
+/* 落樱浪漫 (Sakura) */
+html[data-accent="sakura"] {
+  --accent: #ec4899;
+  --accent-light: #f472b6;
+  --accent-secondary: #db2777;
+  --accent-gradient: linear-gradient(135deg, #f43f5e 0%, #ec4899 55%, #d946ef 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #e11d48 0%, #db2777 55%, #c026d3 100%);
+  --accent-glow: 0 4px 20px rgba(236, 72, 153, 0.35);
+  --line-focus: rgba(236, 72, 153, 0.55);
+}
+
+/* 琥珀日落 (Amber) */
+html[data-accent="amber"] {
+  --accent: #f59e0b;
+  --accent-light: #fbbf24;
+  --accent-secondary: #d97706;
+  --accent-gradient: linear-gradient(135deg, #ea580c 0%, #f59e0b 55%, #fbbf24 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #c2410c 0%, #d97706 55%, #f59e0b 100%);
+  --accent-glow: 0 4px 20px rgba(245, 158, 11, 0.35);
+  --line-focus: rgba(245, 158, 11, 0.55);
+}
+
 /* Base resets & typography */
 * {
   box-sizing: border-box;
@@ -2570,4 +2669,291 @@ main {
   text-align: right;
   word-break: break-all;
 }
+
+/* ---------- 外观与主题面板 ---------- */
+.theme-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.theme-card {
+  background: var(--bg-surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.theme-card:hover {
+  border-color: var(--line-focus);
+  transform: translateY(-2px);
+}
+
+.theme-card.active {
+  border-color: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+
+.theme-preview {
+  height: 68px;
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line-subtle);
+}
+
+.theme-preview-dark {
+  background: #0a0d14;
+}
+.theme-preview-oled {
+  background: #000000;
+}
+.theme-preview-light {
+  background: #f8fafc;
+}
+
+.preview-bar {
+  height: 10px;
+  width: 50%;
+  border-radius: 4px;
+  background: var(--accent);
+}
+.preview-box {
+  height: 32px;
+  width: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.theme-preview-light .preview-box {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.theme-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.theme-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-main);
+}
+.theme-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.accent-palette-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.accent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  border: 1.5px solid var(--line);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.accent-pill:hover {
+  border-color: var(--line-focus);
+  transform: translateY(-1px);
+}
+
+.accent-pill.active {
+  border-color: var(--pill-color);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 12px var(--pill-color);
+}
+
+.accent-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--pill-color);
+  box-shadow: 0 0 6px var(--pill-color);
+}
+
+/* ---------- 播放器快速选集抽屉 (Player Episode Drawer) ---------- */
+.player-ep-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 85%;
+  background: var(--bg-glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-left: 1px solid var(--line);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform 0.28s var(--ease-spring), opacity 0.2s ease;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.player-ep-drawer.hidden {
+  display: flex !important;
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ep-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-subtle);
+  flex-shrink: 0;
+}
+
+.ep-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ep-drawer-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.ep-drawer-tab {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ep-drawer-tab:hover {
+  color: var(--text-main);
+}
+
+.ep-drawer-tab.active {
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.ep-drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ep-drawer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--line-subtle);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.ep-drawer-item:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--line-focus);
+  transform: translateX(-2px);
+}
+
+.ep-drawer-item.playing {
+  border-color: var(--accent);
+  background: rgba(109, 139, 248, 0.15);
+  box-shadow: 0 0 10px rgba(109, 139, 248, 0.2);
+}
+
+.ep-drawer-item-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ep-drawer-item-no {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-light);
+  flex-shrink: 0;
+}
+
+.ep-drawer-item-title {
+  font-size: 12px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-drawer-item-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+.ep-drawer-item-badge.now-playing {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.ep-drawer-item-badge.watched-check {
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ep-drawer-empty {
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 

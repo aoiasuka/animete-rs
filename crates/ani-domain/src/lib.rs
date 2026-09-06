@@ -11,11 +11,24 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashSet;
 
+/// 字幕语言偏好
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SubtitleLanguage {
+    #[default]
+    Any,
+    Simplified,
+    Traditional,
+    Raw,
+}
+
 /// 用户偏好（对应 MediaPreferenceItem / MediaSelectorSubtitlePreferences）。
 /// 由"用户手选一次 → 存为偏好"（MediaSelectorEventSavePreferenceUseCase）持续学习。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MediaPreference {
+    /// 字幕语言偏好
+    pub subtitle_lang: SubtitleLanguage,
     /// 字幕组白名单（模糊匹配，大小写不敏感）
     pub subtitle_group: Option<String>,
     /// 期望分辨率（按高度比接近度打分）
@@ -52,9 +65,94 @@ impl SelectorContext {
     }
 }
 
+/// 检测资源是否具有某种字幕语言特征：(is_simplified, is_traditional, is_raw)
+pub fn detect_subtitle_features(media: &Media) -> (bool, bool, bool) {
+    let sub_lang = media
+        .properties
+        .subtitle_language
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
+    let title = media.title.to_lowercase();
+
+    // 简中特征（标题或属性）
+    let is_chs = sub_lang.contains("chs")
+        || sub_lang.contains("gb")
+        || sub_lang.contains("sc")
+        || sub_lang.contains("simplified")
+        || sub_lang.contains("zh-hans")
+        || sub_lang.contains("zh-cn")
+        || title.contains("chs")
+        || title.contains("gb")
+        || title.contains("简中")
+        || title.contains("简日")
+        || title.contains("简繁")
+        || title.contains("简体")
+        || title.contains("[简]")
+        || title.contains("【简】")
+        || title.contains("gbk");
+
+    // 繁中特征（标题或属性）
+    let is_cht = sub_lang.contains("cht")
+        || sub_lang.contains("big5")
+        || sub_lang.contains("tc")
+        || sub_lang.contains("traditional")
+        || sub_lang.contains("zh-hant")
+        || sub_lang.contains("zh-tw")
+        || sub_lang.contains("zh-hk")
+        || title.contains("cht")
+        || title.contains("big5")
+        || title.contains("繁中")
+        || title.contains("繁日")
+        || title.contains("繁体")
+        || title.contains("[繁]")
+        || title.contains("【繁】");
+
+    // 生肉特征（无字幕）
+    let is_raw = !is_chs
+        && !is_cht
+        && (title.contains("raw")
+            || title.contains("生肉")
+            || title.contains("无字幕")
+            || title.contains("無字幕")
+            || sub_lang.contains("raw")
+            || sub_lang.contains("none"));
+
+    (is_chs, is_cht, is_raw)
+}
+
 /// 评分函数（对应蓝图 7.2）。
 pub fn score(media: &Media, pref: &MediaPreference, ctx: &SelectorContext) -> f32 {
     let mut s = ctx.source_tier(media) * 10.0;
+
+    // 字幕语言偏好打分（加权 +6.0，非首选 -2.0，生肉遇熟肉 -4.0）
+    if pref.subtitle_lang != SubtitleLanguage::Any {
+        let (is_chs, is_cht, is_raw) = detect_subtitle_features(media);
+        match pref.subtitle_lang {
+            SubtitleLanguage::Simplified => {
+                if is_chs {
+                    s += 6.0;
+                } else if is_cht || is_raw {
+                    s -= 2.0;
+                }
+            }
+            SubtitleLanguage::Traditional => {
+                if is_cht {
+                    s += 6.0;
+                } else if is_chs || is_raw {
+                    s -= 2.0;
+                }
+            }
+            SubtitleLanguage::Raw => {
+                if is_raw {
+                    s += 6.0;
+                } else if is_chs || is_cht {
+                    s -= 4.0;
+                }
+            }
+            SubtitleLanguage::Any => {}
+        }
+    }
 
     // 字幕组偏好：完全匹配 +8，前缀模糊 +4
     if let (Some(want), Some(group)) = (&pref.subtitle_group, &media.properties.subtitle_group) {
@@ -566,6 +664,60 @@ mod tests {
         );
         assert_eq!(pref.subtitle_group.as_deref(), Some("AB"));
         assert_eq!(pref.resolution.unwrap().height, 1080);
+    }
+
+    #[test]
+    fn test_subtitle_lang_scoring() {
+        let ctx = SelectorContext::default();
+        let m_chs = media(
+            "[Lilith-Raws] Show - 01 [Bilibili WEB-DL 1080P][简日双语]",
+            None,
+            Some(1080),
+            "dmhy",
+        );
+        let m_cht = media(
+            "[Lilith-Raws] Show - 01 [Bilibili WEB-DL 1080P][繁日雙語]",
+            None,
+            Some(1080),
+            "dmhy",
+        );
+        let m_raw = media(
+            "[Ohys-Raws] Show - 01 (AT-X 1920x1080 x264 AAC) [RAW]",
+            None,
+            Some(1080),
+            "dmhy",
+        );
+
+        // 默认 Any：三者分数相同
+        let pref_any = MediaPreference::default();
+        assert_eq!(
+            score(&m_chs, &pref_any, &ctx),
+            score(&m_cht, &pref_any, &ctx)
+        );
+
+        // 偏好 Simplified
+        let pref_chs = MediaPreference {
+            subtitle_lang: SubtitleLanguage::Simplified,
+            ..Default::default()
+        };
+        assert!(score(&m_chs, &pref_chs, &ctx) > score(&m_cht, &pref_chs, &ctx));
+        assert!(score(&m_chs, &pref_chs, &ctx) > score(&m_raw, &pref_chs, &ctx));
+
+        // 偏好 Traditional
+        let pref_cht = MediaPreference {
+            subtitle_lang: SubtitleLanguage::Traditional,
+            ..Default::default()
+        };
+        assert!(score(&m_cht, &pref_cht, &ctx) > score(&m_chs, &pref_cht, &ctx));
+        assert!(score(&m_cht, &pref_cht, &ctx) > score(&m_raw, &pref_cht, &ctx));
+
+        // 偏好 Raw
+        let pref_raw = MediaPreference {
+            subtitle_lang: SubtitleLanguage::Raw,
+            ..Default::default()
+        };
+        assert!(score(&m_raw, &pref_raw, &ctx) > score(&m_chs, &pref_raw, &ctx));
+        assert!(score(&m_raw, &pref_raw, &ctx) > score(&m_cht, &pref_raw, &ctx));
     }
 
     #[test]
