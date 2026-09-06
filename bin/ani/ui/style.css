@@ -3360,4 +3360,194 @@ main {
   font-size: 12px;
 }
 
+/* ==========================================================================
+   条目全量详情扩展：黄金评分、排名、标签群与剧情折叠卡片
+   ========================================================================== */
+
+.subject-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.subject-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+
+.subject-badge.score {
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #f59e0b;
+}
+
+.subject-badge.score .score-star {
+  font-size: 12px;
+}
+
+.subject-badge.score .score-total {
+  font-size: 10.5px;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
+.subject-badge.rank {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: var(--accent-light);
+}
+
+.subject-badge.platform {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  color: #38bdf8;
+}
+
+.subject-badge.eps {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  color: var(--text-sub);
+}
+
+.subject-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+
+.subject-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--text-sub);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.subject-tag-chip:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.subject-synopsis-wrap {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.subject-synopsis {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-sub);
+  margin: 0;
+  white-space: pre-line;
+  transition: max-height 0.3s ease;
+}
+
+.subject-synopsis.collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.synopsis-toggle-btn {
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--accent-light);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+}
+
+.synopsis-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+/* 我的追番检索过滤工具栏 */
+.collection-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.collection-filter-input {
+  width: 120px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--line);
+  color: var(--text-main);
+  transition: all var(--transition-fast);
+}
+
+.collection-filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  width: 160px;
+}
+
+.collection-status-tabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+
+.col-tab {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all var(--transition-fast);
+}
+
+.col-tab:hover {
+  color: var(--text-main);
+}
+
+.col-tab.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 睡眠定时器高亮 */
+.visual-sleep-opt.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+
 

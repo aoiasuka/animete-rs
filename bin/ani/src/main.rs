@@ -46,6 +46,7 @@ fn main() {
             commands::episode_list,
             commands::get_subject_characters,
             commands::get_related_subjects,
+            commands::get_subject_detail,
             commands::fetch_medias,
             commands::start_torrent,
             commands::get_settings,

@@ -85,6 +85,23 @@ pub struct RelatedSubject {
     pub cover_url: Option<String>,
 }
 
+/// 条目全量详情（包含评分、排名、简介、标签、总集数等）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubjectDetail {
+    pub id: u32,
+    pub display_title: String,
+    pub original_title: String,
+    pub air_date: Option<String>,
+    pub cover_url: Option<String>,
+    pub summary: String,
+    pub score: Option<f32>,
+    pub rank: Option<u32>,
+    pub rating_total: Option<u32>,
+    pub total_episodes: Option<u32>,
+    pub platform: Option<String>,
+    pub tags: Vec<String>,
+}
+
 /// 一天的放送日程（对应 /calendar 的数组元素）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarDay {
@@ -276,6 +293,93 @@ impl BangumiSource {
             original_title: it.name,
             air_date: it.date,
             cover_url: cover,
+        })
+    }
+
+    /// 查询条目完整详情（包含评分、排名、简介、标签、集数等）。
+    pub async fn subject_full_detail(
+        &self,
+        SubjectId(id): SubjectId,
+    ) -> Result<SubjectDetail, UserError> {
+        #[derive(serde::Deserialize)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+            total: Option<u32>,
+        }
+        #[derive(serde::Deserialize)]
+        struct TagObj {
+            name: String,
+            #[serde(default)]
+            count: u32,
+        }
+        #[derive(serde::Deserialize)]
+        struct Item {
+            id: u32,
+            #[serde(default)]
+            name_cn: String,
+            name: String,
+            #[serde(default)]
+            date: Option<String>,
+            #[serde(default)]
+            images: serde_json::Value,
+            #[serde(default)]
+            summary: String,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            total_episodes: Option<u32>,
+            #[serde(default)]
+            eps: Option<u32>,
+            #[serde(default)]
+            platform: Option<String>,
+            #[serde(default)]
+            tags: Vec<TagObj>,
+        }
+
+        let it: Item = self
+            .http
+            .get(format!("{API}/v0/subjects/{id}"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let cover = serde_json::from_value::<Images>(it.images)
+            .ok()
+            .map(|img| best_cover(&img))
+            .unwrap_or(None)
+            .map(|u| u.to_string());
+
+        let mut tags = it.tags;
+        tags.sort_by_key(|b| std::cmp::Reverse(b.count));
+        let top_tags: Vec<String> = tags
+            .into_iter()
+            .filter(|t| !t.name.trim().is_empty())
+            .map(|t| t.name)
+            .take(12)
+            .collect();
+
+        let total_eps = it.eps.or(it.total_episodes);
+
+        Ok(SubjectDetail {
+            id: it.id,
+            display_title: if it.name_cn.is_empty() {
+                it.name.clone()
+            } else {
+                it.name_cn
+            },
+            original_title: it.name,
+            air_date: it.date,
+            cover_url: cover,
+            summary: it.summary.trim().to_string(),
+            score: it.rating.as_ref().and_then(|r| r.score),
+            rank: it.rating.as_ref().and_then(|r| r.rank),
+            rating_total: it.rating.as_ref().and_then(|r| r.total),
+            total_episodes: total_eps,
+            platform: it.platform,
+            tags: top_tags,
         })
     }
 
@@ -615,5 +719,95 @@ mod tests {
         assert_eq!(list[1].id, 30); // 动画 总集篇
         assert_eq!(list[2].id, 40); // 书籍 衍生
         assert_eq!(list[3].id, 10); // 音乐 原声集
+    }
+
+    #[test]
+    fn subject_detail_structure_and_tag_sorting() {
+        let json_raw = serde_json::json!({
+            "id": 400602,
+            "name": "葬送のフリーレン",
+            "name_cn": "葬送的芙莉莲",
+            "date": "2023-09-29",
+            "platform": "TV",
+            "summary": "这是剧情简介\r\n第二行内容",
+            "rating": {
+                "score": 8.5,
+                "rank": 42,
+                "total": 36127
+            },
+            "eps": 28,
+            "total_episodes": 28,
+            "tags": [
+                { "name": "奇幻", "count": 6000 },
+                { "name": "治愈", "count": 8000 },
+                { "name": "MADHOUSE", "count": 6100 }
+            ]
+        });
+
+        #[derive(serde::Deserialize)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+            total: Option<u32>,
+        }
+        #[derive(serde::Deserialize)]
+        struct TagObj {
+            name: String,
+            #[serde(default)]
+            count: u32,
+        }
+        #[derive(serde::Deserialize)]
+        struct MockItem {
+            id: u32,
+            #[serde(default)]
+            name_cn: String,
+            name: String,
+            #[serde(default)]
+            date: Option<String>,
+            #[serde(default)]
+            summary: String,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            eps: Option<u32>,
+            #[serde(default)]
+            platform: Option<String>,
+            #[serde(default)]
+            tags: Vec<TagObj>,
+        }
+
+        let it: MockItem = serde_json::from_value(json_raw).unwrap();
+        let mut tags = it.tags;
+        tags.sort_by_key(|b| std::cmp::Reverse(b.count));
+        let top_tags: Vec<String> = tags.into_iter().map(|t| t.name).collect();
+
+        let detail = SubjectDetail {
+            id: it.id,
+            display_title: if it.name_cn.is_empty() {
+                it.name.clone()
+            } else {
+                it.name_cn
+            },
+            original_title: it.name,
+            air_date: it.date,
+            cover_url: None,
+            summary: it.summary.trim().to_string(),
+            score: it.rating.as_ref().and_then(|r| r.score),
+            rank: it.rating.as_ref().and_then(|r| r.rank),
+            rating_total: it.rating.as_ref().and_then(|r| r.total),
+            total_episodes: it.eps,
+            platform: it.platform,
+            tags: top_tags,
+        };
+
+        assert_eq!(detail.id, 400602);
+        assert_eq!(detail.display_title, "葬送的芙莉莲");
+        assert_eq!(detail.score, Some(8.5));
+        assert_eq!(detail.rank, Some(42));
+        assert_eq!(detail.total_episodes, Some(28));
+        assert_eq!(detail.platform, Some("TV".into()));
+        assert_eq!(detail.tags[0], "治愈"); // highest count
+        assert_eq!(detail.tags[1], "MADHOUSE");
+        assert_eq!(detail.tags[2], "奇幻");
     }
 }

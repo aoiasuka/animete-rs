@@ -217,12 +217,80 @@ async function loadContinueWatching() {
   }
 }
 
+let colFilterState = { text: "", status: "all" };
+let cachedCollections = [];
+
+function renderCollectionsList() {
+  const grid = $("collection-grid");
+  const countEl = $("collection-count");
+  if (!grid) return;
+  const kw = colFilterState.text.toLowerCase().trim();
+  const status = colFilterState.status;
+
+  const filtered = cachedCollections.filter((item) => {
+    if (kw) {
+      const t1 = (item.display_title || item.name_cn || "").toLowerCase();
+      const t2 = (item.original_title || item.name || "").toLowerCase();
+      if (!t1.includes(kw) && !t2.includes(kw)) return false;
+    }
+    if (status !== "all") {
+      const subjectId = Number(item.id?.id ?? item.id);
+      const update = state.collectionUpdates?.[subjectId];
+      if (status === "pending") {
+        if (!update || !update.has_unwatched) return false;
+      } else if (status === "caught_up") {
+        if (update && update.has_unwatched) return false;
+      }
+    }
+    return true;
+  });
+
+  if (countEl) {
+    if (cachedCollections.length === filtered.length) {
+      countEl.textContent = `${cachedCollections.length} 部追番`;
+    } else {
+      countEl.textContent = `显示 ${filtered.length} / ${cachedCollections.length} 部`;
+    }
+  }
+
+  grid.innerHTML = "";
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column: 1 / -1; padding: 24px; text-align: center; color: var(--text-muted);">没有符合条件的追番条目</div>`;
+    return;
+  }
+  for (const item of filtered) {
+    grid.appendChild(subjectCard(item));
+  }
+}
+
 async function loadCollections() {
   const sec = $("collection-section");
   const grid = $("collection-grid");
   const countEl = $("collection-count");
   const refreshBtn = $("btn-refresh-collections");
+  const filterInput = $("collection-filter-input");
+  const statusTabs = $("collection-status-tabs");
   if (!sec || !grid) return;
+
+  if (filterInput && !filterInput.__bound) {
+    filterInput.__bound = true;
+    filterInput.oninput = () => {
+      colFilterState.text = filterInput.value;
+      renderCollectionsList();
+    };
+  }
+
+  if (statusTabs && !statusTabs.__bound) {
+    statusTabs.__bound = true;
+    statusTabs.querySelectorAll(".col-tab").forEach((tab) => {
+      tab.onclick = () => {
+        statusTabs.querySelectorAll(".col-tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        colFilterState.status = tab.getAttribute("data-status") || "all";
+        renderCollectionsList();
+      };
+    });
+  }
 
   if (refreshBtn && !refreshBtn.__bound) {
     refreshBtn.__bound = true;
@@ -254,14 +322,12 @@ async function loadCollections() {
     if (!list || !list.length) {
       sec.classList.add("hidden");
       grid.innerHTML = "";
+      cachedCollections = [];
       return;
     }
+    cachedCollections = list;
     sec.classList.remove("hidden");
-    if (countEl) countEl.textContent = `${list.length} 部追番`;
-    grid.innerHTML = "";
-    for (const item of list) {
-      grid.appendChild(subjectCard(item));
-    }
+    renderCollectionsList();
   } catch {
     sec.classList.add("hidden");
   }
@@ -571,6 +637,7 @@ async function openSubject(s) {
   $("source-errors").classList.add("hidden");
   $("episodes").innerHTML = `<div class="empty">加载中…</div>`;
   showView("detail");
+  loadFullSubjectDetail(bangumiId, my);
   loadCharacters(bangumiId, my);
   loadRelatedSubjects(bangumiId, my);
   try {
@@ -589,6 +656,10 @@ async function openSubject(s) {
   }
 }
 
+const subjectDetailCache = new Map();
+const subjectCharactersCache = new Map();
+const subjectRelatedCache = new Map();
+
 async function loadCharacters(subjectId, seq) {
   const wrap = $("characters-wrap");
   const listEl = $("characters-list");
@@ -598,9 +669,7 @@ async function loadCharacters(subjectId, seq) {
   listEl.innerHTML = "";
   if (countEl) countEl.textContent = "";
 
-  try {
-    const chars = await invoke("get_subject_characters", { subjectId });
-    if (seq !== subjectSeq) return;
+  const renderChars = (chars) => {
     if (!chars || !chars.length) {
       wrap.classList.add("hidden");
       return;
@@ -636,6 +705,18 @@ async function loadCharacters(subjectId, seq) {
       })
       .join("");
     wrap.classList.remove("hidden");
+  };
+
+  if (subjectCharactersCache.has(subjectId)) {
+    renderChars(subjectCharactersCache.get(subjectId));
+    return;
+  }
+
+  try {
+    const chars = await invoke("get_subject_characters", { subjectId });
+    if (seq !== subjectSeq) return;
+    subjectCharactersCache.set(subjectId, chars || []);
+    renderChars(chars);
   } catch (e) {
     if (seq !== subjectSeq) return;
     wrap.classList.add("hidden");
@@ -651,9 +732,7 @@ async function loadRelatedSubjects(subjectId, seq) {
   listEl.innerHTML = "";
   if (countEl) countEl.textContent = "";
 
-  try {
-    const list = await invoke("get_related_subjects", { subjectId });
-    if (seq !== subjectSeq) return;
+  const renderRelated = (list) => {
     if (!list || !list.length) {
       wrap.classList.add("hidden");
       return;
@@ -694,9 +773,109 @@ async function loadRelatedSubjects(subjectId, seq) {
     });
 
     wrap.classList.remove("hidden");
+  };
+
+  if (subjectRelatedCache.has(subjectId)) {
+    renderRelated(subjectRelatedCache.get(subjectId));
+    return;
+  }
+
+  try {
+    const list = await invoke("get_related_subjects", { subjectId });
+    if (seq !== subjectSeq) return;
+    subjectRelatedCache.set(subjectId, list || []);
+    renderRelated(list);
   } catch (e) {
     if (seq !== subjectSeq) return;
     wrap.classList.add("hidden");
+  }
+}
+
+async function loadFullSubjectDetail(subjectId, seq) {
+  const badgesEl = $("subject-badges");
+  const tagsEl = $("subject-tags");
+  const synopsisWrap = $("subject-synopsis-wrap");
+  const synopsisEl = $("subject-synopsis");
+  const synopsisToggle = $("subject-synopsis-toggle");
+
+  if (badgesEl) { badgesEl.innerHTML = ""; badgesEl.classList.add("hidden"); }
+  if (tagsEl) { tagsEl.innerHTML = ""; tagsEl.classList.add("hidden"); }
+  if (synopsisWrap) synopsisWrap.classList.add("hidden");
+  if (synopsisEl) { synopsisEl.textContent = ""; synopsisEl.classList.add("collapsed"); }
+  if (synopsisToggle) synopsisToggle.textContent = "展开简介 ▾";
+
+  const renderDetail = (detail) => {
+    if (!detail) return;
+    // 徽标栏：黄金评分、排名、媒介、总集数
+    if (badgesEl) {
+      const parts = [];
+      if (typeof detail.score === "number" && detail.score > 0) {
+        const totalStr = detail.rating_total
+          ? `<span class="score-total">(${detail.rating_total > 10000 ? (detail.rating_total / 10000).toFixed(1) + "w" : detail.rating_total}人评)</span>`
+          : "";
+        parts.push(`<span class="subject-badge score" title="Bangumi 评分"><span class="score-star">★</span> ${detail.score.toFixed(1)} ${totalStr}</span>`);
+      }
+      if (detail.rank) {
+        parts.push(`<span class="subject-badge rank" title="Bangumi 全站综合排名">Rank #${detail.rank}</span>`);
+      }
+      if (detail.platform) {
+        parts.push(`<span class="subject-badge platform">${escapeHtml(detail.platform)}</span>`);
+      }
+      if (detail.total_episodes) {
+        parts.push(`<span class="subject-badge eps">全 ${detail.total_episodes} 话</span>`);
+      }
+      if (parts.length > 0) {
+        badgesEl.innerHTML = parts.join("");
+        badgesEl.classList.remove("hidden");
+      }
+    }
+
+    // 热门标签胶囊群
+    if (tagsEl && detail.tags && detail.tags.length > 0) {
+      tagsEl.innerHTML = detail.tags
+        .map((t) => `<span class="subject-tag-chip" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`)
+        .join("");
+      tagsEl.classList.remove("hidden");
+      tagsEl.querySelectorAll(".subject-tag-chip").forEach((chip) => {
+        chip.onclick = () => {
+          const kw = chip.getAttribute("data-tag");
+          if (kw) {
+            $("search-input").value = kw;
+            const clr = $("search-clear");
+            if (clr) clr.classList.remove("hidden");
+            doSearch();
+          }
+        };
+      });
+    }
+
+    // 剧情简介
+    if (synopsisWrap && synopsisEl && detail.summary) {
+      synopsisEl.textContent = detail.summary;
+      synopsisWrap.classList.remove("hidden");
+      if (synopsisToggle) {
+        synopsisToggle.onclick = () => {
+          const isCollapsed = synopsisEl.classList.toggle("collapsed");
+          synopsisToggle.textContent = isCollapsed ? "展开简介 ▾" : "收起 ▴";
+        };
+      }
+    }
+  };
+
+  if (subjectDetailCache.has(subjectId)) {
+    renderDetail(subjectDetailCache.get(subjectId));
+    return;
+  }
+
+  try {
+    const detail = await invoke("get_subject_detail", { subjectId });
+    if (seq !== subjectSeq) return;
+    if (detail) {
+      subjectDetailCache.set(subjectId, detail);
+      renderDetail(detail);
+    }
+  } catch (e) {
+    console.warn("loadFullSubjectDetail error:", e);
   }
 }
 
@@ -2322,26 +2501,31 @@ const DanmakuOverlay = (() => {
   const cv = () => $("danmaku-canvas");
   const vid = () => $("video");
 
+  let dpr = 1;
+
   function resize() {
     const c = cv(), v = vid();
     if (!c || !v) return;
     const isFs = !!document.fullscreenElement;
-    W = c.width = v.clientWidth || window.innerWidth;
-    H = c.height = v.clientHeight || window.innerHeight;
+    dpr = Math.max(1, window.devicePixelRatio || 1);
     const rect = v.getBoundingClientRect();
     if (isFs && rect.width > 0 && rect.height > 0) {
-      W = c.width = rect.width;
-      H = c.height = rect.height;
+      W = rect.width;
+      H = rect.height;
       c.style.left = `${rect.left}px`;
       c.style.top = `${rect.top}px`;
       c.style.width = `${rect.width}px`;
       c.style.height = `${rect.height}px`;
     } else {
+      W = v.clientWidth || window.innerWidth;
+      H = v.clientHeight || window.innerHeight;
       c.style.left = "0";
       c.style.top = "0";
       c.style.width = "100%";
       c.style.height = "100%";
     }
+    c.width = Math.round(W * dpr);
+    c.height = Math.round(H * dpr);
     const mult = fontScale === "sm" ? 0.75 : fontScale === "lg" ? 1.3 : 1.0;
     fontPx = Math.round(Math.max(16, Math.min(36, Math.round(H / 22))) * mult);
   }
@@ -2381,7 +2565,9 @@ const DanmakuOverlay = (() => {
       cursor++;
     }
     lastT = now;
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.save();
+    ctx.scale(dpr, dpr);
     ctx.font = `600 ${fontPx}px "Segoe UI", "Microsoft YaHei", sans-serif`;
     ctx.textBaseline = "top";
     ctx.lineWidth = 3;
@@ -2407,7 +2593,7 @@ const DanmakuOverlay = (() => {
       ctx.fillText(it.text, x, y);
       next.push(it);
     }
-    ctx.globalAlpha = 1;
+    ctx.restore();
     items = next;
     raf = requestAnimationFrame(frame);
   }
@@ -2665,6 +2851,116 @@ async function playNextEpisode() {
   } finally {
     isSwitchingEp = false;
   }
+}
+
+function getPreviousEpisode() {
+  if (!state.episodes || !state.episodes.length || state.currentEp == null) return null;
+  const mains = state.episodes.filter((e) => e.kind === "main");
+  const list = mains.length ? mains : state.episodes;
+  const sorted = [...list].sort((a, b) => b.ep - a.ep);
+  return sorted.find((e) => e.ep < state.currentEp) || null;
+}
+
+async function playPreviousEpisode() {
+  const prevEp = getPreviousEpisode();
+  if (!prevEp) {
+    toast("已经是第一集了");
+    showPlayerOsd("已经是第一集了");
+    return;
+  }
+  if (isSwitchingEp) return;
+  isSwitchingEp = true;
+  clearTimeout(autoPlayTimer);
+  autoPlayTimer = null;
+  const epNo = prevEp.ep;
+  const epId = Number(prevEp.id?.id ?? prevEp.id);
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  state.currentEp = epNo;
+  state.currentEpId = epId;
+
+  const chips = $("episodes")?.querySelectorAll(".ep");
+  if (chips) {
+    chips.forEach((c) => {
+      const noEl = c.querySelector(".epno");
+      if (noEl && parseFloat(noEl.textContent) === epNo) {
+        c.classList.add("active");
+      } else {
+        c.classList.remove("active");
+      }
+    });
+  }
+
+  updatePlayerNextBtn();
+  showPlayerOsd(`准备第 ${epNo} 集：${prevEp.display_title}…`);
+  toast(`正在准备第 ${epNo} 集：${prevEp.display_title}…`);
+  try {
+    const sel = await invoke("fetch_medias", { subjectId, ep: epNo });
+    state.candidates = sel.candidates;
+    const best = sel.candidates.find((c) => c.type === "available") || sel.candidates[0];
+    if (!best) {
+      toast(`第 ${epNo} 集暂无可用资源`);
+      return;
+    }
+    const m = best.media;
+    const magnet = m.download?.type === "torrent" ? m.download.uri : null;
+    const httpUrl = m.download?.type === "http" ? m.download.url : null;
+    if (httpUrl) {
+      openPlayer(httpUrl, m.title);
+    } else if (magnet) {
+      startStream(magnet, m.title);
+    } else {
+      toast(`第 ${epNo} 集未找到可播放链接`);
+    }
+  } catch (err) {
+    toast(`加载第 ${epNo} 集失败：` + err);
+  } finally {
+    isSwitchingEp = false;
+  }
+}
+
+function updateMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  const sTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "动漫播放";
+  const epTitle = state.currentEp != null ? `第 ${state.currentEp} 集` : "";
+  const artist = "ani-rs 追番";
+  const artwork = [];
+  const cover = state.subject?.cover_url || state.subject?.images?.large || state.subject?.images?.common;
+  if (cover) {
+    artwork.push({
+      src: cover,
+      sizes: "512x512",
+      type: "image/jpeg",
+    });
+  }
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: epTitle ? `${sTitle} - ${epTitle}` : sTitle,
+    artist,
+    album: sTitle,
+    artwork,
+  });
+
+  try {
+    navigator.mediaSession.setActionHandler("play", () => {
+      $("video")?.play().catch(() => {});
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      $("video")?.pause();
+    });
+    navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+      const v = $("video");
+      if (v) v.currentTime = Math.max(0, v.currentTime - (details.seekOffset || 10));
+    });
+    navigator.mediaSession.setActionHandler("seekforward", (details) => {
+      const v = $("video");
+      if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + (details.seekOffset || 10));
+    });
+    navigator.mediaSession.setActionHandler("previoustrack", () => {
+      playPreviousEpisode();
+    });
+    navigator.mediaSession.setActionHandler("nexttrack", () => {
+      playNextEpisode();
+    });
+  } catch (_) {}
 }
 
 // ---------- 播放器快速选集抽屉 (Player Episode Drawer) ----------
@@ -3400,6 +3696,7 @@ function showPlayer(url, title) {
     $("player-rate").textContent = "倍速 1.0x";
   }
   v.play().catch(() => {});
+  updateMediaSession();
 
   // 弹幕：有番剧上下文时按 番名+集号 从 dandanplay 拉取（未配置时后端静默返回未匹配）
   syncDanmakuToggle();
@@ -3424,10 +3721,59 @@ async function startStream(uri, title) {
   setStatus("在线播放准备中…");
   toast("BT 边下边播：先缓冲视频头部数据…");
   try {
-    await invoke("start_torrent_stream", { uri, title, ep: state.currentEp ?? null });
+    const handle = await invoke("start_torrent_stream", { magnet: uri });
+    currentStreamHandle = handle;
+    toast("种子元数据已解析，正在缓冲视频片段…", true);
   } catch (e) {
-    setStatus("");
-    toast("启动失败：" + e);
+    setStatus("在线播放启动失败：" + e);
+    toast("在线播放失败：" + e);
+  }
+}
+
+// 视频点击播放/暂停；防抖避免双击全屏时误触发暂停/播放
+let videoClickTimer = null;
+$("video").addEventListener("click", (e) => {
+  const v = $("video");
+  const rect = v.getBoundingClientRect();
+  if (e.clientY - rect.top > rect.height - 60) return;
+  if (videoClickTimer) {
+    clearTimeout(videoClickTimer);
+    videoClickTimer = null;
+    return;
+  }
+  videoClickTimer = setTimeout(() => {
+    videoClickTimer = null;
+    if (v.paused) {
+      v.play().catch(() => {});
+      showPlayerOsd("▶ 播放");
+    } else {
+      v.pause();
+      showPlayerOsd("⏸ 暂停");
+    }
+  }, 220);
+});
+$("video").addEventListener("dblclick", () => {
+  if (videoClickTimer) {
+    clearTimeout(videoClickTimer);
+    videoClickTimer = null;
+  }
+  toggleFullscreen();
+});
+$("video").addEventListener("play", () => {
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+});
+$("video").addEventListener("pause", () => {
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+});
+
+function toggleFullscreen() {
+  const stage = document.querySelector(".player-stage") || $("video");
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else {
+    stage.requestFullscreen?.().catch(() => {
+      $("video").requestFullscreen?.().catch(() => {});
+    });
   }
 }
 
@@ -3563,32 +3909,6 @@ $("video").addEventListener("pause", () => {
   if (stageEl) stageEl.classList.remove("idle");
   clearTimeout(stageIdleTimer);
 });
-$("video").addEventListener("click", (e) => {
-  const v = $("video");
-  // 原生控制条在 shadow DOM 里，click 会重定向到 video 元素本身；
-  // 命中底部控制条区域时不翻转播放状态，否则"点暂停=没点"
-  const rect = v.getBoundingClientRect();
-  if (e.clientY - rect.top > rect.height - 60) return;
-  if (v.paused) {
-    v.play().catch(() => {});
-    showPlayerOsd("▶ 播放");
-  } else {
-    v.pause();
-    showPlayerOsd("⏸ 暂停");
-  }
-});
-$("video").addEventListener("dblclick", () => toggleFullscreen());
-
-function toggleFullscreen() {
-  const stage = document.querySelector(".player-stage") || $("video");
-  if (document.fullscreenElement) {
-    document.exitFullscreen().catch(() => {});
-  } else {
-    stage.requestFullscreen?.().catch(() => {
-      $("video").requestFullscreen?.().catch(() => {});
-    });
-  }
-}
 $("player-fs").onclick = toggleFullscreen;
 $("player-next-ep").onclick = () => playNextEpisode();
 
@@ -3733,6 +4053,111 @@ if (dmDelayPlus) dmDelayPlus.onclick = () => DanmakuOverlay.adjustOffset(0.5);
 const dmDelayReset = $("dm-delay-reset");
 if (dmDelayReset) dmDelayReset.onclick = () => DanmakuOverlay.resetOffset();
 
+function parseLocalDanmaku(content) {
+  const comments = [];
+  const trimmed = content.trim();
+  if (trimmed.startsWith("<") || trimmed.includes("<d p=")) {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, "text/xml");
+      const dEls = doc.querySelectorAll("d");
+      dEls.forEach((el) => {
+        const p = el.getAttribute("p");
+        const text = el.textContent?.trim();
+        if (!p || !text) return;
+        const parts = p.split(",");
+        const timeSec = parseFloat(parts[0]);
+        if (isNaN(timeSec) || timeSec < 0) return;
+        const modeNum = parseInt(parts[1], 10);
+        let mode = "scroll";
+        if (modeNum === 4) mode = "bottom";
+        else if (modeNum === 5) mode = "top";
+        const color = parseInt(parts[3], 10) || 0xffffff;
+        comments.push({
+          time_ms: Math.round(timeSec * 1000),
+          mode,
+          color,
+          text,
+        });
+      });
+    } catch (e) {
+      console.warn("parse danmaku xml failed", e);
+    }
+  } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const obj = JSON.parse(content);
+      const list = Array.isArray(obj) ? obj : (obj.comments || obj.danmaku || []);
+      list.forEach((item) => {
+        const t = item.time_ms ?? (item.time != null ? Math.round(item.time * 1000) : null);
+        const text = (item.text ?? item.comment ?? item.m ?? "").trim();
+        if (t == null || !text) return;
+        let mode = item.mode;
+        if (mode === 1 || mode === 2 || mode === 3) mode = "scroll";
+        else if (mode === 4) mode = "bottom";
+        else if (mode === 5) mode = "top";
+        else if (!["scroll", "top", "bottom"].includes(mode)) mode = "scroll";
+        const color = typeof item.color === "number" ? item.color : (parseInt(item.color, 16) || 0xffffff);
+        comments.push({ time_ms: t, mode, color, text });
+      });
+    } catch (e) {
+      console.warn("parse danmaku json failed", e);
+    }
+  }
+  return comments;
+}
+
+function loadDanmakuFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target.result;
+    const comments = parseLocalDanmaku(content);
+    if (!comments || !comments.length) {
+      toast("未在文件中解析到有效弹幕内容", true);
+      return;
+    }
+    danmakuTimeline = comments;
+    DanmakuOverlay.load(comments);
+    DanmakuOverlay.setEnabled(true);
+    setDanmakuOpacity(0.5, false);
+    syncDanmakuToggle();
+    $("dm-clear-btn")?.classList.remove("hidden");
+    toast(`已加载本地弹幕：${file.name} (共 ${comments.length} 条)`, true);
+    showPlayerOsd(`已加载本地弹幕 (${comments.length} 条)`);
+  };
+  reader.readAsText(file, "utf-8");
+}
+
+function unloadDanmaku() {
+  danmakuTimeline = [];
+  DanmakuOverlay.clear();
+  DanmakuOverlay.setEnabled(false);
+  $("dm-clear-btn")?.classList.add("hidden");
+  syncDanmakuToggle();
+  toast("已卸载当前弹幕", true);
+  showPlayerOsd("已清空弹幕");
+}
+
+const dmLoadBtn = $("dm-load-file-btn");
+const dmFileInput = $("dm-file-input");
+const dmClearBtn = $("dm-clear-btn");
+if (dmLoadBtn && dmFileInput) {
+  dmLoadBtn.onclick = () => dmFileInput.click();
+  dmFileInput.onchange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadDanmakuFile(file);
+      $("danmaku-menu")?.classList.add("hidden");
+    }
+    dmFileInput.value = "";
+  };
+}
+if (dmClearBtn) {
+  dmClearBtn.onclick = () => {
+    unloadDanmaku();
+    $("danmaku-menu")?.classList.add("hidden");
+  };
+}
+
 syncDanmakuMenuUI();
 
 // seek 后重定位弹幕游标；窗口尺寸变化时重排画布
@@ -3784,6 +4209,95 @@ function srtToVtt(srtText) {
   let vtt = "WEBVTT\n\n";
   const clean = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\uFEFF/, "");
   vtt += clean.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return vtt;
+}
+
+function assToVtt(assText) {
+  let vtt = "WEBVTT\n\n";
+  const clean = assText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/^\uFEFF/, "");
+  const lines = clean.split("\n");
+  let inEvents = false;
+  let startIdx = 1, endIdx = 2, textIdx = 9;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (line.toLowerCase() === "[events]") {
+      inEvents = true;
+      continue;
+    }
+    if (line.startsWith("[") && line.endsWith("]")) {
+      inEvents = false;
+      continue;
+    }
+    if (!inEvents) continue;
+
+    if (line.toLowerCase().startsWith("format:")) {
+      const cols = line.substring(7).split(",").map((s) => s.trim().toLowerCase());
+      startIdx = cols.indexOf("start");
+      endIdx = cols.indexOf("end");
+      textIdx = cols.indexOf("text");
+      if (startIdx === -1) startIdx = 1;
+      if (endIdx === -1) endIdx = 2;
+      if (textIdx === -1) textIdx = cols.length - 1;
+      continue;
+    }
+
+    if (line.toLowerCase().startsWith("dialogue:")) {
+      const content = line.substring(9);
+      const colCount = Math.max(startIdx, endIdx, textIdx) + 1;
+      const fields = [];
+      let lastPos = 0;
+      for (let f = 0; f < colCount - 1; f++) {
+        const nextComma = content.indexOf(",", lastPos);
+        if (nextComma === -1) break;
+        fields.push(content.substring(lastPos, nextComma).trim());
+        lastPos = nextComma + 1;
+      }
+      fields.push(content.substring(lastPos));
+
+      const startStr = fields[startIdx];
+      const endStr = fields[endIdx];
+      const textRaw = fields[textIdx];
+      if (!startStr || !endStr || !textRaw) continue;
+
+      const parseAssTime = (t) => {
+        const p = t.trim().split(":");
+        if (p.length < 2) return null;
+        let h = 0, m = 0, s = 0;
+        if (p.length === 3) {
+          h = parseInt(p[0], 10) || 0;
+          m = parseInt(p[1], 10) || 0;
+          s = parseFloat(p[2]) || 0;
+        } else {
+          m = parseInt(p[0], 10) || 0;
+          s = parseFloat(p[1]) || 0;
+        }
+        const totalSec = h * 3600 + m * 60 + s;
+        const sInt = Math.floor(totalSec);
+        const ms = Math.round((totalSec - sInt) * 1000);
+        const hh = String(Math.floor(sInt / 3600)).padStart(2, "0");
+        const mm = String(Math.floor((sInt % 3600) / 60)).padStart(2, "0");
+        const ss = String(sInt % 60).padStart(2, "0");
+        const mmm = String(ms).padStart(3, "0");
+        return `${hh}:${mm}:${ss}.${mmm}`;
+      };
+
+      const vttStart = parseAssTime(startStr);
+      const vttEnd = parseAssTime(endStr);
+      if (!vttStart || !vttEnd) continue;
+
+      let cleanText = textRaw
+        .replace(/\{[^\}]*\}/g, "")
+        .replace(/\\N/gi, "\n")
+        .replace(/\\n/gi, "\n")
+        .replace(/\\h/gi, " ")
+        .trim();
+
+      if (!cleanText) continue;
+      vtt += `${vttStart} --> ${vttEnd}\n${cleanText}\n\n`;
+    }
+  }
   return vtt;
 }
 
@@ -3883,8 +4397,11 @@ function loadSubtitleFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     let content = e.target.result;
-    if (file.name.toLowerCase().endsWith(".srt")) {
+    const n = file.name.toLowerCase();
+    if (n.endsWith(".srt")) {
       content = srtToVtt(content);
+    } else if (n.endsWith(".ass") || n.endsWith(".ssa") || content.includes("[Events]")) {
+      content = assToVtt(content);
     }
     subState.cues = parseVttCues(content);
     subState.rawVtt = content;
@@ -4055,13 +4572,16 @@ if (pStage) {
   pStage.addEventListener("drop", (e) => {
     e.preventDefault();
     pStage.classList.remove("drag-over");
-    const file = e.dataTransfer?.files?.[0];
-    if (file) {
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (!files.length) return;
+    for (const file of files) {
       const n = file.name.toLowerCase();
-      if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass")) {
+      if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass") || n.endsWith(".ssa")) {
         loadSubtitleFile(file);
+      } else if (n.endsWith(".xml") || n.endsWith(".json")) {
+        loadDanmakuFile(file);
       } else {
-        toast("仅支持拖入 .srt 或 .vtt 外挂字幕文件");
+        toast("仅支持拖入字幕文件 (.srt/.vtt/.ass) 或弹幕文件 (.xml/.json)");
       }
     }
   });
@@ -4185,6 +4705,55 @@ document.querySelectorAll(".visual-boost-opt").forEach((btn) => {
   };
 });
 
+const sleepState = {
+  mode: "off",
+  timerId: null,
+};
+
+function setSleepTimer(mode, notify = true) {
+  if (sleepState.timerId) {
+    clearTimeout(sleepState.timerId);
+    sleepState.timerId = null;
+  }
+  sleepState.mode = mode;
+
+  document.querySelectorAll(".visual-sleep-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-sleep") === mode);
+  });
+
+  if (mode === "off") {
+    if (notify) showPlayerOsd("睡眠定时: 已关闭");
+  } else if (mode === "ep") {
+    if (notify) showPlayerOsd("睡眠定时: 播完本集自动暂停");
+  } else {
+    const mins = parseInt(mode, 10);
+    sleepState.timerId = setTimeout(() => {
+      triggerSleepTimer();
+    }, mins * 60 * 1000);
+    if (notify) showPlayerOsd(`睡眠定时: ${mins} 分钟后自动暂停`);
+  }
+}
+
+function triggerSleepTimer() {
+  const v = $("video");
+  if (v && !v.paused) {
+    v.pause();
+  }
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  setSleepTimer("off", false);
+  showPlayerOsd("【睡眠定时器】设定时间已到，已自动为您暂停播放");
+  toast("【睡眠定时器】设定时间已到，已自动暂停播放", true);
+}
+
+document.querySelectorAll(".visual-sleep-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const mode = btn.getAttribute("data-sleep") || "off";
+    setSleepTimer(mode);
+  };
+});
+
 const vEl = $("video");
 if (vEl) {
   vEl.addEventListener("enterpictureinpicture", () => {
@@ -4296,6 +4865,7 @@ document.addEventListener("keydown", (e) => {
     case "-": case "_": DanmakuOverlay.adjustOffset(-0.5); break;
     case "=": case "+": DanmakuOverlay.adjustOffset(0.5); break;
     case "f": case "F": toggleFullscreen(); break;
+    case "b": case "B": playPreviousEpisode(); break;
     case "n": case "N": playNextEpisode(); break;
     case "e": case "E": toggleEpDrawer(); break;
     case "i": case "I": toggleStatsOsd(); break;
@@ -4321,6 +4891,19 @@ $("video").addEventListener("ended", () => {
         .catch(() => {});
     }
   }
+
+  // 睡眠定时器检查：若是「播完本集」模式，则不连播下一集，直接退出全屏并休眠
+  if (sleepState.mode === "ep") {
+    clearTimeout(autoPlayTimer);
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    setSleepTimer("off", false);
+    showPlayerOsd("【睡眠定时器】本集已播完，已停止连播");
+    toast("【睡眠定时器】本集已播完，已停止连播", true);
+    return;
+  }
+
   // 自动连播下一集（3 秒倒计时）
   const nextEp = getNextEpisode();
   if (nextEp) {
@@ -4368,10 +4951,29 @@ if (helpModalEl) {
   };
 }
 
-// 全局桌面快捷键：/ 聚焦搜索框；? 打开帮助；Escape 退出/返回上一层
+function triggerBossKey() {
+  const v = $("video");
+  if (v) {
+    if (!v.paused) v.pause();
+    v.muted = true;
+  }
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  invoke("win_minimize").catch(() => {});
+  showPlayerOsd("【老板键】已静音并最小化窗口");
+}
+
+// 全局桌面快捷键：/ 聚焦搜索框；? 打开帮助；Escape 退出/返回上一层；Alt+Q 老板键
 document.addEventListener("keydown", (e) => {
   const tag = e.target?.tagName;
   const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+  if ((e.altKey && (e.key === "q" || e.key === "Q")) || (e.ctrlKey && e.altKey && (e.key === "h" || e.key === "H"))) {
+    e.preventDefault();
+    triggerBossKey();
+    return;
+  }
 
   if (e.key === "/" && !isInput) {
     e.preventDefault();

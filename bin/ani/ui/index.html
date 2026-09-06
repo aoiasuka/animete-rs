@@ -101,7 +101,15 @@
               <h2>我的追番</h2>
               <span id="collection-count" class="meta"></span>
             </div>
-            <button id="btn-refresh-collections" class="ghost small" title="并发检查全部追番条目更新状态">检查追更 🔄</button>
+            <div class="collection-head-actions">
+              <input type="text" id="collection-filter-input" class="collection-filter-input" placeholder="筛选追番…" />
+              <div class="collection-status-tabs" id="collection-status-tabs">
+                <button class="ghost small col-tab active" data-status="all">全部</button>
+                <button class="ghost small col-tab" data-status="pending">待看</button>
+                <button class="ghost small col-tab" data-status="caught_up">已追平</button>
+              </div>
+              <button id="btn-refresh-collections" class="ghost small" title="并发检查全部追番条目更新状态">检查追更 🔄</button>
+            </div>
           </div>
           <div id="collection-grid" class="cards collection-grid"></div>
         </div>
@@ -152,6 +160,12 @@
             </button>
           </div>
           <div id="subject-meta" class="meta"></div>
+          <div id="subject-badges" class="subject-badges hidden"></div>
+          <div id="subject-tags" class="subject-tags hidden"></div>
+          <div id="subject-synopsis-wrap" class="subject-synopsis-wrap hidden">
+            <p id="subject-synopsis" class="subject-synopsis collapsed"></p>
+            <button id="subject-synopsis-toggle" class="ghost small synopsis-toggle-btn">展开简介 ▾</button>
+          </div>
         </div>
       </div>
       <!-- 角色与声优展台（Ani 6.0 特性） -->
@@ -594,6 +608,10 @@
           <button id="player-danmaku" class="ghost small" title="弹幕设置与高级调谐 (快捷键 D)">弹幕 关</button>
           <div id="danmaku-menu" class="danmaku-menu hidden">
             <div class="danmaku-menu-title">弹幕高级调谐</div>
+            <button id="dm-load-file-btn" class="sub-menu-item">📂 加载本地弹幕 (.xml / .json)</button>
+            <button id="dm-clear-btn" class="sub-menu-item hidden">✕ 卸载当前弹幕</button>
+            <input type="file" id="dm-file-input" accept=".xml,.json" class="hidden" />
+            <div class="sub-menu-sep"></div>
             <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">不透明度</span>
               <div class="dm-btn-group">
@@ -640,12 +658,12 @@
           </div>
         </div>
         <div class="player-sub-wrap">
-          <button id="player-sub-btn" class="ghost small" title="外挂字幕设置与加载 (支持拖拽 .srt/.vtt 到播放器)">字幕 关</button>
+          <button id="player-sub-btn" class="ghost small" title="外挂字幕设置与加载 (支持拖拽 .srt/.vtt/.ass 到播放器)">字幕 关</button>
           <div id="sub-menu" class="sub-menu hidden">
             <div class="sub-menu-title">外挂字幕</div>
-            <button id="sub-load-file-btn" class="sub-menu-item">📂 加载本地字幕 (.srt / .vtt)</button>
+            <button id="sub-load-file-btn" class="sub-menu-item">📂 加载本地字幕 (.srt / .vtt / .ass)</button>
             <button id="sub-clear-btn" class="sub-menu-item hidden">✕ 卸载当前字幕</button>
-            <input type="file" id="sub-file-input" accept=".srt,.vtt,.ass" class="hidden" />
+            <input type="file" id="sub-file-input" accept=".srt,.vtt,.ass,.ssa" class="hidden" />
             <div class="sub-menu-sep"></div>
             <div class="sub-menu-row">
               <span class="sub-menu-label">延迟微调</span>
@@ -753,6 +771,16 @@
                 <button class="ghost small visual-boost-opt" data-boost="3.0" title="极限增益 3 倍">300% 极限</button>
               </div>
             </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">睡眠定时</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-sleep-opt active" data-sleep="off" title="关闭定时">关闭</button>
+                <button class="ghost small visual-sleep-opt" data-sleep="ep" title="播完本集自动暂停并退出全屏">播完本集</button>
+                <button class="ghost small visual-sleep-opt" data-sleep="30" title="30 分钟后自动暂停">30分</button>
+                <button class="ghost small visual-sleep-opt" data-sleep="60" title="60 分钟后自动暂停">60分</button>
+                <button class="ghost small visual-sleep-opt" data-sleep="90" title="90 分钟后自动暂停">90分</button>
+              </div>
+            </div>
           </div>
         </div>
         <button id="player-screenshot-btn" class="ghost small" title="名场面截帧并复制到剪贴板 (快捷键 C)">截屏 📸</button>
@@ -831,6 +859,7 @@
           <div class="sg-title">全局与导航</div>
           <div class="sg-item"><span class="sg-desc">聚焦顶部搜索框</span><kbd>/</kbd></div>
           <div class="sg-item"><span class="sg-desc">层级返回 / 关闭弹窗</span><kbd>Esc</kbd></div>
+          <div class="sg-item"><span class="sg-desc">快捷老板键 (静音暂停并最小化)</span><div class="kbds"><kbd>Alt</kbd> + <kbd>Q</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">打开快捷键指南</span><kbd>?</kbd></div>
         </div>
         <div class="shortcut-group">
@@ -844,25 +873,28 @@
           <div class="sg-item"><span class="sg-desc">名场面截帧保存并复制到剪贴板</span><kbd>C</kbd></div>
           <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">睡眠定时器 (关/播完本集/30/60/90分)</span><span>控制栏「画面 📺」</span></div>
           <div class="sg-item"><span class="sg-desc">循环切换画面比例与填充</span><kbd>W</kbd></div>
           <div class="sg-item"><span class="sg-desc">一键跳过片头 (+90s)</span><kbd>S</kbd></div>
           <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">全屏 / 退出全屏（弹幕跟随）</span><kbd>F</kbd></div>
-          <div class="sg-item"><span class="sg-desc">播放下一集</span><kbd>N</kbd></div>
+          <div class="sg-item"><span class="sg-desc">播放上一集 / 下一集</span><div class="kbds"><kbd>B</kbd> <kbd>N</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">滑出 / 收起选集抽屉</span><kbd>E</kbd></div>
           <div class="sg-item"><span class="sg-desc">显示 / 隐藏播放统计信息</span><kbd>I</kbd></div>
+          <div class="sg-item"><span class="sg-desc">系统媒体控制 (SMTC)</span><span>键盘媒体键 / 锁屏控制</span></div>
           <div class="sg-item"><span class="sg-desc">双击视频区域</span><span>全屏切换</span></div>
         </div>
         <div class="shortcut-group">
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">呼出 / 隐藏弹幕高级调谐面板</span><kbd>D</kbd></div>
+          <div class="sg-item"><span class="sg-desc">加载本地弹幕 (.xml / .json)</span><span>拖拽至播放器 或 控制栏「弹幕」</span></div>
           <div class="sg-item"><span class="sg-desc">弹幕提前 0.5 秒 / 延后 0.5 秒</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
         </div>
         <div class="shortcut-group">
           <div class="sg-title">外挂字幕</div>
           <div class="sg-item"><span class="sg-desc">字幕提前 0.5 秒 / 延后 0.5 秒</span><div class="kbds"><kbd>Z</kbd> <kbd>X</kbd></div></div>
-          <div class="sg-item"><span class="sg-desc">加载本地字幕</span><span>拖拽 .srt / .vtt 至播放器 或 控制栏「字幕」</span></div>
+          <div class="sg-item"><span class="sg-desc">加载本地字幕 (.srt / .vtt / .ass)</span><span>拖拽至播放器 或 控制栏「字幕」</span></div>
         </div>
         <div class="shortcut-group">
           <div class="sg-title">追番与剧集打卡</div>
