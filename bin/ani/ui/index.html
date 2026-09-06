@@ -608,6 +608,56 @@
             </div>
           </div>
         </div>
+        <div class="player-visual-wrap">
+          <button id="player-visual-btn" class="ghost small" title="画面比例、色彩滤镜与视效 (快捷键 W)">画面 📺</button>
+          <div id="visual-menu" class="visual-menu hidden">
+            <div class="visual-menu-title">画面比例与画质视效</div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">画面比例</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-aspect-opt active" data-aspect="default">自适应</button>
+                <button class="ghost small visual-aspect-opt" data-aspect="16-9">16:9</button>
+                <button class="ghost small visual-aspect-opt" data-aspect="4-3">4:3</button>
+                <button class="ghost small visual-aspect-opt" data-aspect="21-9">21:9</button>
+                <button class="ghost small visual-aspect-opt" data-aspect="fill">拉伸</button>
+                <button class="ghost small visual-aspect-opt" data-aspect="cover">裁剪</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">画面变换</span>
+              <div class="visual-btn-group">
+                <button id="btn-mirror" class="ghost small visual-toggle-btn" title="水平翻转画面">左右镜像</button>
+                <button id="btn-rotate" class="ghost small visual-toggle-btn" title="顺时针旋转 90 度">旋转 90°</button>
+                <button id="btn-reset-transform" class="ghost small visual-toggle-btn">重置</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">色彩滤镜</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-filter-opt active" data-filter="none">原画</button>
+                <button class="ghost small visual-filter-opt" data-filter="vivid">动漫鲜艳</button>
+                <button class="ghost small visual-filter-opt" data-filter="warm">护眼柔和</button>
+                <button class="ghost small visual-filter-opt" data-filter="contrast">明亮锐利</button>
+              </div>
+            </div>
+            <div class="visual-menu-sep"></div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">跳过片头</span>
+              <div class="visual-btn-group">
+                <button id="btn-skip-op" class="ghost small visual-action-btn" title="快进 90 秒 (快捷键 S)">+90s 跳过</button>
+                <button id="btn-auto-skip-op" class="ghost small visual-action-btn" title="连播自动跳过 OP">自动跳过: 关</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">A-B 循环</span>
+              <div class="visual-btn-group">
+                <button id="btn-ab-a" class="ghost small visual-ab-btn" title="标记起始 A 点 (快捷键 [)">设 A 点</button>
+                <button id="btn-ab-b" class="ghost small visual-ab-btn" title="标记结束 B 点并循环 (快捷键 ])">设 B 点</button>
+                <button id="btn-ab-clear" class="ghost small visual-ab-btn" title="清除循环 (快捷键 \)">清除</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
         <button id="player-stats-btn" class="ghost small" title="播放统计信息 (I)">ℹ 统计</button>
@@ -619,6 +669,10 @@
         <div id="player-spinner" class="player-spinner hidden">
           <div class="spinner-ring"></div>
           <span class="spinner-text">缓冲中…</span>
+        </div>
+        <div id="player-skip-capsule" class="player-skip-capsule hidden">
+          <span>跳过片头 OP</span>
+          <kbd>S</kbd>
         </div>
         <div id="player-stats-osd" class="player-stats-osd hidden">
           <div class="stats-osd-head">
@@ -687,6 +741,9 @@
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><kbd>M</kbd></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">降低 / 提高播放倍速</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">循环切换画面比例与填充</span><kbd>W</kbd></div>
+          <div class="sg-item"><span class="sg-desc">一键跳过片头 (+90s)</span><kbd>S</kbd></div>
+          <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">全屏 / 退出全屏（弹幕跟随）</span><kbd>F</kbd></div>
           <div class="sg-item"><span class="sg-desc">播放下一集</span><kbd>N</kbd></div>
           <div class="sg-item"><span class="sg-desc">滑出 / 收起选集抽屉</span><kbd>E</kbd></div>
@@ -695,7 +752,7 @@
         </div>
         <div class="shortcut-group">
           <div class="sg-title">弹幕调谐</div>
-          <div class="sg-item"><span class="sg-desc">弹幕提前 1 秒 / 延后 1 秒</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">弹幕提前 1 秒 / 延后 1 秒</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">循环切换透明度 (100% / 70% / 40% / 关)</span><span>控制栏「弹幕」</span></div>
         </div>
         <div class="shortcut-group">

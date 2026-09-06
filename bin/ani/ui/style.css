@@ -1614,11 +1614,17 @@ main {
 
 .player-stage video {
   display: block;
-  width: 100%;
+  width: var(--video-width, 100%);
+  max-width: 100%;
   max-height: calc(100vh - 240px);
-  aspect-ratio: 16/9;
+  aspect-ratio: var(--video-aspect, 16/9);
   background: #000;
   outline: none;
+  object-fit: var(--video-fit, contain);
+  transform: var(--video-transform, none);
+  filter: var(--video-filter, none);
+  transition: filter 0.2s ease, transform 0.25s var(--ease-spring);
+  margin: 0 auto;
 }
 
 #danmaku-canvas {
@@ -1642,11 +1648,15 @@ main {
 }
 
 .player-stage:fullscreen video {
-  width: 100% !important;
-  height: 100% !important;
+  width: var(--video-width, auto) !important;
+  max-width: 100vw !important;
+  height: var(--video-height, 100%) !important;
   max-height: 100vh !important;
-  object-fit: contain !important;
-  aspect-ratio: auto !important;
+  object-fit: var(--video-fit, contain) !important;
+  transform: var(--video-transform, none) !important;
+  filter: var(--video-filter, none) !important;
+  aspect-ratio: var(--video-aspect, auto) !important;
+  margin: 0 auto !important;
 }
 
 .player-stage:fullscreen #danmaku-canvas {
@@ -1845,6 +1855,135 @@ main {
   background: var(--accent-gradient) !important;
   color: #fff !important;
   border-color: transparent !important;
+}
+
+/* 画面比例与画质视效菜单 */
+.player-visual-wrap {
+  position: relative;
+}
+
+.visual-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 290px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 1000;
+  padding: 14px;
+  animation: fadeInDown 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.visual-menu-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.visual-menu-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.visual-menu-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.visual-btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.visual-btn-group button {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--line-subtle);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.visual-btn-group button:hover {
+  border-color: var(--line-focus);
+}
+
+.visual-aspect-opt.active,
+.visual-filter-opt.active,
+.visual-toggle-btn.active,
+.visual-action-btn.active {
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  font-weight: 600;
+}
+
+.visual-menu-sep {
+  height: 1px;
+  background: var(--line-subtle);
+  margin: 10px 0 6px;
+}
+
+/* 开播悬浮跳过片头胶囊 */
+.player-skip-capsule {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--accent);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), var(--accent-glow);
+  border-radius: var(--radius-pill);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 45;
+  transition: all var(--transition-fast);
+  animation: slideUpFade 0.25s var(--ease-spring);
+}
+
+.player-skip-capsule:hover {
+  transform: translateY(-2px);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.player-skip-capsule kbd {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+@keyframes slideUpFade {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* 播放器拖入高亮 */

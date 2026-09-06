@@ -952,7 +952,13 @@ pub async fn is_subject_collected(
         .map_err(|e| e.to_string())
 }
 
-/// 切换追番收藏状态（已收藏则取消，未收藏则加入）。返回最新状态（true=已收藏）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToggleCollectionResult {
+    pub collected: bool,
+    pub bangumi_synced: bool,
+}
+
+/// 切换追番收藏状态（已收藏则取消，未收藏则加入）。若已登录 Bangumi 则自动同步「在看」。
 #[tauri::command]
 pub async fn toggle_subject_collection(
     ctx: State<'_, AppContext>,
@@ -961,15 +967,20 @@ pub async fn toggle_subject_collection(
     name: String,
     cover_url: Option<String>,
     air_date: Option<String>,
-) -> Result<bool, String> {
+) -> Result<ToggleCollectionResult, String> {
     let repo = ani_db::CollectionRepo::new(ctx.db.clone());
     let collected = repo
         .is_collected(bangumi_id)
         .await
         .map_err(|e| e.to_string())?;
+    let mut bangumi_synced = false;
+
     if collected {
         repo.remove(bangumi_id).await.map_err(|e| e.to_string())?;
-        Ok(false)
+        Ok(ToggleCollectionResult {
+            collected: false,
+            bangumi_synced: false,
+        })
     } else {
         let item = ani_db::SubjectCollectionItem {
             bangumi_id,
@@ -980,7 +991,42 @@ pub async fn toggle_subject_collection(
             updated_at: chrono::Utc::now().timestamp_millis(),
         };
         repo.save(&item).await.map_err(|e| e.to_string())?;
-        Ok(true)
+
+        // 尝试同步到 Bangumi「在看 (type=3)」
+        let is_logged_in = ctx.settings.read().unwrap().bangumi.is_logged_in();
+        if is_logged_in && bangumi_id > 0 {
+            let res = async {
+                let token = valid_bangumi_token(&ctx).await?;
+                let oauth = ds_bangumi::oauth::BangumiOAuth::new().map_err(|e| e.to_string())?;
+                oauth
+                    .collect_subject(&token, bangumi_id as u32, 3)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+            .await;
+
+            match res {
+                Ok(_) => {
+                    bangumi_synced = true;
+                }
+                Err(e) => {
+                    tracing::warn!("同步追番到 Bangumi 失败，记入离线挂起队列：{e}");
+                    let play_repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+                    let payload = serde_json::json!({
+                        "subject_id": bangumi_id,
+                        "collection_type": 3,
+                    });
+                    let _ = play_repo
+                        .enqueue_pending_op(ani_core::EpisodeId(0), "collect_subject", &payload)
+                        .await;
+                }
+            }
+        }
+
+        Ok(ToggleCollectionResult {
+            collected: true,
+            bangumi_synced,
+        })
     }
 }
 
@@ -1451,6 +1497,30 @@ pub async fn sync_pending_playback_ops(
             if subject_id > 0 && episode_id > 0 {
                 match oauth
                     .mark_episode_watched(&token, subject_id, episode_id)
+                    .await
+                {
+                    Ok(_) => {
+                        let _ = repo.remove_pending_op(op.id).await;
+                        succeeded += 1;
+                    }
+                    Err(_) => {
+                        let _ = repo.inc_pending_op_attempts(op.id).await;
+                        failed += 1;
+                    }
+                }
+            } else {
+                let _ = repo.remove_pending_op(op.id).await;
+            }
+        } else if op.op_kind == "collect_subject" {
+            let data: serde_json::Value = serde_json::from_str(&op.op_json).unwrap_or_default();
+            let subject_id = data.get("subject_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let collection_type = data
+                .get("collection_type")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(3) as u8;
+            if subject_id > 0 {
+                match oauth
+                    .collect_subject(&token, subject_id, collection_type)
                     .await
                 {
                     Ok(_) => {

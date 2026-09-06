@@ -485,16 +485,22 @@ async function updateCollectBtn(bangumiId, s) {
 
   btn.onclick = async () => {
     try {
-      const isNow = await invoke("toggle_subject_collection", {
+      const res = await invoke("toggle_subject_collection", {
         bangumiId: Number(bangumiId),
         nameCn: s.name_cn || s.display_title || "",
         name: s.original_title || s.name || "",
         coverUrl: s.cover_url || null,
         airDate: s.air_date || null,
       });
+      const isNow = typeof res === "boolean" ? res : res.collected;
+      const synced = res?.bangumi_synced;
       isCurrentSubjectCollected = isNow;
       setCollectBtnUI(isNow);
-      toast(isNow ? "已加入我的追番" : "已取消追番", true);
+      if (isNow) {
+        toast(synced ? "已加入追番（已同步至 Bangumi 在看 ✓）" : "已加入我的追番", true);
+      } else {
+        toast("已取消追番", true);
+      }
       loadCollections();
     } catch (e) {
       toast("追番操作失败：" + e);
@@ -2758,6 +2764,207 @@ function saveProgress(finished = false) {
   }
 }
 
+// ---------- 播放器视效调谐、动漫滤镜、跳过片头与 A-B 循环 ----------
+const visualState = {
+  aspect: localStorage.getItem("ani_visual_aspect") || "default",
+  mirror: false,
+  rotateDeg: 0,
+  filter: localStorage.getItem("ani_visual_filter") || "none",
+  autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
+  abLoop: { a: null, b: null, active: false },
+};
+
+let opAutoSkipped = false;
+
+const ASPECT_LABELS = {
+  default: "自适应",
+  "16-9": "16:9",
+  "4-3": "4:3",
+  "21-9": "21:9",
+  fill: "拉伸铺满",
+  cover: "去黑边裁剪",
+};
+
+const FILTER_LABELS = {
+  none: "原画",
+  vivid: "动漫鲜艳",
+  warm: "护眼柔和",
+  contrast: "明亮锐利",
+};
+
+function applyVisualEffects(notify = false) {
+  const v = $("video");
+  if (!v) return;
+
+  // 1. 比例与填充
+  let fit = "contain";
+  let aspect = "auto";
+
+  switch (visualState.aspect) {
+    case "16-9":
+      fit = "fill";
+      aspect = "16 / 9";
+      break;
+    case "4-3":
+      fit = "fill";
+      aspect = "4 / 3";
+      break;
+    case "21-9":
+      fit = "fill";
+      aspect = "21 / 9";
+      break;
+    case "fill":
+      fit = "fill";
+      aspect = "auto";
+      break;
+    case "cover":
+      fit = "cover";
+      aspect = "auto";
+      break;
+    case "default":
+    default:
+      fit = "contain";
+      aspect = "auto";
+      break;
+  }
+
+  v.style.setProperty("--video-fit", fit);
+  v.style.setProperty("--video-aspect", aspect);
+  if (visualState.aspect === "fill" || visualState.aspect === "cover") {
+    v.style.setProperty("--video-width", "100%");
+    v.style.setProperty("--video-height", "100%");
+  } else {
+    v.style.removeProperty("--video-width");
+    v.style.removeProperty("--video-height");
+  }
+
+  // 2. 变换（镜像翻转与旋转）
+  const transforms = [];
+  if (visualState.mirror) transforms.push("scaleX(-1)");
+  if (visualState.rotateDeg) transforms.push(`rotate(${visualState.rotateDeg}deg)`);
+  v.style.setProperty("--video-transform", transforms.length > 0 ? transforms.join(" ") : "none");
+
+  // 3. 动漫硬件加速色彩滤镜
+  const FILTERS = {
+    none: "none",
+    vivid: "saturate(1.25) contrast(1.08) brightness(1.02)",
+    warm: "sepia(0.18) saturate(0.9) brightness(0.96) hue-rotate(-5deg)",
+    contrast: "contrast(1.2) brightness(1.06) saturate(1.1)",
+  };
+  v.style.setProperty("--video-filter", FILTERS[visualState.filter] || "none");
+
+  // 同步 UI 状态
+  document.querySelectorAll(".visual-aspect-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-aspect") === visualState.aspect);
+  });
+  document.querySelectorAll(".visual-filter-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-filter") === visualState.filter);
+  });
+  const mirrorBtn = $("btn-mirror");
+  if (mirrorBtn) mirrorBtn.classList.toggle("active", visualState.mirror);
+  const rotateBtn = $("btn-rotate");
+  if (rotateBtn) {
+    rotateBtn.textContent = visualState.rotateDeg ? `旋转 ${visualState.rotateDeg}°` : "旋转 90°";
+    rotateBtn.classList.toggle("active", visualState.rotateDeg > 0);
+  }
+  const autoSkipBtn = $("btn-auto-skip-op");
+  if (autoSkipBtn) {
+    autoSkipBtn.textContent = `自动跳过: ${visualState.autoSkipOp ? "开" : "关"}`;
+    autoSkipBtn.classList.toggle("active", visualState.autoSkipOp);
+  }
+
+  if (notify) {
+    showPlayerOsd(`画面比例: ${ASPECT_LABELS[visualState.aspect] || visualState.aspect}`);
+  }
+}
+
+const ASPECT_CYCLE = ["default", "16-9", "4-3", "21-9", "fill", "cover"];
+function cycleAspectRatio() {
+  const curIdx = ASPECT_CYCLE.indexOf(visualState.aspect);
+  const nextIdx = (curIdx + 1) % ASPECT_CYCLE.length;
+  visualState.aspect = ASPECT_CYCLE[nextIdx];
+  localStorage.setItem("ani_visual_aspect", visualState.aspect);
+  applyVisualEffects(true);
+}
+
+function skipOp(seconds = 90) {
+  const v = $("video");
+  if (!v) return;
+  const dur = v.duration && isFinite(v.duration) ? v.duration : Infinity;
+  const target = Math.min(dur, v.currentTime + seconds);
+  v.currentTime = target;
+  showPlayerOsd(`⏭ 已跳过片头 (+${seconds}s) · ${fmtTime(target)}`);
+  toast(`已跳过片头 ${seconds} 秒`, true);
+  const capsule = $("player-skip-capsule");
+  if (capsule) capsule.classList.add("hidden");
+}
+
+function setAbPointA() {
+  const v = $("video");
+  if (!v) return;
+  const now = v.currentTime;
+  visualState.abLoop.a = now;
+  visualState.abLoop.active = false;
+  const btnA = $("btn-ab-a");
+  if (btnA) {
+    btnA.textContent = `A: ${fmtTime(now)}`;
+    btnA.classList.add("active");
+  }
+  const btnB = $("btn-ab-b");
+  if (btnB) {
+    btnB.textContent = "设 B 点";
+    btnB.classList.remove("active");
+  }
+  showPlayerOsd(`🔁 A-B 循环：起点 A = ${fmtTime(now)}`);
+  toast(`已标记 A 点：${fmtTime(now)}（请在终点按 ] 设 B 点）`, true);
+}
+
+function setAbPointB() {
+  const v = $("video");
+  if (!v) return;
+  const now = v.currentTime;
+  if (visualState.abLoop.a === null) {
+    visualState.abLoop.a = 0;
+    const btnA = $("btn-ab-a");
+    if (btnA) {
+      btnA.textContent = `A: 00:00`;
+      btnA.classList.add("active");
+    }
+  }
+  if (now <= visualState.abLoop.a) {
+    toast("B 点时间必须大于 A 点");
+    return;
+  }
+  visualState.abLoop.b = now;
+  visualState.abLoop.active = true;
+  const btnB = $("btn-ab-b");
+  if (btnB) {
+    btnB.textContent = `B: ${fmtTime(now)}`;
+    btnB.classList.add("active");
+  }
+  v.currentTime = visualState.abLoop.a;
+  showPlayerOsd(`🔁 A-B 循环中：${fmtTime(visualState.abLoop.a)} ➔ ${fmtTime(now)}`);
+  toast(`A-B 循环已激活：${fmtTime(visualState.abLoop.a)} ~ ${fmtTime(now)}`, true);
+}
+
+function clearAbLoop(notify = true) {
+  visualState.abLoop = { a: null, b: null, active: false };
+  const btnA = $("btn-ab-a");
+  if (btnA) {
+    btnA.textContent = "设 A 点";
+    btnA.classList.remove("active");
+  }
+  const btnB = $("btn-ab-b");
+  if (btnB) {
+    btnB.textContent = "设 B 点";
+    btnB.classList.remove("active");
+  }
+  if (notify) {
+    showPlayerOsd("🔁 A-B 循环已清除");
+    toast("A-B 循环已清除", true);
+  }
+}
+
 function destroyPlayer() {
   const v = $("video");
   v.pause();
@@ -2792,6 +2999,12 @@ function destroyPlayer() {
   unloadSubtitle(true);
   const subMenu = $("sub-menu");
   if (subMenu) subMenu.classList.add("hidden");
+  const visualMenu = $("visual-menu");
+  if (visualMenu) visualMenu.classList.add("hidden");
+  const skipCapsule = $("player-skip-capsule");
+  if (skipCapsule) skipCapsule.classList.add("hidden");
+  clearAbLoop(false);
+  opAutoSkipped = false;
   v.removeAttribute("src");
   v.load();
 }
@@ -2815,6 +3028,7 @@ function showPlayer(url, title) {
   showView("player");
   updatePlayerNextBtn();
   const v = $("video");
+  applyVisualEffects();
   if (!url) return;
 
   // 断点续播：加载后跳到上次位置（看完的从头播）。
@@ -2991,6 +3205,24 @@ $("video").addEventListener("timeupdate", () => {
   if (v.currentTime - lastSavedSec >= 5) {
     lastSavedSec = v.currentTime;
     saveProgress(false);
+  }
+
+  // A-B 片段循环播放
+  if (visualState.abLoop.active && visualState.abLoop.b !== null && v.currentTime >= visualState.abLoop.b) {
+    v.currentTime = visualState.abLoop.a ?? 0;
+  }
+
+  // 自动跳过片头（连播时仅在开播 0.5s~5s 自动触发一次）
+  if (visualState.autoSkipOp && !opAutoSkipped && v.currentTime >= 0.5 && v.currentTime < 5) {
+    opAutoSkipped = true;
+    skipOp(90);
+  }
+
+  // 开播 0.5s ~ 15s 展示悬浮跳过片头胶囊（自动跳过开启时不展示）
+  const capsule = $("player-skip-capsule");
+  if (capsule) {
+    const showCapsule = !visualState.autoSkipOp && v.currentTime >= 0.5 && v.currentTime <= 15;
+    capsule.classList.toggle("hidden", !showCapsule);
   }
 });
 $("video").addEventListener("volumechange", () => {
@@ -3372,7 +3604,95 @@ if (pStage) {
   });
 }
 
-// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / F 全屏 / N 下一集 / [ ] 弹幕时间微调 / Z X 字幕延迟微调
+// 画面比例、视效菜单与跳过片头控制绑定
+const visualBtn = $("player-visual-btn");
+const visualMenu = $("visual-menu");
+if (visualBtn && visualMenu) {
+  visualBtn.onclick = (e) => {
+    e.stopPropagation();
+    visualMenu.classList.toggle("hidden");
+    applyVisualEffects();
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".player-visual-wrap")) {
+      visualMenu.classList.add("hidden");
+    }
+  });
+}
+
+document.querySelectorAll(".visual-aspect-opt").forEach((btn) => {
+  btn.onclick = () => {
+    visualState.aspect = btn.getAttribute("data-aspect");
+    localStorage.setItem("ani_visual_aspect", visualState.aspect);
+    applyVisualEffects(true);
+  };
+});
+
+document.querySelectorAll(".visual-filter-opt").forEach((btn) => {
+  btn.onclick = () => {
+    visualState.filter = btn.getAttribute("data-filter");
+    localStorage.setItem("ani_visual_filter", visualState.filter);
+    applyVisualEffects();
+    showPlayerOsd(`色彩滤镜: ${FILTER_LABELS[visualState.filter] || visualState.filter}`);
+  };
+});
+
+const btnMirror = $("btn-mirror");
+if (btnMirror) {
+  btnMirror.onclick = () => {
+    visualState.mirror = !visualState.mirror;
+    applyVisualEffects();
+    showPlayerOsd(visualState.mirror ? "画面: 左右镜像开启" : "画面: 正常显示");
+  };
+}
+
+const btnRotate = $("btn-rotate");
+if (btnRotate) {
+  btnRotate.onclick = () => {
+    visualState.rotateDeg = (visualState.rotateDeg + 90) % 360;
+    applyVisualEffects();
+    showPlayerOsd(`画面顺时针旋转: ${visualState.rotateDeg}°`);
+  };
+}
+
+const btnResetTransform = $("btn-reset-transform");
+if (btnResetTransform) {
+  btnResetTransform.onclick = () => {
+    visualState.mirror = false;
+    visualState.rotateDeg = 0;
+    applyVisualEffects();
+    showPlayerOsd("画面变换已重置");
+  };
+}
+
+const btnSkipOp = $("btn-skip-op");
+if (btnSkipOp) {
+  btnSkipOp.onclick = () => skipOp(90);
+}
+
+const btnAutoSkipOp = $("btn-auto-skip-op");
+if (btnAutoSkipOp) {
+  btnAutoSkipOp.onclick = () => {
+    visualState.autoSkipOp = !visualState.autoSkipOp;
+    localStorage.setItem("ani_auto_skip_op", visualState.autoSkipOp ? "1" : "0");
+    applyVisualEffects();
+    showPlayerOsd(visualState.autoSkipOp ? "自动跳过 OP: 开启" : "自动跳过 OP: 关闭");
+  };
+}
+
+const btnAbA = $("btn-ab-a");
+if (btnAbA) btnAbA.onclick = () => setAbPointA();
+const btnAbB = $("btn-ab-b");
+if (btnAbB) btnAbB.onclick = () => setAbPointB();
+const btnAbClear = $("btn-ab-clear");
+if (btnAbClear) btnAbClear.onclick = () => clearAbLoop();
+
+const skipCapsule = $("player-skip-capsule");
+if (skipCapsule) {
+  skipCapsule.onclick = () => skipOp(90);
+}
+
+// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / W 画面比例 / S 跳过片头 / [ ] \ A-B循环 / - = 弹幕微调 / Z X 字幕延迟微调
 document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
@@ -3383,7 +3703,8 @@ document.addEventListener("keydown", (e) => {
   const keys = [
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
-    "[", "]", ",", "<", ".", ">", "i", "I", "z", "Z", "x", "X"
+    "w", "W", "s", "S", "[", "]", "\\", "-", "=", "_", "+",
+    ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
   e.preventDefault();
@@ -3446,12 +3767,17 @@ document.addEventListener("keydown", (e) => {
       localStorage.setItem("ani_rate", String(RATES[nextIdx]));
       break;
     }
+    case "w": case "W": cycleAspectRatio(); break;
+    case "s": case "S": skipOp(90); break;
+    case "[": setAbPointA(); break;
+    case "]": setAbPointB(); break;
+    case "\\": clearAbLoop(); break;
+    case "-": case "_": DanmakuOverlay.adjustOffset(-1); break;
+    case "=": case "+": DanmakuOverlay.adjustOffset(1); break;
     case "f": case "F": toggleFullscreen(); break;
     case "n": case "N": playNextEpisode(); break;
     case "e": case "E": toggleEpDrawer(); break;
     case "i": case "I": toggleStatsOsd(); break;
-    case "[": DanmakuOverlay.adjustOffset(-1); break;
-    case "]": DanmakuOverlay.adjustOffset(1); break;
     case "z": case "Z": adjustSubOffset(-0.5); break;
     case "x": case "X": adjustSubOffset(0.5); break;
   }
