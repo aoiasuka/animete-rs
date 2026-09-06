@@ -1044,9 +1044,13 @@ pub struct CollectionUpdateInfo {
     pub total_episodes: usize,
     pub latest_ep: f32,
     pub latest_title: String,
+    #[serde(default)]
+    pub watched_count: usize,
+    #[serde(default)]
+    pub has_unwatched: bool,
 }
 
-/// 检查全部追番条目的最新更新状态（并发拉取 Bangumi 剧集数据）。
+/// 检查全部追番条目的最新更新状态（并发拉取 Bangumi 剧集数据并计算未看状态）。
 #[tauri::command]
 pub async fn check_collection_updates(
     ctx: State<'_, AppContext>,
@@ -1065,6 +1069,7 @@ pub async fn check_collection_updates(
         }));
     }
 
+    let ep_repo = ani_db::EpisodeRepo::new(ctx.db.clone());
     for task in tasks {
         if let Ok((bangumi_id, Ok(eps))) = task.await {
             let mains: Vec<_> = eps
@@ -1076,6 +1081,19 @@ pub async fn check_collection_updates(
             } else {
                 eps.iter().collect()
             };
+            let watched_ids = ep_repo
+                .list_watched_by_subject(bangumi_id)
+                .await
+                .unwrap_or_default();
+            let watched_set: std::collections::HashSet<i64> = watched_ids.into_iter().collect();
+            let watched_count = target_list
+                .iter()
+                .filter(|e| watched_set.contains(&(e.id.0 as i64)))
+                .count();
+            let has_unwatched = target_list
+                .iter()
+                .any(|e| !watched_set.contains(&(e.id.0 as i64)));
+
             if let Some(latest) = target_list
                 .iter()
                 .max_by(|a, b| a.ep.partial_cmp(&b.ep).unwrap_or(std::cmp::Ordering::Equal))
@@ -1086,6 +1104,8 @@ pub async fn check_collection_updates(
                         total_episodes: target_list.len(),
                         latest_ep: latest.ep,
                         latest_title: latest.display_title.clone(),
+                        watched_count,
+                        has_unwatched,
                     },
                 );
             }

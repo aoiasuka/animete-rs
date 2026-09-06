@@ -1027,7 +1027,7 @@ main {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: rgba(16, 185, 129, 0.92);
+  background: var(--accent-gradient, rgba(16, 185, 129, 0.92));
   color: #ffffff;
   font-size: 11px;
   font-weight: 600;
@@ -1038,6 +1038,36 @@ main {
   pointer-events: none;
   z-index: 2;
   letter-spacing: 0.2px;
+}
+
+.card-update-badge.unwatched {
+  background: linear-gradient(135deg, #f59e0b, #ef4444) !important;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.45);
+}
+
+.card-update-badge.caught-up {
+  background: rgba(16, 185, 129, 0.88) !important;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+.card.today-airing {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 16px var(--accent-glow) !important;
+}
+
+.card.today-airing::before {
+  content: "今日更新";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--accent-gradient);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  z-index: 3;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
 .card .card-body {
@@ -1839,22 +1869,28 @@ main {
 }
 
 .sub-sync-btns,
-.sub-size-btns {
+.sub-size-btns,
+.sub-btn-group {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 .sub-sync-btns button,
-.sub-size-btns button {
+.sub-size-btns button,
+.sub-btn-group button {
   padding: 3px 8px;
   font-size: 11px;
 }
 
-.sub-size-opt.active {
+.sub-size-opt.active,
+.sub-color-opt.active,
+.sub-bg-opt.active,
+.sub-pos-opt.active {
   background: var(--accent-gradient) !important;
   color: #fff !important;
   border-color: transparent !important;
+  font-weight: 600;
 }
 
 /* 画面比例与画质视效菜单 */
@@ -2019,11 +2055,11 @@ main {
 
 /* 现代原生 WebVTT 字幕渲染样式 */
 ::cue {
-  color: #ffffff;
-  background-color: rgba(10, 13, 20, 0.78);
+  color: var(--sub-color, #ffffff);
+  background-color: var(--sub-bg, rgba(10, 13, 20, 0.78));
   font-family: system-ui, -apple-system, sans-serif;
   font-size: var(--sub-font-size, 20px);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+  text-shadow: var(--sub-shadow, 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9));
   line-height: 1.4;
   border-radius: 4px;
   padding: 3px 10px;

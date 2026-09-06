@@ -233,8 +233,13 @@ async function loadCollections() {
         const updates = await invoke("check_collection_updates");
         state.collectionUpdates = updates || {};
         await loadCollections();
-        const count = Object.keys(state.collectionUpdates).length;
-        toast(`追更状态已更新（共检查 ${count} 部动画）`, true);
+        const list = Object.values(state.collectionUpdates || {});
+        const unwatched = list.filter((u) => u.has_unwatched).length;
+        if (unwatched > 0) {
+          toast(`追更状态已更新：共 ${list.length} 部追番，其中 ${unwatched} 部有新集待看！`, true);
+        } else {
+          toast(`追更状态已更新：共 ${list.length} 部追番，全部均已追平 ✓`, true);
+        }
       } catch (err) {
         toast("检查追更失败：" + err);
       } finally {
@@ -323,19 +328,20 @@ function renderCalendar() {
     tabs.appendChild(tab);
   }
   const current = days.find((d) => d.weekday.id === selected) ?? days[0];
+  const isCurrentDayToday = current && current.weekday.id === homeState.today;
   grid.innerHTML = "";
   if (!current || !current.items.length) {
     grid.innerHTML = `<div class="empty">这一天没有放送条目</div>`;
     return;
   }
   for (const s of current.items) {
-    grid.appendChild(subjectCard(s));
+    grid.appendChild(subjectCard(s, isCurrentDayToday));
   }
 }
 
-function subjectCard(s) {
+function subjectCard(s, isTodayAiring = false) {
   const card = document.createElement("div");
-  card.className = "card";
+  card.className = "card" + (isTodayAiring ? " today-airing" : "");
   const displayTitle = s.display_title || s.name_cn || s.name || "动画";
   const originalTitle = s.original_title || s.name || "";
   const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
@@ -344,9 +350,14 @@ function subjectCard(s) {
     : `<div style="display:grid;place-items:center;height:100%;color:var(--text-dim);font-size:32px">🎬</div>`;
   const airDate = s.air_date ? escapeHtml(s.air_date) : "放送中";
   const updateInfo = state.collectionUpdates ? state.collectionUpdates[bangumiId] : null;
-  const updateBadge = updateInfo
-    ? `<div class="card-update-badge">更新至第 ${updateInfo.latest_ep} 集</div>`
-    : "";
+  let updateBadge = "";
+  if (updateInfo) {
+    if (updateInfo.has_unwatched) {
+      updateBadge = `<div class="card-update-badge unwatched" title="更新至第 ${updateInfo.latest_ep} 集，尚有未看剧集">待看 · 第 ${updateInfo.latest_ep} 集</div>`;
+    } else {
+      updateBadge = `<div class="card-update-badge caught-up" title="已全部观看完成">已追平 · 共 ${updateInfo.latest_ep} 集 ✓</div>`;
+    }
+  }
   card.innerHTML = `
     <div class="card-cover">
       ${coverImg}
@@ -2472,7 +2483,7 @@ let lastSavedSec = -10;
 // 应用内 BT 播放（anibt://）失败时回落外部播放器用的本地路径
 let btFallbackPath = null;
 let btErrorListener = null;
-const RATES = [1.0, 1.25, 1.5, 2.0];
+const RATES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
 
 function mediaKey(str) {
   let h = 5381;
@@ -3549,9 +3560,31 @@ const subState = {
   rawVtt: "",
   cues: [],
   offsetSec: 0.0,
-  size: "md",
+  size: localStorage.getItem("ani_sub_size") || "md",
+  color: localStorage.getItem("ani_sub_color") || "white",
+  bg: localStorage.getItem("ani_sub_bg") || "dim",
+  position: localStorage.getItem("ani_sub_pos") || "bottom",
   trackEl: null,
   blobUrl: null,
+};
+
+const SUB_COLORS = {
+  white: "#ffffff",
+  yellow: "#fde047",
+  cyan: "#38bdf8",
+  green: "#4ade80",
+};
+
+const SUB_BGS = {
+  dim: "rgba(10, 13, 20, 0.78)",
+  none: "transparent",
+  solid: "#000000",
+};
+
+const SUB_SHADOWS = {
+  dim: "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)",
+  none: "0 0 4px #000, 0 0 2px #000, 1px 1px 2px #000, -1px -1px 2px #000",
+  solid: "none",
 };
 
 function srtToVtt(srtText) {
@@ -3586,7 +3619,7 @@ function parseVttCues(vttText) {
   return cues;
 }
 
-function buildShiftedVtt(cues, offsetSec) {
+function buildShiftedVtt(cues, offsetSec, position = subState.position) {
   let out = "WEBVTT\n\n";
   const fmtVttTime = (sec) => {
     sec = Math.max(0, sec);
@@ -3596,11 +3629,12 @@ function buildShiftedVtt(cues, offsetSec) {
     const ms = Math.floor((sec % 1) * 1000);
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
   };
+  const lineSetting = position === "top" ? " line:10%" : " line:90%";
   for (const cue of cues) {
     const s = cue.start + offsetSec;
     const e = cue.end + offsetSec;
     if (e > 0) {
-      out += `${fmtVttTime(s)} --> ${fmtVttTime(e)}\n${cue.text}\n\n`;
+      out += `${fmtVttTime(s)} --> ${fmtVttTime(e)}${lineSetting}\n${cue.text}\n\n`;
     }
   }
   return out;
@@ -3664,7 +3698,9 @@ function loadSubtitleFile(file) {
     subState.filename = file.name;
     subState.loaded = true;
     subState.offsetSec = 0.0;
-    applySubtitleTrack(content);
+    const shifted = buildShiftedVtt(subState.cues, 0.0, subState.position);
+    applySubtitleTrack(shifted);
+    applySubtitleStyles();
     updateSubUI();
     toast("已加载外挂字幕：" + file.name, true);
     showPlayerOsd("已加载字幕: " + file.name);
@@ -3700,21 +3736,66 @@ function adjustSubOffset(delta) {
     return;
   }
   subState.offsetSec = Math.round((subState.offsetSec + delta) * 10) / 10;
-  const shifted = buildShiftedVtt(subState.cues, subState.offsetSec);
+  const shifted = buildShiftedVtt(subState.cues, subState.offsetSec, subState.position);
   applySubtitleTrack(shifted);
   updateSubUI();
   const sign = subState.offsetSec > 0 ? "+" : "";
   showPlayerOsd(`字幕延迟: ${sign}${subState.offsetSec.toFixed(1)}s`);
 }
 
+function applySubtitleStyles() {
+  const sizes = { sm: "17px", md: "21px", lg: "26px" };
+  document.documentElement.style.setProperty("--sub-font-size", sizes[subState.size] || "21px");
+  document.documentElement.style.setProperty("--sub-color", SUB_COLORS[subState.color] || "#ffffff");
+  document.documentElement.style.setProperty("--sub-bg", SUB_BGS[subState.bg] || "rgba(10, 13, 20, 0.78)");
+  document.documentElement.style.setProperty("--sub-shadow", SUB_SHADOWS[subState.bg] || "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)");
+
+  document.querySelectorAll(".sub-size-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-size") === subState.size);
+  });
+  document.querySelectorAll(".sub-color-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-color") === subState.color);
+  });
+  document.querySelectorAll(".sub-bg-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-bg") === subState.bg);
+  });
+  document.querySelectorAll(".sub-pos-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-pos") === subState.position);
+  });
+}
+
 function setSubSize(size) {
   subState.size = size;
-  const sizes = { sm: "17px", md: "21px", lg: "26px" };
-  document.documentElement.style.setProperty("--sub-font-size", sizes[size] || "21px");
-  document.querySelectorAll(".sub-size-opt").forEach((btn) => {
-    btn.classList.toggle("active", btn.getAttribute("data-size") === size);
-  });
+  localStorage.setItem("ani_sub_size", size);
+  applySubtitleStyles();
   showPlayerOsd(`字幕字号: ${size === "sm" ? "小" : size === "lg" ? "大" : "中"}`);
+}
+
+function setSubColor(color) {
+  subState.color = color;
+  localStorage.setItem("ani_sub_color", color);
+  applySubtitleStyles();
+  const names = { white: "纯白", yellow: "明黄", cyan: "天蓝", green: "翡翠" };
+  showPlayerOsd(`字幕色彩: ${names[color] || color}`);
+}
+
+function setSubBg(bg) {
+  subState.bg = bg;
+  localStorage.setItem("ani_sub_bg", bg);
+  applySubtitleStyles();
+  const names = { dim: "半透明", none: "纯描边", solid: "纯黑" };
+  showPlayerOsd(`底框样式: ${names[bg] || bg}`);
+}
+
+function setSubPosition(pos) {
+  subState.position = pos;
+  localStorage.setItem("ani_sub_pos", pos);
+  applySubtitleStyles();
+  if (subState.loaded && subState.cues.length > 0) {
+    const shifted = buildShiftedVtt(subState.cues, subState.offsetSec, subState.position);
+    applySubtitleTrack(shifted);
+  }
+  showPlayerOsd(`字幕位置: ${pos === "top" ? "顶部" : "底部"}`);
 }
 
 const subBtn = $("player-sub-btn");
@@ -3756,6 +3837,17 @@ if (subDelayPlus) subDelayPlus.onclick = () => adjustSubOffset(0.5);
 document.querySelectorAll(".sub-size-opt").forEach((btn) => {
   btn.onclick = () => setSubSize(btn.getAttribute("data-size"));
 });
+document.querySelectorAll(".sub-color-opt").forEach((btn) => {
+  btn.onclick = () => setSubColor(btn.getAttribute("data-color"));
+});
+document.querySelectorAll(".sub-bg-opt").forEach((btn) => {
+  btn.onclick = () => setSubBg(btn.getAttribute("data-bg"));
+});
+document.querySelectorAll(".sub-pos-opt").forEach((btn) => {
+  btn.onclick = () => setSubPosition(btn.getAttribute("data-pos"));
+});
+
+applySubtitleStyles();
 
 // 播放器区域支持直接拖拽挂载字幕文件
 const pStage = document.querySelector(".player-stage");
