@@ -1924,11 +1924,18 @@ main {
 .visual-aspect-opt.active,
 .visual-filter-opt.active,
 .visual-toggle-btn.active,
-.visual-action-btn.active {
+.visual-action-btn.active,
+.visual-boost-opt.active {
   background: var(--accent-gradient) !important;
   color: #fff !important;
   border-color: transparent !important;
   font-weight: 600;
+}
+
+#player-pip.active {
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .visual-menu-sep {
@@ -1983,6 +1990,25 @@ main {
   to {
     transform: translateY(0);
     opacity: 1;
+  }
+}
+
+/* 播放器相机快门白闪动效 */
+.player-shutter-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  z-index: 100;
+  animation: shutterFlash 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shutterFlash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }
 

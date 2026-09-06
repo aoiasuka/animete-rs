@@ -656,8 +656,20 @@
                 <button id="btn-ab-clear" class="ghost small visual-ab-btn" title="清除循环 (快捷键 \)">清除</button>
               </div>
             </div>
+            <div class="visual-menu-sep"></div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">音效超频增益</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-boost-opt active" data-boost="1.0" title="原生原始音量">100% 原音</button>
+                <button class="ghost small visual-boost-opt" data-boost="1.5" title="音量适度增强 1.5 倍">150% 增强</button>
+                <button class="ghost small visual-boost-opt" data-boost="2.0" title="音量超频至 2 倍">200% 超频</button>
+                <button class="ghost small visual-boost-opt" data-boost="3.0" title="极限增益 3 倍">300% 极限</button>
+              </div>
+            </div>
           </div>
         </div>
+        <button id="player-screenshot-btn" class="ghost small" title="名场面截帧并复制到剪贴板 (快捷键 C)">截屏 📸</button>
+        <button id="player-pip" class="ghost small" title="画中画悬浮小窗 (快捷键 P)">画中画 🗗</button>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
         <button id="player-stats-btn" class="ghost small" title="播放统计信息 (I)">ℹ 统计</button>
@@ -665,6 +677,7 @@
       <div class="player-stage">
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
+        <div id="player-shutter-flash" class="player-shutter-flash hidden"></div>
         <div id="player-osd" class="player-osd hidden"></div>
         <div id="player-spinner" class="player-spinner hidden">
           <div class="spinner-ring"></div>
@@ -741,6 +754,9 @@
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><kbd>M</kbd></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">降低 / 提高播放倍速</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">名场面截帧保存并复制到剪贴板</span><kbd>C</kbd></div>
+          <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
+          <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">循环切换画面比例与填充</span><kbd>W</kbd></div>
           <div class="sg-item"><span class="sg-desc">一键跳过片头 (+90s)</span><kbd>S</kbd></div>
           <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></div></div>

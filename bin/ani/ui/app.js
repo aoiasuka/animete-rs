@@ -2965,6 +2965,176 @@ function clearAbLoop(notify = true) {
   }
 }
 
+// ---------- Web Audio 音量超频增益系统 ----------
+const audioBoostState = {
+  level: parseFloat(localStorage.getItem("ani_audio_boost")) || 1.0,
+  ctx: null,
+  sourceNode: null,
+  gainNode: null,
+};
+
+const BOOST_LEVELS = [1.0, 1.5, 2.0, 3.0];
+
+function initAudioBoost() {
+  const v = $("video");
+  if (!v) return;
+  if (!audioBoostState.ctx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    try {
+      audioBoostState.ctx = new AudioContext();
+      audioBoostState.sourceNode = audioBoostState.ctx.createMediaElementSource(v);
+      audioBoostState.gainNode = audioBoostState.ctx.createGain();
+      audioBoostState.gainNode.gain.value = audioBoostState.level;
+      audioBoostState.sourceNode.connect(audioBoostState.gainNode);
+      audioBoostState.gainNode.connect(audioBoostState.ctx.destination);
+    } catch {
+      // 避免重复创建 MediaElementSource 错误
+    }
+  }
+  if (audioBoostState.ctx && audioBoostState.ctx.state === "suspended") {
+    audioBoostState.ctx.resume().catch(() => {});
+  }
+}
+
+function setAudioBoost(level, notify = false) {
+  audioBoostState.level = level;
+  localStorage.setItem("ani_audio_boost", String(level));
+  initAudioBoost();
+  if (audioBoostState.gainNode) {
+    audioBoostState.gainNode.gain.value = level;
+  }
+  document.querySelectorAll(".visual-boost-opt").forEach((btn) => {
+    btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.boost) - level) < 0.05);
+  });
+  if (notify) {
+    const pct = Math.round(level * 100);
+    const tag = level > 1.0 ? (level >= 3.0 ? " (极限超频)" : " (增强)") : " (原音)";
+    showPlayerOsd(`🔊 音量增益: ${pct}%${tag}`);
+    toast(`音效增益已调整为 ${pct}%${tag}`, true);
+  }
+}
+
+function adjustAudioBoost(step = 0.5) {
+  const curIdx = BOOST_LEVELS.findIndex((l) => Math.abs(l - audioBoostState.level) < 0.05);
+  let nextIdx = curIdx >= 0 ? curIdx + (step > 0 ? 1 : -1) : 0;
+  nextIdx = Math.max(0, Math.min(BOOST_LEVELS.length - 1, nextIdx));
+  setAudioBoost(BOOST_LEVELS[nextIdx], true);
+}
+
+// ---------- 名场面无损截帧与系统剪贴板分享 ----------
+let isCapturingFrame = false;
+async function captureVideoFrame() {
+  const v = $("video");
+  if (!v || isCapturingFrame || !v.videoWidth || !v.videoHeight) {
+    toast("暂无视频画面可供截取");
+    return;
+  }
+  isCapturingFrame = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    const ctx = canvas.getContext("2d");
+
+    // 若用户应用了色彩滤镜或镜像/旋转变换，同步应用到导出画面
+    if (visualState.filter !== "none") {
+      ctx.filter = getComputedStyle(v).filter;
+    }
+    if (visualState.mirror || visualState.rotateDeg) {
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      if (visualState.mirror) ctx.scale(-1, 1);
+      if (visualState.rotateDeg) ctx.rotate((visualState.rotateDeg * Math.PI) / 180);
+      ctx.drawImage(v, -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    }
+
+    // 触发快门白闪动效
+    const flash = $("player-shutter-flash");
+    if (flash) {
+      flash.classList.remove("hidden");
+      setTimeout(() => flash.classList.add("hidden"), 350);
+    }
+
+    const subjectName = (state.subject?.name_cn || state.subject?.name || state.subject?.display_title || "anime")
+      .replace(/[\\/:*?"<>|]/g, "_")
+      .trim();
+    const epNum = state.currentEp != null ? `_EP${String(state.currentEp).padStart(2, "0")}` : "";
+    const curSec = Math.floor(v.currentTime);
+    const m = Math.floor(curSec / 60);
+    const s = curSec % 60;
+    const timeStr = `${String(m).padStart(2, "0")}m${String(s).padStart(2, "0")}s`;
+    const filename = `[${subjectName}]${epNum}_${timeStr}.png`;
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        toast("截图生成失败");
+        isCapturingFrame = false;
+        return;
+      }
+
+      // 1. 尝试复制到系统剪贴板（支持在聊天工具直接 Ctrl+V）
+      let clipboardCopied = false;
+      if (navigator.clipboard && window.ClipboardItem) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          clipboardCopied = true;
+        } catch {
+          clipboardCopied = false;
+        }
+      }
+
+      // 2. 触发浏览器/系统原生下载文件保存
+      const a = document.createElement("a");
+      a.download = filename;
+      const blobUrl = URL.createObjectURL(blob);
+      a.href = blobUrl;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 1000);
+
+      const msg = clipboardCopied
+        ? "📸 名场面截图已保存并复制到剪贴板！"
+        : "📸 名场面截图已保存至本地！";
+      showPlayerOsd(msg);
+      toast(`${msg}（${canvas.width}×${canvas.height}）`, true);
+      isCapturingFrame = false;
+    }, "image/png");
+  } catch (e) {
+    isCapturingFrame = false;
+    toast("截屏失败：" + e);
+  }
+}
+
+// ---------- 画中画悬浮窗功能 ----------
+async function togglePiP() {
+  const v = $("video");
+  if (!v) return;
+  if (!document.pictureInPictureEnabled) {
+    toast("当前系统环境不支持画中画功能");
+    return;
+  }
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      showPlayerOsd("🗗 退出画中画");
+    } else {
+      await v.requestPictureInPicture();
+      showPlayerOsd("🗗 已进入画中画悬浮窗");
+      toast("已开启画中画悬浮窗（切至桌面或其他页面可持续悬浮观看）", true);
+    }
+  } catch (e) {
+    toast("画中画操作失败：" + e);
+  }
+}
+
 function destroyPlayer() {
   const v = $("video");
   v.pause();
@@ -3003,6 +3173,11 @@ function destroyPlayer() {
   if (visualMenu) visualMenu.classList.add("hidden");
   const skipCapsule = $("player-skip-capsule");
   if (skipCapsule) skipCapsule.classList.add("hidden");
+  if (document.pictureInPictureElement) {
+    document.exitPictureInPicture().catch(() => {});
+  }
+  const pipBtn = $("player-pip");
+  if (pipBtn) pipBtn.classList.remove("active");
   clearAbLoop(false);
   opAutoSkipped = false;
   v.removeAttribute("src");
@@ -3029,6 +3204,9 @@ function showPlayer(url, title) {
   updatePlayerNextBtn();
   const v = $("video");
   applyVisualEffects();
+  if (audioBoostState.level !== 1.0) {
+    setAudioBoost(audioBoostState.level);
+  }
   if (!url) return;
 
   // 断点续播：加载后跳到上次位置（看完的从头播）。
@@ -3692,7 +3870,34 @@ if (skipCapsule) {
   skipCapsule.onclick = () => skipOp(90);
 }
 
-// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / M 静音 / 0-9 进度跳转 / < > 倍速 / W 画面比例 / S 跳过片头 / [ ] \ A-B循环 / - = 弹幕微调 / Z X 字幕延迟微调
+const screenshotBtn = $("player-screenshot-btn");
+if (screenshotBtn) {
+  screenshotBtn.onclick = () => captureVideoFrame();
+}
+
+const pipBtn = $("player-pip");
+if (pipBtn) {
+  pipBtn.onclick = () => togglePiP();
+}
+
+document.querySelectorAll(".visual-boost-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const level = parseFloat(btn.getAttribute("data-boost")) || 1.0;
+    setAudioBoost(level, true);
+  };
+});
+
+const vEl = $("video");
+if (vEl) {
+  vEl.addEventListener("enterpictureinpicture", () => {
+    $("player-pip")?.classList.add("active");
+  });
+  vEl.addEventListener("leavepictureinpicture", () => {
+    $("player-pip")?.classList.remove("active");
+  });
+}
+
+// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / Shift+↑↓ 音效超频 / C 截图 / P 画中画 / M 静音 / 0-9 进度跳转 / < > 倍速 / W 画面比例 / S 跳过片头 / [ ] \ A-B循环 / - = 弹幕微调 / Z X 字幕延迟微调
 document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
@@ -3703,7 +3908,7 @@ document.addEventListener("keydown", (e) => {
   const keys = [
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
-    "w", "W", "s", "S", "[", "]", "\\", "-", "=", "_", "+",
+    "w", "W", "s", "S", "c", "C", "p", "P", "[", "]", "\\", "-", "=", "_", "+",
     ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
@@ -3737,13 +3942,21 @@ document.addEventListener("keydown", (e) => {
       showPlayerOsd("⏩ 快进 10s · " + fmtTime(v.currentTime));
       break;
     case "ArrowUp":
-      v.muted = false;
-      v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10);
-      showPlayerOsd("🔊 音量: " + Math.round(v.volume * 100) + "%");
+      if (e.shiftKey) {
+        adjustAudioBoost(0.5);
+      } else {
+        v.muted = false;
+        v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10);
+        showPlayerOsd("🔊 音量: " + Math.round(v.volume * 100) + "%");
+      }
       break;
     case "ArrowDown":
-      v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10);
-      showPlayerOsd("🔉 音量: " + Math.round(v.volume * 100) + "%");
+      if (e.shiftKey) {
+        adjustAudioBoost(-0.5);
+      } else {
+        v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10);
+        showPlayerOsd("🔉 音量: " + Math.round(v.volume * 100) + "%");
+      }
       break;
     case "m": case "M":
       v.muted = !v.muted;
@@ -3769,6 +3982,8 @@ document.addEventListener("keydown", (e) => {
     }
     case "w": case "W": cycleAspectRatio(); break;
     case "s": case "S": skipOp(90); break;
+    case "c": case "C": captureVideoFrame(); break;
+    case "p": case "P": togglePiP(); break;
     case "[": setAbPointA(); break;
     case "]": setAbPointB(); break;
     case "\\": clearAbLoop(); break;
