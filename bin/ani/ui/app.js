@@ -107,7 +107,7 @@ function fmtSpeed(bps) {
 
 // ---------- 首页：新番时间表 + 最近搜索 ----------
 
-const homeState = { calendar: [], today: 0, loaded: false };
+const homeState = { calendar: [], today: 0, loaded: false, calFilter: "all" };
 
 // JS getDay(): 0=周日…6=周六；Bangumi weekday id: 1=周一…7=周日
 function todayWeekdayId() {
@@ -397,14 +397,36 @@ function renderCalendar() {
   tabs.innerHTML = "";
   const days = [...homeState.calendar].sort((a, b) => a.weekday.id - b.weekday.id);
   let selected = homeState.selected ?? homeState.today;
+
+  const calFilter = homeState.calFilter || "all";
+  document.querySelectorAll(".cal-filter-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-filter") === calFilter);
+  });
+
+  const filterItem = (s) => {
+    if (calFilter === "high_score") {
+      return typeof s.score === "number" && s.score >= 7.5;
+    }
+    if (calFilter === "collected") {
+      const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
+      return (
+        s.collection_type != null ||
+        cachedCollections.some((c) => Number(c.id) === bangumiId) ||
+        (state.collectionUpdates && state.collectionUpdates[bangumiId] != null)
+      );
+    }
+    return true;
+  };
+
   for (const day of days) {
     const isToday = day.weekday.id === homeState.today;
+    const dayFilteredCount = day.items.filter(filterItem).length;
     const tab = document.createElement("div");
     tab.className = "wd-tab" + (day.weekday.id === selected ? " active" : "");
     tab.innerHTML = `
       ${isToday ? '<span class="today-badge" title="今天"></span>' : ""}
       <span>${escapeHtml(day.weekday.cn)}</span>
-      <span class="cnt">${day.items.length}</span>`;
+      <span class="cnt">${dayFilteredCount}</span>`;
     tab.onclick = () => {
       homeState.selected = day.weekday.id;
       renderCalendar();
@@ -418,7 +440,18 @@ function renderCalendar() {
     grid.innerHTML = `<div class="empty">这一天没有放送条目</div>`;
     return;
   }
-  for (const s of current.items) {
+  const filteredItems = current.items.filter(filterItem);
+  if (!filteredItems.length) {
+    const tip =
+      calFilter === "high_score"
+        ? "这一天暂无评分 7.5 以上的高分口碑条目"
+        : calFilter === "collected"
+        ? "这一天暂无你已关注追番的条目"
+        : "这一天没有放送条目";
+    grid.innerHTML = `<div class="empty">${tip}</div>`;
+    return;
+  }
+  for (const s of filteredItems) {
     grid.appendChild(subjectCard(s, isCurrentDayToday));
   }
 }
@@ -495,6 +528,13 @@ if (calExportBtn) {
   calExportBtn.onclick = () => exportAnimeCalendar();
 }
 
+document.querySelectorAll(".cal-filter-tab").forEach((tab) => {
+  tab.onclick = () => {
+    homeState.calFilter = tab.getAttribute("data-filter") || "all";
+    renderCalendar();
+  };
+});
+
 function subjectCard(s, isTodayAiring = false) {
   const card = document.createElement("div");
   card.className = "card" + (isTodayAiring ? " today-airing" : "");
@@ -514,6 +554,12 @@ function subjectCard(s, isTodayAiring = false) {
       updateBadge = `<div class="card-update-badge caught-up" title="已全部观看完成">已追平 · 共 ${updateInfo.latest_ep} 集 ✓</div>`;
     }
   }
+  let scoreBadge = "";
+  if (typeof s.score === "number" && s.score > 0) {
+    const formattedScore = s.score.toFixed(1);
+    const rankText = s.rank ? ` #${s.rank}` : "";
+    scoreBadge = `<div class="card-score-badge" title="Bangumi 评分: ${formattedScore}${s.rank ? ` · 排名 #${s.rank}` : ""}">★ ${formattedScore}${rankText ? `<span style="font-size:9.5px;opacity:0.85;margin-left:2px">${rankText}</span>` : ""}</div>`;
+  }
   let colTypeBadge = "";
   if (s.collection_type) {
     const tMap = {
@@ -532,6 +578,7 @@ function subjectCard(s, isTodayAiring = false) {
   card.innerHTML = `
     <div class="card-cover">
       ${coverImg}
+      ${scoreBadge}
       ${updateBadge}
       ${colTypeBadge}
       <div class="card-play-hint">
@@ -552,6 +599,8 @@ function subjectCard(s, isTodayAiring = false) {
     name: originalTitle,
     cover_url: s.cover_url,
     air_date: s.air_date,
+    score: s.score,
+    rank: s.rank,
   });
   return card;
 }
@@ -676,7 +725,9 @@ function applySearchFilterAndSort() {
     });
   }
 
-  if (searchSortOrder === "air_desc") {
+  if (searchSortOrder === "score_desc") {
+    list.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  } else if (searchSortOrder === "air_desc") {
     list.sort((a, b) => (b.air_date || "").localeCompare(a.air_date || ""));
   } else if (searchSortOrder === "air_asc") {
     list.sort((a, b) => (a.air_date || "9999").localeCompare(b.air_date || "9999"));
@@ -4892,6 +4943,9 @@ const visualState = {
   mirror: false,
   rotateDeg: 0,
   filter: localStorage.getItem("ani_visual_filter") || "none",
+  brightness: parseInt(localStorage.getItem("ani_visual_brightness") || "100", 10),
+  contrast: parseInt(localStorage.getItem("ani_visual_contrast") || "100", 10),
+  saturation: parseInt(localStorage.getItem("ani_visual_saturation") || "100", 10),
   autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
   autoSkipEd: parseInt(localStorage.getItem("ani_auto_skip_ed") || "0", 10),
   abLoop: { a: null, b: null, active: false },
@@ -4914,6 +4968,8 @@ const FILTER_LABELS = {
   vivid: "动漫鲜艳",
   warm: "护眼柔和",
   contrast: "明亮锐利",
+  shadow: "暗部增强",
+  manga: "黑白漫画",
 };
 
 function applyVisualEffects(notify = false) {
@@ -4968,14 +5024,51 @@ function applyVisualEffects(notify = false) {
   if (visualState.rotateDeg) transforms.push(`rotate(${visualState.rotateDeg}deg)`);
   v.style.setProperty("--video-transform", transforms.length > 0 ? transforms.join(" ") : "none");
 
-  // 3. 动漫硬件加速色彩滤镜
+  // 3. 动漫硬件加速色彩滤镜 + 细节微调滑块 (亮度/对比度/饱和度)
   const FILTERS = {
-    none: "none",
+    none: "",
     vivid: "saturate(1.25) contrast(1.08) brightness(1.02)",
     warm: "sepia(0.18) saturate(0.9) brightness(0.96) hue-rotate(-5deg)",
     contrast: "contrast(1.2) brightness(1.06) saturate(1.1)",
+    shadow: "brightness(1.15) contrast(1.12) saturate(1.05)",
+    manga: "grayscale(1) contrast(1.35) brightness(1.05)",
   };
-  v.style.setProperty("--video-filter", FILTERS[visualState.filter] || "none");
+
+  const baseFilter = FILTERS[visualState.filter] || "";
+  const adjustments = [];
+  if (visualState.brightness !== 100) {
+    adjustments.push(`brightness(${(visualState.brightness / 100).toFixed(2)})`);
+  }
+  if (visualState.contrast !== 100) {
+    adjustments.push(`contrast(${(visualState.contrast / 100).toFixed(2)})`);
+  }
+  if (visualState.saturation !== 100) {
+    adjustments.push(`saturate(${(visualState.saturation / 100).toFixed(2)})`);
+  }
+  const combinedFilter = [baseFilter, ...adjustments].filter(Boolean).join(" ") || "none";
+  v.style.setProperty("--video-filter", combinedFilter);
+
+  // 同步微调滑块 UI
+  const brightSlider = $("visual-bright-slider");
+  if (brightSlider && document.activeElement !== brightSlider) {
+    brightSlider.value = visualState.brightness;
+  }
+  const brightVal = $("visual-bright-val");
+  if (brightVal) brightVal.textContent = `${visualState.brightness}%`;
+
+  const contrastSlider = $("visual-contrast-slider");
+  if (contrastSlider && document.activeElement !== contrastSlider) {
+    contrastSlider.value = visualState.contrast;
+  }
+  const contrastVal = $("visual-contrast-val");
+  if (contrastVal) contrastVal.textContent = `${visualState.contrast}%`;
+
+  const satSlider = $("visual-sat-slider");
+  if (satSlider && document.activeElement !== satSlider) {
+    satSlider.value = visualState.saturation;
+  }
+  const satVal = $("visual-sat-val");
+  if (satVal) satVal.textContent = `${visualState.saturation}%`;
 
   // 同步 UI 状态
   document.querySelectorAll(".visual-aspect-opt").forEach((btn) => {
@@ -6121,6 +6214,117 @@ if (dmClearBtn) {
   };
 }
 
+function exportDanmakuXml() {
+  const events = DanmakuOverlay.getEvents();
+  if (!events || !events.length) {
+    toast("当前没有已加载的弹幕可供导出");
+    return;
+  }
+  const rawTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "未知动画";
+  const safeTitle = rawTitle.replace(/[/\\:*?"<>|]/g, "_");
+  const epNo = state.currentEp != null ? state.currentEp : "1";
+  const filename = `${safeTitle} - 第${epNo}话.xml`;
+
+  const escapeXml = (str) =>
+    String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<i>',
+    '  <chatserver>chat.bilibili.com</chatserver>',
+    '  <chatid>0</chatid>',
+    '  <mission>0</mission>',
+    '  <maxlimit>5000</maxlimit>',
+    '  <state>0</state>',
+    '  <real_name>0</real_name>',
+    '  <source>k-v</source>',
+  ];
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  events.forEach((e, idx) => {
+    const timeSec = ((e.time_ms || 0) / 1000).toFixed(3);
+    let modeNum = 1; // 1=scroll, 4=bottom, 5=top
+    if (e.mode === "top") modeNum = 5;
+    else if (e.mode === "bottom") modeNum = 4;
+    const colorNum = typeof e.color === "number" ? e.color : (parseInt(e.color, 16) || 16777215);
+    const p = `${timeSec},${modeNum},25,${colorNum},${nowSec},0,0,${idx + 1}`;
+    lines.push(`  <d p="${p}">${escapeXml(e.text)}</d>`);
+  });
+
+  lines.push('</i>');
+  const xmlContent = lines.join("\r\n");
+
+  const blob = new Blob([xmlContent], { type: "application/xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  toast(`已导出 ${events.length} 条 B 站标准 XML 弹幕（${filename}）`, true);
+  showPlayerOsd(`已导出 XML 弹幕 (${events.length} 条)`);
+}
+
+function exportDanmakuJson() {
+  const events = DanmakuOverlay.getEvents();
+  if (!events || !events.length) {
+    toast("当前没有已加载的弹幕可供导出");
+    return;
+  }
+  const rawTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "未知动画";
+  const safeTitle = rawTitle.replace(/[/\\:*?"<>|]/g, "_");
+  const epNo = state.currentEp != null ? state.currentEp : "1";
+  const filename = `${safeTitle} - 第${epNo}话.json`;
+
+  const exportData = {
+    anime: safeTitle,
+    episode: epNo,
+    exported_at: new Date().toISOString(),
+    total: events.length,
+    comments: events.map((e) => ({
+      time: Math.round(e.time_ms || 0) / 1000,
+      time_ms: Math.round(e.time_ms || 0),
+      mode: e.mode || "scroll",
+      color: typeof e.color === "number" ? e.color : 16777215,
+      text: e.text || "",
+    })),
+  };
+
+  const jsonContent = JSON.stringify(exportData, null, 2);
+  const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  toast(`已导出 ${events.length} 条 JSON 弹幕（${filename}）`, true);
+  showPlayerOsd(`已导出 JSON 弹幕 (${events.length} 条)`);
+}
+
+const dmExportXmlBtn = $("dm-export-xml-btn");
+if (dmExportXmlBtn) {
+  dmExportXmlBtn.onclick = () => {
+    exportDanmakuXml();
+    $("danmaku-menu")?.classList.add("hidden");
+  };
+}
+
+const dmExportJsonBtn = $("dm-export-json-btn");
+if (dmExportJsonBtn) {
+  dmExportJsonBtn.onclick = () => {
+    exportDanmakuJson();
+    $("danmaku-menu")?.classList.add("hidden");
+  };
+}
+
 // ---------- 弹幕手动搜索与跨集匹配系统 ----------
 const dmManualMatchBtn = $("dm-manual-match-btn");
 const dmMatchModal = $("dm-match-modal");
@@ -6692,10 +6896,25 @@ if (subLoadBtn && subFileInput) {
 const subClearBtn = $("sub-clear-btn");
 if (subClearBtn) subClearBtn.onclick = () => unloadSubtitle();
 
+function resetSubOffset() {
+  if (!subState.loaded || subState.cues.length === 0) {
+    subState.offsetSec = 0.0;
+    updateSubUI();
+    return;
+  }
+  subState.offsetSec = 0.0;
+  const shifted = buildShiftedVtt(subState.cues, 0.0, subState.position);
+  applySubtitleTrack(shifted);
+  updateSubUI();
+  showPlayerOsd("字幕延迟已重置为 0.0s");
+}
+
 const subDelayMinus = $("sub-delay-minus");
 if (subDelayMinus) subDelayMinus.onclick = () => adjustSubOffset(-0.5);
 const subDelayPlus = $("sub-delay-plus");
 if (subDelayPlus) subDelayPlus.onclick = () => adjustSubOffset(0.5);
+const subDelayReset = $("sub-delay-reset");
+if (subDelayReset) subDelayReset.onclick = () => resetSubOffset();
 
 document.querySelectorAll(".sub-size-opt").forEach((btn) => {
   btn.onclick = () => setSubSize(btn.getAttribute("data-size"));
@@ -6888,6 +7107,47 @@ if (btnResetTransform) {
     visualState.rotateDeg = 0;
     applyVisualEffects();
     showPlayerOsd("画面变换已重置");
+  };
+}
+
+const visualBrightSlider = $("visual-bright-slider");
+if (visualBrightSlider) {
+  visualBrightSlider.oninput = (e) => {
+    visualState.brightness = parseInt(e.target.value, 10) || 100;
+    localStorage.setItem("ani_visual_brightness", String(visualState.brightness));
+    applyVisualEffects();
+  };
+}
+
+const visualContrastSlider = $("visual-contrast-slider");
+if (visualContrastSlider) {
+  visualContrastSlider.oninput = (e) => {
+    visualState.contrast = parseInt(e.target.value, 10) || 100;
+    localStorage.setItem("ani_visual_contrast", String(visualState.contrast));
+    applyVisualEffects();
+  };
+}
+
+const visualSatSlider = $("visual-sat-slider");
+if (visualSatSlider) {
+  visualSatSlider.oninput = (e) => {
+    visualState.saturation = parseInt(e.target.value, 10) || 100;
+    localStorage.setItem("ani_visual_saturation", String(visualState.saturation));
+    applyVisualEffects();
+  };
+}
+
+const btnResetVisualSliders = $("btn-reset-visual-sliders");
+if (btnResetVisualSliders) {
+  btnResetVisualSliders.onclick = () => {
+    visualState.brightness = 100;
+    visualState.contrast = 100;
+    visualState.saturation = 100;
+    localStorage.setItem("ani_visual_brightness", "100");
+    localStorage.setItem("ani_visual_contrast", "100");
+    localStorage.setItem("ani_visual_saturation", "100");
+    applyVisualEffects();
+    showPlayerOsd("调色滑块已重置 (100%)");
   };
 }
 

@@ -133,6 +133,11 @@
               <span class="meta">放送时间表 · 数据来自 Bangumi</span>
             </div>
             <div class="home-head-actions">
+              <div class="calendar-filter-tabs" id="calendar-filter-tabs">
+                <button class="ghost small cal-filter-tab active" data-filter="all">全部放送</button>
+                <button class="ghost small cal-filter-tab" data-filter="high_score" title="仅查看 Bangumi 评分为 7.5 及以上的口碑佳作">高分佳作 (★7.5+)</button>
+                <button class="ghost small cal-filter-tab" data-filter="collected" title="仅查看已关注追番的新番条目">我的追番 📺</button>
+              </div>
               <button id="stats-btn" class="ghost small" title="查看个人观影足迹与追番数据统计报表">追番统计 📊</button>
               <button id="open-local-video-btn" class="ghost small" title="打开本地视频文件播放 (亦可直接拖拽视频到窗口)">打开本地视频 📂</button>
               <input type="file" id="local-video-file-input" accept=".mp4,.mkv,.webm,.flv,.m4v,.avi,.ts" class="hidden" />
@@ -187,6 +192,7 @@
             </div>
             <select id="search-sort-select" class="select small" title="搜索结果排序">
               <option value="default">默认匹配</option>
+              <option value="score_desc">Bangumi 评分 (高→低)</option>
               <option value="air_desc">放送日期 (新→旧)</option>
               <option value="air_asc">放送日期 (旧→新)</option>
               <option value="title">标题拼音/首字母</option>
@@ -777,6 +783,14 @@
                 <button id="dm-filter-color" class="ghost small dm-filter-chip" title="屏蔽彩色弹幕（全部强制白色）">彩色</button>
               </div>
             </div>
+            <div class="sub-menu-sep"></div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">弹幕导出</span>
+              <div class="dm-btn-group">
+                <button id="dm-export-xml-btn" class="ghost small" title="导出为 B 站标准 XML 弹幕文件 (适配 PotPlayer/MPV/VLC/弹幕库)">XML 导出</button>
+                <button id="dm-export-json-btn" class="ghost small" title="导出为 JSON 弹幕备份文件">JSON 导出</button>
+              </div>
+            </div>
             <button id="dm-open-blocklist-btn" class="sub-menu-item">🚫 弹幕屏蔽词管理 (<span id="dm-blocklist-count-badge">0</span>)</button>
           </div>
         </div>
@@ -798,6 +812,7 @@
                 <button id="sub-delay-minus" class="ghost small" title="提前 0.5s (快捷键 Z)">-0.5s</button>
                 <span id="sub-delay-val" class="meta mono">0.0s</span>
                 <button id="sub-delay-plus" class="ghost small" title="延后 0.5s (快捷键 X)">+0.5s</button>
+                <button id="sub-delay-reset" class="ghost small" title="重置字幕时间为 0.0s">重置</button>
               </div>
             </div>
             <div class="sub-menu-row">
@@ -864,6 +879,28 @@
                 <button class="ghost small visual-filter-opt" data-filter="vivid">动漫鲜艳</button>
                 <button class="ghost small visual-filter-opt" data-filter="warm">护眼柔和</button>
                 <button class="ghost small visual-filter-opt" data-filter="contrast">明亮锐利</button>
+                <button class="ghost small visual-filter-opt" data-filter="shadow" title="增强暗部细节，提升暗场表现">暗部增强</button>
+                <button class="ghost small visual-filter-opt" data-filter="manga" title="黑白漫画风高对比灰阶">黑白漫画</button>
+              </div>
+            </div>
+            <div class="visual-sliders-block">
+              <div class="visual-slider-row">
+                <span class="visual-slider-label">亮度</span>
+                <input type="range" id="visual-bright-slider" class="visual-slider" min="50" max="150" value="100" />
+                <span id="visual-bright-val" class="visual-slider-val mono">100%</span>
+              </div>
+              <div class="visual-slider-row">
+                <span class="visual-slider-label">对比度</span>
+                <input type="range" id="visual-contrast-slider" class="visual-slider" min="50" max="150" value="100" />
+                <span id="visual-contrast-val" class="visual-slider-val mono">100%</span>
+              </div>
+              <div class="visual-slider-row">
+                <span class="visual-slider-label">饱和度</span>
+                <input type="range" id="visual-sat-slider" class="visual-slider" min="0" max="200" value="100" />
+                <span id="visual-sat-val" class="visual-slider-val mono">100%</span>
+              </div>
+              <div class="visual-slider-actions">
+                <button id="btn-reset-visual-sliders" class="ghost small" title="将亮度、对比度、饱和度一键恢复为 100%">重置调色</button>
               </div>
             </div>
             <div class="visual-menu-sep"></div>

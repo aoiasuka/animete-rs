@@ -199,6 +199,11 @@ impl BangumiSource {
         struct Resp {
             data: Vec<Item>,
         }
+        #[derive(serde::Deserialize, Default)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+        }
         #[derive(serde::Deserialize)]
         struct Item {
             id: u32,
@@ -209,6 +214,12 @@ impl BangumiSource {
             date: Option<String>,
             #[serde(default)]
             images: Images,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            score: Option<f32>,
+            #[serde(default)]
+            rank: Option<u32>,
         }
         let r: Resp = self
             .http
@@ -236,6 +247,8 @@ impl BangumiSource {
                 original_title: i.name,
                 air_date: i.date,
                 cover_url: best_cover(&i.images),
+                score: i.score.or_else(|| i.rating.as_ref().and_then(|r| r.score)),
+                rank: i.rank.or_else(|| i.rating.as_ref().and_then(|r| r.rank)),
             })
             .collect())
     }
@@ -254,6 +267,11 @@ impl BangumiSource {
             #[serde(default)]
             cn: String,
         }
+        #[derive(serde::Deserialize, Default)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+        }
         #[derive(serde::Deserialize)]
         struct Item {
             id: u32,
@@ -264,6 +282,12 @@ impl BangumiSource {
             date: Option<String>,
             #[serde(default)]
             images: Images,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            score: Option<f32>,
+            #[serde(default)]
+            rank: Option<u32>,
         }
         let r: Vec<Day> = self
             .http
@@ -292,6 +316,8 @@ impl BangumiSource {
                         original_title: i.name,
                         air_date: i.date,
                         cover_url: best_cover(&i.images),
+                        score: i.score.or_else(|| i.rating.as_ref().and_then(|r| r.score)),
+                        rank: i.rank.or_else(|| i.rating.as_ref().and_then(|r| r.rank)),
                     })
                     .collect(),
             })
@@ -303,6 +329,11 @@ impl BangumiSource {
         &self,
         SubjectId(id): SubjectId,
     ) -> Result<SubjectSummary, UserError> {
+        #[derive(serde::Deserialize, Default)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+        }
         #[derive(serde::Deserialize)]
         struct Item {
             id: u32,
@@ -313,6 +344,12 @@ impl BangumiSource {
             date: Option<String>,
             #[serde(default)]
             images: serde_json::Value,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            score: Option<f32>,
+            #[serde(default)]
+            rank: Option<u32>,
         }
         let it: Item = self
             .http
@@ -337,6 +374,10 @@ impl BangumiSource {
             original_title: it.name,
             air_date: it.date,
             cover_url: cover,
+            score: it
+                .score
+                .or_else(|| it.rating.as_ref().and_then(|r| r.score)),
+            rank: it.rank.or_else(|| it.rating.as_ref().and_then(|r| r.rank)),
         })
     }
 
@@ -1164,5 +1205,65 @@ mod tests {
         );
         assert_eq!(c.rate, Some(10));
         assert_eq!(c.comment, "绝对的年度神作！节奏与情感烘托绝佳。");
+    }
+
+    #[test]
+    fn test_subject_summary_score_and_rank_parsing() {
+        let calendar_item_json = serde_json::json!({
+            "id": 400602,
+            "name": "葬送のフリーレン",
+            "name_cn": "葬送的芙莉莲",
+            "air_date": "2023-09-29",
+            "rating": {
+                "score": 8.8,
+                "total": 30000
+            },
+            "rank": 15,
+            "images": {
+                "large": "https://lain.bgm.tv/pic/cover/l/test.jpg"
+            }
+        });
+
+        #[derive(serde::Deserialize, Default)]
+        struct RatingObj {
+            score: Option<f32>,
+            rank: Option<u32>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Item {
+            id: u32,
+            #[serde(default)]
+            name_cn: String,
+            name: String,
+            #[serde(default, rename = "air_date")]
+            date: Option<String>,
+            #[serde(default)]
+            images: Images,
+            #[serde(default)]
+            rating: Option<RatingObj>,
+            #[serde(default)]
+            score: Option<f32>,
+            #[serde(default)]
+            rank: Option<u32>,
+        }
+
+        let i: Item = serde_json::from_value(calendar_item_json).unwrap();
+        let summary = SubjectSummary {
+            id: SubjectId(i.id),
+            display_title: if i.name_cn.is_empty() {
+                i.name.clone()
+            } else {
+                i.name_cn
+            },
+            original_title: i.name,
+            air_date: i.date,
+            cover_url: best_cover(&i.images),
+            score: i.score.or_else(|| i.rating.as_ref().and_then(|r| r.score)),
+            rank: i.rank.or_else(|| i.rating.as_ref().and_then(|r| r.rank)),
+        };
+
+        assert_eq!(summary.id.0, 400602);
+        assert_eq!(summary.score, Some(8.8));
+        assert_eq!(summary.rank, Some(15));
     }
 }

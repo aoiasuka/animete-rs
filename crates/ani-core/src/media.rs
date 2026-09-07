@@ -48,6 +48,12 @@ pub struct SubjectSummary {
     pub air_date: Option<String>,
     /// 封面 URL
     pub cover_url: Option<Url>,
+    /// Bangumi 评分 (0.0 ~ 10.0)
+    #[serde(default)]
+    pub score: Option<f32>,
+    /// Bangumi 排名
+    #[serde(default)]
+    pub rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
