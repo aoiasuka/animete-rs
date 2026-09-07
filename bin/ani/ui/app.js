@@ -405,6 +405,78 @@ function renderCalendar() {
   }
 }
 
+function exportAnimeCalendar() {
+  if (!homeState.calendar || !homeState.calendar.length) {
+    toast("新番时间表尚未加载完成，请稍候");
+    return;
+  }
+  const bydayMap = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" };
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const dtStamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+
+  let ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ani-rs//Anime Calendar 1.0//CN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:ani-rs 本周新番放送时间表",
+    "X-WR-TIMEZONE:Asia/Shanghai",
+  ];
+
+  let eventCount = 0;
+  for (const day of homeState.calendar) {
+    const wId = day.weekday?.id || 1;
+    const byday = bydayMap[wId] || "MO";
+    const weekdayCn = day.weekday?.cn || `星期${wId}`;
+
+    const todayW = now.getDay() === 0 ? 7 : now.getDay();
+    let diffDays = (wId - todayW + 7) % 7;
+    const eventDate = new Date(now.getTime() + diffDays * 86400000);
+    const yyyymmdd = `${eventDate.getFullYear()}${pad(eventDate.getMonth() + 1)}${pad(eventDate.getDate())}`;
+    const dtStart = `${yyyymmdd}T200000`; // 默认晚上黄金档 20:00
+
+    for (const item of day.items || []) {
+      const subId = Number(item.id ? (item.id.id ?? item.id) : (item.bangumi_id ?? item.id));
+      const title = item.display_title || item.original_title || "未知新番";
+      const orig = item.original_title && item.original_title !== title ? `\\n日文原名: ${item.original_title}` : "";
+      const bgmUrl = `https://bgm.tv/subject/${subId}`;
+      const desc = `放送时间: 每${weekdayCn} 20:00\\nBangumi ID: ${subId}${orig}\\n条目详情: ${bgmUrl}\\n由 ani-rs 追番客户端导出`;
+
+      ics.push("BEGIN:VEVENT");
+      ics.push(`UID:bangumi-sub-${subId}@ani-rs`);
+      ics.push(`DTSTAMP:${dtStamp}`);
+      ics.push(`DTSTART;TZID=Asia/Shanghai:${dtStart}`);
+      ics.push(`SUMMARY:[新番] ${title.replace(/[,;\\]/g, " ")}`);
+      ics.push(`DESCRIPTION:${desc}`);
+      ics.push(`URL:${bgmUrl}`);
+      ics.push(`RRULE:FREQ=WEEKLY;BYDAY=${byday}`);
+      ics.push("END:VEVENT");
+      eventCount++;
+    }
+  }
+
+  ics.push("END:VCALENDAR");
+  const icsContent = ics.join("\r\n");
+
+  const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "anime_broadcast_schedule.ics";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  navigator.clipboard.writeText(icsContent).catch(() => {});
+  toast(`已导出 ${eventCount} 部新番日程并已复制到剪贴板，可直接导入 Windows 日历 / Outlook / Apple / Google Calendar！`, true);
+}
+
+const calExportBtn = $("calendar-export-btn");
+if (calExportBtn) {
+  calExportBtn.onclick = () => exportAnimeCalendar();
+}
+
 function subjectCard(s, isTodayAiring = false) {
   const card = document.createElement("div");
   card.className = "card" + (isTodayAiring ? " today-airing" : "");
@@ -731,6 +803,7 @@ async function openSubject(s) {
   loadFullSubjectDetail(bangumiId, my);
   loadCharacters(bangumiId, my);
   loadRelatedSubjects(bangumiId, my);
+  loadSubjectComments(bangumiId, my);
   try {
     const [eps, watchedList] = await Promise.all([
       invoke("episode_list", { subjectId: bangumiId }),
@@ -880,6 +953,122 @@ async function loadRelatedSubjects(subjectId, seq) {
     if (seq !== subjectSeq) return;
     wrap.classList.add("hidden");
   }
+}
+
+let commentsState = {
+  subjectId: null,
+  offset: 0,
+  limit: 15,
+  total: 0,
+  loading: false,
+};
+
+async function loadSubjectComments(subjectId, seq, append = false) {
+  const listEl = $("comments-list");
+  const statsEl = $("comments-stats");
+  const moreRow = $("comments-more-row");
+  const moreBtn = $("comments-more-btn");
+  if (!listEl) return;
+
+  if (!append) {
+    commentsState.subjectId = subjectId;
+    commentsState.offset = 0;
+    commentsState.total = 0;
+    listEl.innerHTML = `<div class="meta empty-tip">正在加载社区短评…</div>`;
+    if (statsEl) statsEl.textContent = "";
+    if (moreRow) moreRow.classList.add("hidden");
+  }
+
+  if (commentsState.loading) return;
+  commentsState.loading = true;
+  if (moreBtn) moreBtn.textContent = "加载中…";
+
+  try {
+    const res = await invoke("get_subject_comments", {
+      subjectId,
+      offset: commentsState.offset,
+      limit: commentsState.limit,
+    });
+    if (seq !== subjectSeq) return;
+
+    commentsState.total = res.total || 0;
+    const items = res.data || [];
+
+    if (!append) {
+      listEl.innerHTML = "";
+    }
+
+    if (statsEl) {
+      statsEl.textContent = commentsState.total > 0 ? `共 ${commentsState.total} 条短评` : "";
+    }
+
+    if (!append && (!items || !items.length)) {
+      listEl.innerHTML = `<div class="meta empty-tip">暂无社区短评，快去 Bangumi 抢沙发吧！</div>`;
+      if (moreRow) moreRow.classList.add("hidden");
+      return;
+    }
+
+    for (const c of items) {
+      const card = document.createElement("div");
+      card.className = "comment-card";
+
+      const avatarHtml = c.user?.avatar_url
+        ? `<img class="comment-avatar" src="${escapeHtml(c.user.avatar_url)}" alt="${escapeHtml(c.user.nickname)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()" />`
+        : "";
+      const initial = (c.user?.nickname || c.user?.username || "?").slice(0, 1).toUpperCase();
+
+      let rateHtml = "";
+      if (c.rate) {
+        let rateClass = "comment-rate-badge";
+        if (c.rate >= 8) rateClass += " high";
+        else if (c.rate >= 6) rateClass += " mid";
+        rateHtml = `<span class="${rateClass}" title="评分: ${c.rate} / 10"><span style="color:#f59e0b">★</span> ${c.rate}</span>`;
+      }
+
+      const dateStr = c.updated_at ? c.updated_at.split("T")[0] : "";
+
+      card.innerHTML = `
+        <div class="comment-avatar-wrap">
+          ${avatarHtml || initial}
+        </div>
+        <div class="comment-content-wrap">
+          <div class="comment-meta-row">
+            <span class="comment-user-name">${escapeHtml(c.user?.nickname || c.user?.username || "漫友")}</span>
+            ${rateHtml}
+            <span class="comment-time">${escapeHtml(dateStr)}</span>
+          </div>
+          <p class="comment-text">${escapeHtml(c.comment)}</p>
+        </div>
+      `;
+      listEl.appendChild(card);
+    }
+
+    commentsState.offset += items.length;
+    if (moreRow && moreBtn) {
+      const hasMore = commentsState.offset < commentsState.total;
+      moreRow.classList.toggle("hidden", !hasMore);
+      moreBtn.textContent = "加载更多短评 ▾";
+    }
+  } catch (e) {
+    if (seq !== subjectSeq) return;
+    if (!append) {
+      listEl.innerHTML = `<div class="meta empty-tip">暂未获取到短评 (${escapeHtml(String(e))})</div>`;
+    }
+  } finally {
+    commentsState.loading = false;
+    if (moreBtn && moreBtn.textContent === "加载中…") {
+      moreBtn.textContent = "加载更多短评 ▾";
+    }
+  }
+}
+
+const commentsMoreBtn = $("comments-more-btn");
+if (commentsMoreBtn) {
+  commentsMoreBtn.onclick = () => {
+    if (commentsState.subjectId) {
+      loadSubjectComments(commentsState.subjectId, subjectSeq, true);
+    }
+  };
 }
 
 async function loadFullSubjectDetail(subjectId, seq) {
@@ -4309,6 +4498,10 @@ function destroyPlayer() {
     hls = null;
   }
   unloadSubtitle(true);
+  const subWrap = $("sub-detected-wrap");
+  if (subWrap) subWrap.classList.add("hidden");
+  const subList = $("sub-detected-list");
+  if (subList) subList.innerHTML = "";
   const subMenu = $("sub-menu");
   if (subMenu) subMenu.classList.add("hidden");
   const visualMenu = $("visual-menu");
@@ -4327,11 +4520,11 @@ function destroyPlayer() {
   v.load();
 }
 
-function openPlayer(url, title) {
+function openPlayer(url, title, extra = {}) {
   playerPrev = $("view-detail").classList.contains("hidden")
     ? (state.subView === "results" ? "results" : "subjects")
     : "detail";
-  showPlayer(url, title);
+  showPlayer(url, title, extra);
 }
 
 function showPlayerEmpty() {
@@ -4339,7 +4532,7 @@ function showPlayerEmpty() {
   showPlayer("", "在线播放");
 }
 
-function showPlayer(url, title) {
+function showPlayer(url, title, extra = {}) {
   destroyPlayer();
   currentMediaUrl = url || "";
   $("player-title").textContent = title || "在线播放";
@@ -4351,6 +4544,8 @@ function showPlayer(url, title) {
     setAudioBoost(audioBoostState.level);
   }
   if (!url) return;
+
+  autoDetectAndMountSubtitles(extra?.localPath || btFallbackPath, extra?.subtitles);
 
   // 断点续播：加载后跳到上次位置（看完的从头播）。
   // 元数据加载与进度查询的完成顺序不定，两侧都要能触发，且只 seek 一次
@@ -4535,12 +4730,12 @@ listen("stream-file", (f) => {
 }).catch(() => {});
 
 listen("stream-ready", async (ev) => {
-  const { url, path, title } = ev.payload;
+  const { url, path, title, subtitles } = ev.payload;
   setStatus("");
   if (url) {
     // 应用内边下边播（anibt:// 协议）：弹幕/断点续播/倍速全可用
     btFallbackPath = path || null;
-    openPlayer(url, title);
+    openPlayer(url, title, { localPath: path, subtitles });
     toast("BT 边下边播：正在应用内播放器缓冲…", true);
     return;
   }
@@ -5263,29 +5458,107 @@ function updateSubUI() {
   }
 }
 
+function loadSubtitleFromText(rawText, filename) {
+  let content = rawText;
+  const n = (filename || "").toLowerCase();
+  if (n.endsWith(".srt")) {
+    content = srtToVtt(content);
+  } else if (n.endsWith(".ass") || n.endsWith(".ssa") || content.includes("[Events]")) {
+    content = assToVtt(content);
+  }
+  subState.cues = parseVttCues(content);
+  subState.rawVtt = content;
+  subState.filename = filename || "外挂字幕";
+  subState.loaded = true;
+  subState.offsetSec = 0.0;
+  const shifted = buildShiftedVtt(subState.cues, 0.0, subState.position);
+  applySubtitleTrack(shifted);
+  applySubtitleStyles();
+  updateSubUI();
+  toast("已加载字幕：" + subState.filename, true);
+  showPlayerOsd("已加载字幕: " + subState.filename);
+}
+
 function loadSubtitleFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
-    let content = e.target.result;
-    const n = file.name.toLowerCase();
-    if (n.endsWith(".srt")) {
-      content = srtToVtt(content);
-    } else if (n.endsWith(".ass") || n.endsWith(".ssa") || content.includes("[Events]")) {
-      content = assToVtt(content);
-    }
-    subState.cues = parseVttCues(content);
-    subState.rawVtt = content;
-    subState.filename = file.name;
-    subState.loaded = true;
-    subState.offsetSec = 0.0;
-    const shifted = buildShiftedVtt(subState.cues, 0.0, subState.position);
-    applySubtitleTrack(shifted);
-    applySubtitleStyles();
-    updateSubUI();
-    toast("已加载外挂字幕：" + file.name, true);
-    showPlayerOsd("已加载字幕: " + file.name);
+    loadSubtitleFromText(e.target.result, file.name);
   };
   reader.readAsText(file, "utf-8");
+}
+
+async function autoDetectAndMountSubtitles(videoPath, initialSubs = []) {
+  const wrap = $("sub-detected-wrap");
+  const listEl = $("sub-detected-list");
+  if (!wrap || !listEl) return;
+  wrap.classList.add("hidden");
+  listEl.innerHTML = "";
+
+  let subs = Array.isArray(initialSubs) ? [...initialSubs] : [];
+  if ((!subs || !subs.length) && videoPath) {
+    try {
+      const found = await invoke("find_sibling_subtitles", { videoPath });
+      if (found && found.length) subs = found;
+    } catch (e) {
+      console.warn("find_sibling_subtitles error:", e);
+    }
+  }
+
+  if (!subs || !subs.length) return;
+
+  wrap.classList.remove("hidden");
+
+  // 字幕语言偏好，默认优先简中
+  const prefLang = settingsData?.prefs?.subtitle_lang || "chi";
+  let matchedSub = null;
+
+  for (const s of subs) {
+    const item = document.createElement("button");
+    item.className = "sub-detected-item";
+    const name = s.name.split(/[/\\]/).pop();
+    const isChs = /[\.\[_\-](sc|chs|gb|zh-hans|cn)[\.\]_\-]/i.test(s.name) || s.name.includes("简") || s.name.includes("GB");
+    const isCht = /[\.\[_\-](tc|cht|big5|zh-hant)[\.\]_\-]/i.test(s.name) || s.name.includes("繁") || s.name.includes("BIG5");
+    const tag = isChs ? "简中" : (isCht ? "繁中" : "外挂");
+
+    item.innerHTML = `
+      <span class="sub-detected-item-name" title="${escapeAttr(name)}">${escapeHtml(name)}</span>
+      <span class="sub-detected-item-tag">${tag}</span>
+    `;
+
+    item.onclick = async () => {
+      try {
+        const text = await invoke("read_local_text_file", { path: s.path });
+        loadSubtitleFromText(text, name);
+        listEl.querySelectorAll(".sub-detected-item").forEach((el) => el.classList.remove("active"));
+        item.classList.add("active");
+      } catch (err) {
+        toast("加载字幕失败：" + err);
+      }
+    };
+
+    listEl.appendChild(item);
+
+    if (!matchedSub) {
+      if (prefLang === "chi_trad" && isCht) matchedSub = { sub: s, btn: item };
+      else if (prefLang !== "chi_trad" && isChs) matchedSub = { sub: s, btn: item };
+    }
+  }
+
+  // 自动挂载匹配偏好的字幕或唯一字幕
+  if (!subState.loaded) {
+    const toMount = matchedSub || (subs.length === 1 ? { sub: subs[0], btn: listEl.children[0] } : null);
+    if (toMount) {
+      try {
+        const text = await invoke("read_local_text_file", { path: toMount.sub.path });
+        const name = toMount.sub.name.split(/[/\\]/).pop();
+        loadSubtitleFromText(text, name);
+        toMount.btn?.classList.add("active");
+        showPlayerOsd(`已自动挂载片源字幕: ${name}`);
+      } catch (e) {
+        console.warn("auto-mount subtitle failed:", e);
+      }
+    }
+  }
 }
 
 function unloadSubtitle(silent = false) {
@@ -5302,6 +5575,10 @@ function unloadSubtitle(silent = false) {
   subState.cues = [];
   subState.offsetSec = 0.0;
   updateSubUI();
+  const detectedList = $("sub-detected-list");
+  if (detectedList) {
+    detectedList.querySelectorAll(".sub-detected-item").forEach((el) => el.classList.remove("active"));
+  }
   const subMenu = $("sub-menu");
   if (subMenu) subMenu.classList.add("hidden");
   if (!silent) {

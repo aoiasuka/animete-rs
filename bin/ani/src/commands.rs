@@ -114,6 +114,19 @@ pub async fn get_subject_detail(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn get_subject_comments(
+    ctx: State<'_, AppContext>,
+    subject_id: u32,
+    offset: u32,
+    limit: u32,
+) -> Result<ds_bangumi::SubjectCommentsResp, String> {
+    ctx.bgm
+        .subject_comments(ani_core::SubjectId(subject_id), offset, limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 向所有启用源并发检索 + 自动选源（对应 domain/media/fetch + MediaSelectorAutoSelect）。
 #[tauri::command]
 pub async fn fetch_medias(
@@ -718,6 +731,19 @@ pub async fn start_torrent_stream(
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         let path = download_dir.join(&video.name);
+        let subs: Vec<serde_json::Value> = files
+            .iter()
+            .filter(|f| is_subtitle(&f.name))
+            .map(|f| {
+                serde_json::json!({
+                    "name": f.name.clone(),
+                    "path": download_dir.join(&f.name).to_string_lossy(),
+                    "index": f.index,
+                    "length": f.length,
+                })
+            })
+            .collect();
+
         let url = if is_webview_video(&video.name) {
             Some(format!(
                 "http://anibt.localhost/v/{}/{}",
@@ -735,19 +761,79 @@ pub async fn start_torrent_stream(
                 "url": url,
                 "title": title,
                 "file": video.name,
+                "subtitles": subs,
             }),
         );
     });
     Ok(())
 }
 
-fn is_video(name: &str) -> bool {
+pub fn is_video(name: &str) -> bool {
     let n = name.to_lowercase();
     [
         ".mp4", ".mkv", ".avi", ".ts", ".flv", ".wmv", ".webm", ".mov", ".m2ts",
     ]
     .iter()
     .any(|ext| n.ends_with(ext))
+}
+
+pub fn is_subtitle(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [".srt", ".vtt", ".ass", ".ssa"]
+        .iter()
+        .any(|ext| n.ends_with(ext))
+}
+
+/// 扫描与视频文件同目录（及 Subs/ 子目录）下的外挂字幕文件。
+#[tauri::command]
+pub async fn find_sibling_subtitles(video_path: String) -> Result<Vec<serde_json::Value>, String> {
+    let p = std::path::Path::new(&video_path);
+    let parent = match p.parent() {
+        Some(dir) => dir,
+        None => return Ok(Vec::new()),
+    };
+    let mut subs = Vec::new();
+    if let Ok(mut entries) = tokio::fs::read_dir(parent).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if is_subtitle(name) {
+                        subs.push(serde_json::json!({
+                            "name": name,
+                            "path": path.to_string_lossy(),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    let subs_dir = parent.join("Subs");
+    if let Ok(mut entries) = tokio::fs::read_dir(subs_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if is_subtitle(name) {
+                        subs.push(serde_json::json!({
+                            "name": format!("Subs/{}", name),
+                            "path": path.to_string_lossy(),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    Ok(subs)
+}
+
+/// 安全读取本地文本文件（用于加载字幕），支持 UTF-8 兼容解码。
+#[tauri::command]
+pub async fn read_local_text_file(path: String) -> Result<String, String> {
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 /// 格式是否受 WebView2 原生 HTML5 播放器支持。
@@ -2142,6 +2228,17 @@ mod tests {
         assert!(!is_webview_video("ep01.avi"));
         assert!(!is_webview_video("ep01.ts"));
         assert!(!is_webview_video("ep01.flv"));
+    }
+
+    #[test]
+    fn test_is_subtitle() {
+        assert!(is_subtitle("Frieren.sc.ass"));
+        assert!(is_subtitle("Frieren.tc.ssa"));
+        assert!(is_subtitle("sub.srt"));
+        assert!(is_subtitle("sub.vtt"));
+        assert!(is_subtitle("SUB.ASS"));
+        assert!(!is_subtitle("video.mp4"));
+        assert!(!is_subtitle("archive.zip"));
     }
 
     #[test]

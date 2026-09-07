@@ -130,6 +130,34 @@ pub struct CalendarWeekday {
     pub cn: String,
 }
 
+/// 评论用户简要信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CommentUser {
+    pub username: String,
+    pub nickname: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+/// 条目社区短评/吐槽
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubjectComment {
+    pub user: CommentUser,
+    #[serde(default)]
+    pub rate: Option<u8>,
+    pub comment: String,
+    pub updated_at: String,
+}
+
+/// 短评响应结构体
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubjectCommentsResp {
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
+    pub data: Vec<SubjectComment>,
+}
+
 impl BangumiSource {
     pub fn new() -> anyhow::Result<Self> {
         let http = Client::builder()
@@ -564,6 +592,99 @@ impl BangumiSource {
 
         Ok(list)
     }
+
+    /// 查询条目社区短评与吐槽列表。
+    pub async fn subject_comments(
+        &self,
+        SubjectId(id): SubjectId,
+        offset: u32,
+        limit: u32,
+    ) -> Result<SubjectCommentsResp, UserError> {
+        let resp_text = self
+            .http
+            .get(format!("{API}/v0/subjects/{id}/comments"))
+            .query(&[
+                ("offset", offset.to_string()),
+                ("limit", limit.min(50).to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        parse_subject_comments(&resp_text).map_err(|e| UserError::Internal {
+            detail: format!("解析短评失败: {e}"),
+        })
+    }
+}
+
+/// 解析短评 JSON（纯函数，单测入口）。
+pub fn parse_subject_comments(json_str: &str) -> anyhow::Result<SubjectCommentsResp> {
+    #[derive(serde::Deserialize)]
+    struct UserItem {
+        username: String,
+        #[serde(default)]
+        nickname: String,
+        #[serde(default)]
+        avatar: Option<Images>,
+    }
+    #[derive(serde::Deserialize)]
+    struct CommentItem {
+        user: UserItem,
+        #[serde(default)]
+        rate: Option<u8>,
+        #[serde(default)]
+        comment: String,
+        #[serde(default)]
+        updated_at: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct RawResp {
+        #[serde(default)]
+        total: u32,
+        #[serde(default)]
+        limit: u32,
+        #[serde(default)]
+        offset: u32,
+        #[serde(default)]
+        data: Vec<CommentItem>,
+    }
+
+    let r: RawResp = serde_json::from_str(json_str)?;
+    let data = r
+        .data
+        .into_iter()
+        .filter(|c| !c.comment.trim().is_empty())
+        .map(|c| {
+            let avatar_url = c
+                .user
+                .avatar
+                .and_then(|a| best_cover(&a))
+                .map(|u| u.to_string());
+            SubjectComment {
+                user: CommentUser {
+                    username: c.user.username.clone(),
+                    nickname: if c.user.nickname.trim().is_empty() {
+                        c.user.username
+                    } else {
+                        c.user.nickname
+                    },
+                    avatar_url,
+                },
+                rate: c.rate,
+                comment: c.comment.trim().to_string(),
+                updated_at: c.updated_at,
+            }
+        })
+        .collect();
+
+    Ok(SubjectCommentsResp {
+        total: r.total,
+        limit: r.limit,
+        offset: r.offset,
+        data,
+    })
 }
 
 #[async_trait]
@@ -809,5 +930,55 @@ mod tests {
         assert_eq!(detail.tags[0], "治愈"); // highest count
         assert_eq!(detail.tags[1], "MADHOUSE");
         assert_eq!(detail.tags[2], "奇幻");
+    }
+
+    #[test]
+    fn test_parse_subject_comments() {
+        let fixture = r#"{
+            "total": 45,
+            "limit": 20,
+            "offset": 0,
+            "data": [
+                {
+                    "user": {
+                        "username": "anime_fan",
+                        "nickname": "阿宅",
+                        "avatar": {
+                            "large": "https://lain.bgm.tv/pic/user/l/000/00/01.jpg",
+                            "medium": "https://lain.bgm.tv/pic/user/m/000/00/01.jpg"
+                        }
+                    },
+                    "rate": 10,
+                    "comment": "绝对的年度神作！节奏与情感烘托绝佳。",
+                    "updated_at": "2024-03-22T10:00:00Z"
+                },
+                {
+                    "user": {
+                        "username": "lurker",
+                        "nickname": "",
+                        "avatar": null
+                    },
+                    "rate": null,
+                    "comment": "   ",
+                    "updated_at": "2024-03-21T08:00:00Z"
+                }
+            ]
+        }"#;
+
+        let resp = parse_subject_comments(fixture).expect("parse comments fixture");
+        assert_eq!(resp.total, 45);
+        assert_eq!(resp.limit, 20);
+        assert_eq!(resp.offset, 0);
+        // 空评论应被过滤
+        assert_eq!(resp.data.len(), 1);
+        let c = &resp.data[0];
+        assert_eq!(c.user.username, "anime_fan");
+        assert_eq!(c.user.nickname, "阿宅");
+        assert_eq!(
+            c.user.avatar_url.as_deref(),
+            Some("https://lain.bgm.tv/pic/user/l/000/00/01.jpg")
+        );
+        assert_eq!(c.rate, Some(10));
+        assert_eq!(c.comment, "绝对的年度神作！节奏与情感烘托绝佳。");
     }
 }

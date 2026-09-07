@@ -128,6 +128,9 @@
               <h2>本周新番</h2>
               <span class="meta">放送时间表 · 数据来自 Bangumi</span>
             </div>
+            <div class="home-head-actions">
+              <button id="calendar-export-btn" class="ghost small" title="导出为 iCalendar (.ics) 日历订阅文件，导入 Windows 日历 / Outlook / Apple / Google Calendar">导出日历 📅</button>
+            </div>
           </div>
           <div id="weekday-tabs" class="weekday-tabs"></div>
           <div id="calendar-grid" class="cards home-grid"><div class="empty">加载时间表中…</div></div>
@@ -265,6 +268,20 @@
         </div>
       </div>
       <div id="candidates" class="cands"></div>
+
+      <!-- 社区短评与吐槽（Bangumi 漫友评价） -->
+      <div id="comments-wrap" class="comments-wrap">
+        <div class="comments-head-row">
+          <div class="comments-head-left">
+            <h3>社区吐槽与短评 💬</h3>
+            <span id="comments-stats" class="meta"></span>
+          </div>
+        </div>
+        <div id="comments-list" class="comments-list"><div class="meta empty-tip">暂无社区短评</div></div>
+        <div id="comments-more-row" class="comments-more-row hidden">
+          <button id="comments-more-btn" class="ghost small">加载更多短评 ▾</button>
+        </div>
+      </div>
     </section>
 
     <!-- 设置 -->
@@ -709,6 +726,10 @@
             <button id="sub-load-file-btn" class="sub-menu-item">📂 加载本地字幕 (.srt / .vtt / .ass)</button>
             <button id="sub-clear-btn" class="sub-menu-item hidden">✕ 卸载当前字幕</button>
             <input type="file" id="sub-file-input" accept=".srt,.vtt,.ass,.ssa" class="hidden" />
+            <div id="sub-detected-wrap" class="sub-detected-wrap hidden">
+              <div class="sub-detected-title">✨ 发现片源/本地字幕</div>
+              <div id="sub-detected-list" class="sub-detected-list"></div>
+            </div>
             <div class="sub-menu-sep"></div>
             <div class="sub-menu-row">
               <span class="sub-menu-label">延迟微调</span>
