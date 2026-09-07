@@ -6156,6 +6156,18 @@ function showPlayer(url, title, extra = {}) {
   $("player-title").textContent = title || "在线播放";
   showView("player");
   updatePlayerNextBtn();
+
+  if (typeof broadcastHostMedia === "function") {
+    broadcastHostMedia({
+      subject_id: state.subject?.id?.id ?? state.subject?.id,
+      subject_title: state.subject?.name_cn || state.subject?.name || title,
+      episode_id: state.currentEpId,
+      episode_sort: state.currentEp,
+      episode_title: title,
+      media_url: url,
+    });
+  }
+
   const v = $("video");
   applyVisualEffects();
   if (audioBoostState.level !== 1.0) {
@@ -6506,6 +6518,17 @@ $("video").addEventListener("timeupdate", () => {
     saveProgress(false);
   }
 
+  // 一起看 (Syncplay) 房主周期性广播播放心跳
+  if (typeof syncplayState !== "undefined" && syncplayState.active && syncplayState.role === "host" && !v.paused) {
+    const now = Date.now();
+    if (now - (syncplayState.lastHostUpdate || 0) > 3000) {
+      syncplayState.lastHostUpdate = now;
+      if (typeof broadcastHostPlayback === "function") {
+        broadcastHostPlayback("heartbeat");
+      }
+    }
+  }
+
   // 接近片尾（78% 进度以上）后台静默预选源下一集
   if (v.duration > 0 && v.currentTime / v.duration >= 0.78) {
     prefetchNextEpisodeCandidates();
@@ -6552,6 +6575,23 @@ $("video").addEventListener("timeupdate", () => {
 });
 $("video").addEventListener("volumechange", () => {
   localStorage.setItem("ani_vol", String($("video").volume));
+});
+
+// 一起看（Syncplay）播放状态同步监听
+$("video").addEventListener("play", () => {
+  if (typeof broadcastHostPlayback === "function") {
+    broadcastHostPlayback("play");
+  }
+});
+$("video").addEventListener("pause", () => {
+  if (typeof broadcastHostPlayback === "function") {
+    broadcastHostPlayback("pause");
+  }
+});
+$("video").addEventListener("seeked", () => {
+  if (typeof broadcastHostPlayback === "function") {
+    broadcastHostPlayback("seek");
+  }
 });
 const setPlayerSpinner = (show) => {
   const sp = $("player-spinner");
@@ -8288,6 +8328,7 @@ document.addEventListener("keydown", (e) => {
     case "b": case "B": playPreviousEpisode(); break;
     case "n": case "N": playNextEpisode(); break;
     case "e": case "E": toggleEpDrawer(); break;
+    case "y": case "Y": toggleSyncplayDrawer(); break;
     case "i": case "I": toggleStatsOsd(); break;
     case "z": case "Z": adjustSubOffset(-0.5); break;
     case "x": case "X": adjustSubOffset(0.5); break;
@@ -8790,6 +8831,21 @@ document.addEventListener("keydown", (e) => {
       toggleHelpModal(false);
       return;
     }
+    const syncplayModal = $("syncplay-modal");
+    if (syncplayModal && !syncplayModal.classList.contains("hidden")) {
+      toggleSyncplayModal(false);
+      return;
+    }
+    const localMediaModal = $("local-media-modal");
+    if (localMediaModal && !localMediaModal.classList.contains("hidden")) {
+      localMediaModal.classList.add("hidden");
+      return;
+    }
+    const syncplayDrawer = $("syncplay-drawer");
+    if (syncplayDrawer && !syncplayDrawer.classList.contains("hidden")) {
+      toggleSyncplayDrawer(false);
+      return;
+    }
     if (isInput) {
       if (e.target.id === "search-input" && e.target.value) {
         e.target.value = "";
@@ -8819,4 +8875,790 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
+
+// ==========================================================================
+// 一起看 (Syncplay / Watch Together) 协同观影系统
+// ==========================================================================
+
+const syncplayState = {
+  active: false,
+  role: "none", // "host" | "guest" | "none"
+  roomId: "",
+  roomName: "",
+  port: 19280,
+  addr: "", // e.g. "127.0.0.1:19280"
+  nickname: localStorage.getItem("ani_syncplay_nick") || "追番喵",
+  memberId: "u_" + Math.random().toString(36).substring(2, 9),
+  members: [],
+  eventSource: null,
+  autoSync: true,
+  isApplyingSync: false,
+  lastHostUpdate: 0,
+  heartbeatTimer: null,
+  pendingMedia: null,
+};
+
+function toggleSyncplayModal(show) {
+  const modal = $("syncplay-modal");
+  if (!modal) return;
+  const isVisible = typeof show === "boolean" ? show : modal.classList.contains("hidden");
+  modal.classList.toggle("hidden", !isVisible);
+  if (isVisible) {
+    updateSyncplayModalUI();
+  }
+}
+
+function toggleSyncplayDrawer(show) {
+  const drawer = $("syncplay-drawer");
+  if (!drawer) return;
+  const isVisible = typeof show === "boolean" ? show : drawer.classList.contains("hidden");
+  drawer.classList.toggle("hidden", !isVisible);
+  if (isVisible) {
+    updateSyncplayDrawerUI();
+  }
+}
+
+async function updateSyncplayModalUI() {
+  const nickInputHost = $("syncplay-host-nick");
+  const nickInputJoin = $("syncplay-join-nick");
+  if (nickInputHost) nickInputHost.value = syncplayState.nickname;
+  if (nickInputJoin) nickInputJoin.value = syncplayState.nickname;
+
+  // 查询本地局域网 IP
+  try {
+    const ips = await invoke("get_local_network_ips");
+    const ipsList = $("syncplay-ips-list");
+    if (ipsList && ips && ips.length) {
+      const p = syncplayState.port || 19280;
+      ipsList.innerHTML = `局域网地址推荐：${ips.map((ip) => `<code>${ip}:${p}</code>`).join(" / ")}`;
+    }
+  } catch (_) {}
+
+  // 状态感知卡片更新
+  const hostLiveCard = $("syncplay-host-live-card");
+  const startBtn = $("syncplay-host-start-btn");
+  const stopBtn = $("syncplay-host-stop-btn");
+
+  if (syncplayState.active && syncplayState.role === "host") {
+    if (hostLiveCard) hostLiveCard.classList.remove("hidden");
+    if (startBtn) startBtn.classList.add("hidden");
+    if (stopBtn) stopBtn.classList.remove("hidden");
+    const codeEl = $("syncplay-host-invite-code");
+    if (codeEl) codeEl.textContent = syncplayState.addr || `127.0.0.1:${syncplayState.port}`;
+    const badge = $("syncplay-host-member-badge");
+    if (badge) badge.textContent = `${syncplayState.members.length} 人在线`;
+  } else {
+    if (hostLiveCard) hostLiveCard.classList.add("hidden");
+    if (startBtn) startBtn.classList.remove("hidden");
+    if (stopBtn) stopBtn.classList.add("hidden");
+  }
+
+  const joinStatusCard = $("syncplay-join-status-card");
+  const joinBtn = $("syncplay-join-connect-btn");
+  const leaveBtn = $("syncplay-join-leave-btn");
+
+  if (syncplayState.active && syncplayState.role === "guest") {
+    if (joinStatusCard) joinStatusCard.classList.remove("hidden");
+    if (joinBtn) joinBtn.classList.add("hidden");
+    if (leaveBtn) leaveBtn.classList.remove("hidden");
+    const titleEl = $("syncplay-join-room-title");
+    if (titleEl) titleEl.textContent = `房间：${syncplayState.roomName || syncplayState.roomId || "已连接"}`;
+    const badge = $("syncplay-join-member-badge");
+    if (badge) badge.textContent = `${syncplayState.members.length} 人在线`;
+  } else {
+    if (joinStatusCard) joinStatusCard.classList.add("hidden");
+    if (joinBtn) joinBtn.classList.remove("hidden");
+    if (leaveBtn) leaveBtn.classList.add("hidden");
+  }
+}
+
+function updateSyncplayDrawerUI() {
+  const count = syncplayState.members.length || (syncplayState.active ? 1 : 0);
+  const sub = $("syncplay-drawer-sub");
+  if (sub) sub.textContent = `${count} 人在线 · ${syncplayState.role === "host" ? "我是房主" : "已同步"}`;
+
+  const navBadge = $("syncplay-nav-badge");
+  if (navBadge) {
+    navBadge.textContent = String(count);
+    navBadge.classList.toggle("hidden", !syncplayState.active);
+  }
+  const dot = $("player-syncplay-dot");
+  if (dot) {
+    dot.classList.toggle("hidden", !syncplayState.active);
+  }
+
+  // 渲染成员列表
+  const mList = $("syncplay-members-list");
+  if (mList) {
+    if (!syncplayState.members.length) {
+      mList.innerHTML = `<div class="meta" style="font-size:11.5px;padding:4px 0;">当前房间暂无其他成员</div>`;
+    } else {
+      mList.innerHTML = syncplayState.members.map((m) => {
+        const isMe = m.id === syncplayState.memberId;
+        const roleTag = m.is_host ? `<span class="member-role">房主</span>` : "";
+        const syncTag = m.is_synced ? `<span class="member-sync-tag">✓ 已同步</span>` : `<span class="member-sync-tag lagging">! 微偏</span>`;
+        return `
+          <div class="syncplay-member-item">
+            <span class="member-name">${escapeHtml(m.nickname || "群友")}${isMe ? " (我)" : ""}</span>
+            ${roleTag}
+            ${syncTag}
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  // 渲染房主正在播放的媒体卡片 (从机视角)
+  const mediaCard = $("syncplay-media-sync-card");
+  if (mediaCard) {
+    if (syncplayState.role === "guest" && syncplayState.pendingMedia) {
+      mediaCard.classList.remove("hidden");
+      const titleEl = $("sync-card-title");
+      if (titleEl) {
+        titleEl.textContent = `${syncplayState.pendingMedia.subject_title || ""} 第 ${syncplayState.pendingMedia.episode_sort || ""} 话 ${syncplayState.pendingMedia.episode_title || ""}`.trim();
+      }
+    } else {
+      mediaCard.classList.add("hidden");
+    }
+  }
+}
+
+// 建立 SSE 连接
+function connectSyncplayEvents(baseHttpUrl) {
+  if (syncplayState.eventSource) {
+    syncplayState.eventSource.close();
+    syncplayState.eventSource = null;
+  }
+
+  const sseUrl = `${baseHttpUrl}/events`;
+  const es = new EventSource(sseUrl);
+  syncplayState.eventSource = es;
+
+  es.onopen = () => {
+    toast(`已连接到协同观影房间`, true);
+  };
+
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleSyncplayEvent(data, baseHttpUrl);
+    } catch (_) {}
+  };
+
+  es.onerror = () => {};
+}
+
+function handleSyncplayEvent(ev, baseHttpUrl) {
+  if (!ev) return;
+  const v = $("video");
+
+  switch (ev.type) {
+    case "init": {
+      if (ev.room) {
+        syncplayState.roomId = ev.room.room_id;
+        syncplayState.roomName = ev.room.room_name;
+      }
+      if (ev.members) {
+        syncplayState.members = ev.members;
+      }
+      updateSyncplayDrawerUI();
+      updateSyncplayModalUI();
+      break;
+    }
+    case "member_joined":
+    case "member_left":
+    case "members_update": {
+      if (ev.payload && Array.isArray(ev.payload)) {
+        syncplayState.members = ev.payload;
+      } else if (ev.type === "member_joined" && ev.payload) {
+        if (!syncplayState.members.find((m) => m.id === ev.payload.id)) {
+          syncplayState.members.push(ev.payload);
+        }
+        toast(`👋 ${ev.payload.nickname || "好友"} 加入了观影房间`, true);
+      } else if (ev.type === "member_left" && ev.payload) {
+        syncplayState.members = syncplayState.members.filter((m) => m.id !== ev.payload.id);
+        toast(`🚪 ${ev.sender_name || "好友"} 离开了观影房间`);
+      }
+      updateSyncplayDrawerUI();
+      updateSyncplayModalUI();
+      break;
+    }
+    case "playback_sync": {
+      // 从机接收到房主的播放/跳转指令
+      if (syncplayState.role === "guest" && syncplayState.autoSync && v) {
+        const payload = ev.payload;
+        if (!payload) break;
+
+        const targetPos = payload.position || 0;
+        const isPlaying = payload.playing;
+        const drift = Math.abs(v.currentTime - targetPos);
+
+        syncplayState.isApplyingSync = true;
+
+        if (drift > 1.5) {
+          v.currentTime = targetPos;
+        } else if (drift > 0.3) {
+          // 微调倍速平滑防卡顿追赶
+          if (v.currentTime < targetPos) {
+            v.playbackRate = (payload.rate || 1.0) * 1.05;
+          } else {
+            v.playbackRate = (payload.rate || 1.0) * 0.95;
+          }
+        } else {
+          v.playbackRate = payload.rate || 1.0;
+        }
+
+        if (isPlaying && v.paused) {
+          v.play().catch(() => {});
+        } else if (!isPlaying && !v.paused) {
+          v.pause();
+        }
+
+        setTimeout(() => {
+          syncplayState.isApplyingSync = false;
+        }, 120);
+      }
+      break;
+    }
+    case "media_sync": {
+      const media = ev.payload;
+      if (syncplayState.role === "guest" && media) {
+        syncplayState.pendingMedia = media;
+        updateSyncplayDrawerUI();
+
+        // 展示顶部浮动感应通知
+        const alertEl = $("syncplay-ep-alert");
+        const alertText = $("syncplay-ep-alert-text");
+        if (alertEl && alertText) {
+          alertText.textContent = `房主已切换至：《${media.subject_title || ""}》第 ${media.episode_sort || ""} 话`;
+          alertEl.classList.remove("hidden");
+        }
+      }
+      break;
+    }
+    case "chat": {
+      const text = ev.payload?.text;
+      const author = ev.sender_name || "好友";
+      const isMe = ev.sender_id === syncplayState.memberId;
+      appendSyncplayChatBubble(author, text, isMe);
+
+      // 上屏专属高光房间弹幕
+      renderRoomDanmaku(`[房间·${author}] ${text}`);
+      break;
+    }
+    case "reaction": {
+      const emoji = ev.payload?.emoji || "🎉";
+      spawnReactionBubble(emoji);
+      break;
+    }
+  }
+}
+
+// 房间专属高光弹幕渲染
+function renderRoomDanmaku(text) {
+  const stage = $("view-player")?.querySelector(".player-stage");
+  if (!stage) return;
+  const d = document.createElement("div");
+  d.className = "danmaku-item danmaku-room";
+  d.textContent = text;
+  d.style.position = "absolute";
+  d.style.right = "-400px";
+  d.style.top = `${20 + Math.random() * 45}%`;
+  d.style.transition = "transform 6s linear";
+  stage.appendChild(d);
+
+  requestAnimationFrame(() => {
+    const stageWidth = stage.clientWidth || 800;
+    d.style.transform = `translateX(-${stageWidth + 600}px)`;
+  });
+
+  setTimeout(() => {
+    d.remove();
+  }, 6500);
+}
+
+// 浮空表情气泡爆炸效果
+function spawnReactionBubble(emoji) {
+  const container = $("syncplay-reaction-container");
+  if (!container) return;
+  const bubble = document.createElement("div");
+  bubble.className = "syncplay-bubble";
+  bubble.textContent = emoji;
+  bubble.style.left = `${Math.floor(Math.random() * 80)}px`;
+  container.appendChild(bubble);
+
+  setTimeout(() => {
+    bubble.remove();
+  }, 2300);
+}
+
+function appendSyncplayChatBubble(author, text, isMe) {
+  const box = $("syncplay-chat-box");
+  if (!box) return;
+  const msg = document.createElement("div");
+  msg.className = `syncplay-chat-msg ${isMe ? "self" : ""}`;
+  msg.innerHTML = `
+    <span class="syncplay-chat-author">${escapeHtml(author)}</span>
+    <span class="syncplay-chat-text">${escapeHtml(text)}</span>
+  `;
+  box.appendChild(msg);
+  box.scrollTop = box.scrollHeight;
+}
+
+// 房主启动房间
+async function startSyncplayHost() {
+  const rname = $("syncplay-host-rname")?.value?.trim() || "一起看追番房间";
+  const nick = $("syncplay-host-nick")?.value?.trim() || "房主";
+  const port = parseInt($("syncplay-host-port")?.value || "19280", 10);
+
+  syncplayState.nickname = nick;
+  localStorage.setItem("ani_syncplay_nick", nick);
+
+  try {
+    const info = await invoke("create_syncplay_room", {
+      port,
+      roomName: rname,
+      nickname: nick,
+    });
+    syncplayState.active = true;
+    syncplayState.role = "host";
+    syncplayState.port = info.port;
+    syncplayState.roomId = info.room_id;
+    syncplayState.roomName = info.room_name;
+    syncplayState.addr = `${info.local_ips[0] || "127.0.0.1"}:${info.port}`;
+
+    const baseHttp = `http://127.0.0.1:${info.port}`;
+    connectSyncplayEvents(baseHttp);
+
+    // 加入房主自身为 member
+    await fetch(`${baseHttp}/api/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        member_id: syncplayState.memberId,
+        nickname: nick,
+        is_host: true,
+      }),
+    });
+
+    toast(`🎉 一起看房间已创建！端口：${info.port}`, true);
+    updateSyncplayModalUI();
+    updateSyncplayDrawerUI();
+  } catch (err) {
+    toast(`创建房间失败: ${err}`);
+  }
+}
+
+// 房主停止房间
+async function stopSyncplayHost() {
+  try {
+    await invoke("stop_syncplay_room");
+    if (syncplayState.eventSource) {
+      syncplayState.eventSource.close();
+      syncplayState.eventSource = null;
+    }
+    syncplayState.active = false;
+    syncplayState.role = "none";
+    syncplayState.members = [];
+    toast("已解散并停止一起看房间");
+    updateSyncplayModalUI();
+    updateSyncplayDrawerUI();
+  } catch (err) {
+    toast(`停止房间失败: ${err}`);
+  }
+}
+
+// 成员加入房间
+async function joinSyncplayRoom() {
+  let addr = $("syncplay-join-addr")?.value?.trim() || "";
+  const nick = $("syncplay-join-nick")?.value?.trim() || "群友";
+
+  if (!addr) {
+    toast("请输入房主提供的房间地址 (例如 192.168.1.100:19280)");
+    return;
+  }
+  if (!addr.startsWith("http://") && !addr.startsWith("https://")) {
+    addr = "http://" + addr;
+  }
+
+  syncplayState.nickname = nick;
+  localStorage.setItem("ani_syncplay_nick", nick);
+
+  try {
+    const res = await fetch(`${addr}/api/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        member_id: syncplayState.memberId,
+        nickname: nick,
+        is_host: false,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    syncplayState.active = true;
+    syncplayState.role = "guest";
+    syncplayState.addr = addr;
+
+    connectSyncplayEvents(addr);
+
+    // 启动心跳定时器
+    if (syncplayState.heartbeatTimer) clearInterval(syncplayState.heartbeatTimer);
+    syncplayState.heartbeatTimer = setInterval(() => {
+      if (!syncplayState.active || syncplayState.role !== "guest") return;
+      const v = $("video");
+      const cur = v ? v.currentTime : 0;
+      fetch(`${syncplayState.addr}/api/heartbeat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          member_id: syncplayState.memberId,
+          position: cur,
+          is_synced: true,
+        }),
+      }).catch(() => {});
+    }, 8000);
+
+    toast(`已成功加入房间！正在同步房主观影状态…`, true);
+    updateSyncplayModalUI();
+    updateSyncplayDrawerUI();
+  } catch (err) {
+    toast(`加入房间失败，请检查地址或网络连通性: ${err}`);
+  }
+}
+
+// 成员离开房间
+function leaveSyncplayRoom() {
+  if (syncplayState.addr) {
+    fetch(`${syncplayState.addr}/api/leave`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ member_id: syncplayState.memberId }),
+    }).catch(() => {});
+  }
+  if (syncplayState.eventSource) {
+    syncplayState.eventSource.close();
+    syncplayState.eventSource = null;
+  }
+  if (syncplayState.heartbeatTimer) {
+    clearInterval(syncplayState.heartbeatTimer);
+    syncplayState.heartbeatTimer = null;
+  }
+  syncplayState.active = false;
+  syncplayState.role = "none";
+  syncplayState.members = [];
+  toast("已离开观影房间");
+  updateSyncplayModalUI();
+  updateSyncplayDrawerUI();
+}
+
+// 房主状态广播
+function broadcastHostPlayback(action) {
+  if (!syncplayState.active || syncplayState.role !== "host" || syncplayState.isApplyingSync) return;
+  const v = $("video");
+  if (!v) return;
+
+  const baseHttp = `http://127.0.0.1:${syncplayState.port}`;
+  fetch(`${baseHttp}/api/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender_id: syncplayState.memberId,
+      sender_name: syncplayState.nickname,
+      playing: !v.paused,
+      position: v.currentTime,
+      rate: v.playbackRate,
+    }),
+  }).catch(() => {});
+}
+
+function broadcastHostMedia(media) {
+  if (!syncplayState.active || syncplayState.role !== "host") return;
+  const baseHttp = `http://127.0.0.1:${syncplayState.port}`;
+  fetch(`${baseHttp}/api/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender_id: syncplayState.memberId,
+      sender_name: syncplayState.nickname,
+      media,
+    }),
+  }).catch(() => {});
+}
+
+// 发送聊天短评
+function sendSyncplayChat(text) {
+  if (!syncplayState.active || !syncplayState.addr) {
+    toast("尚未连接到一起看房间");
+    return;
+  }
+  const baseHttp = syncplayState.role === "host" ? `http://127.0.0.1:${syncplayState.port}` : syncplayState.addr;
+  fetch(`${baseHttp}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender_id: syncplayState.memberId,
+      sender_name: syncplayState.nickname,
+      text,
+    }),
+  }).catch(() => {});
+}
+
+// 发送快捷反应表情
+function sendSyncplayReaction(emoji) {
+  if (!syncplayState.active || !syncplayState.addr) return;
+  const baseHttp = syncplayState.role === "host" ? `http://127.0.0.1:${syncplayState.port}` : syncplayState.addr;
+  fetch(`${baseHttp}/api/reaction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender_id: syncplayState.memberId,
+      sender_name: syncplayState.nickname,
+      emoji,
+    }),
+  }).catch(() => {});
+}
+
+function copySyncplayInvite() {
+  const code = syncplayState.addr || $("syncplay-host-invite-code")?.textContent || "";
+  if (code) {
+    navigator.clipboard.writeText(code).then(() => {
+      toast("已复制房间邀请码到剪贴板！发送给好友即可加入", true);
+    }).catch(() => {
+      toast(`房间邀请码：${code}`);
+    });
+  }
+}
+
+function switchSyncplayTab(tab) {
+  const hostTab = $("syncplay-tab-host");
+  const joinTab = $("syncplay-tab-join");
+  const hostPanel = $("syncplay-panel-host");
+  const joinPanel = $("syncplay-panel-join");
+  if (tab === "host") {
+    hostTab?.classList.add("active");
+    joinTab?.classList.remove("active");
+    hostPanel?.classList.remove("hidden");
+    joinPanel?.classList.add("hidden");
+  } else {
+    joinTab?.classList.add("active");
+    hostTab?.classList.remove("active");
+    joinPanel?.classList.remove("hidden");
+    hostPanel?.classList.add("hidden");
+  }
+}
+
+async function handleSyncplayGotoMedia() {
+  const m = syncplayState.pendingMedia;
+  if (!m) return;
+  $("syncplay-ep-alert")?.classList.add("hidden");
+
+  if (m.media_url) {
+    openPlayer(m.media_url, m.episode_title || m.subject_title || "协同播放");
+    return;
+  }
+  if (m.subject_id && m.episode_sort != null) {
+    try {
+      await showSubjectDetail(m.subject_id);
+      const ep = (state.episodes || []).find((e) => Math.abs(e.ep - m.episode_sort) < 0.01);
+      if (ep) {
+        await playEpisode(ep);
+      }
+    } catch (err) {
+      toast(`同步剧集失败: ${err}`);
+    }
+  }
+}
+
+// ==========================================================================
+// 本地视频与下载管理系统 (Local Media Scanner & Player)
+// ==========================================================================
+
+async function openLocalMediaModal() {
+  const modal = $("local-media-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  await scanAndRenderLocalMedia();
+}
+
+async function scanAndRenderLocalMedia() {
+  const listEl = $("local-media-list");
+  const emptyEl = $("local-media-empty");
+  const dirPathEl = $("local-media-dir-path");
+  if (!listEl) return;
+
+  listEl.innerHTML = `<div class="meta" style="grid-column: 1/-1; padding: 20px; text-align: center;">正在扫描本地视频目录…</div>`;
+
+  try {
+    const items = await invoke("scan_local_videos", { dirPath: null });
+    if (dirPathEl) dirPathEl.textContent = "已扫描本地下载目录";
+
+    if (!items || !items.length) {
+      listEl.innerHTML = "";
+      if (emptyEl) emptyEl.classList.remove("hidden");
+      return;
+    }
+
+    if (emptyEl) emptyEl.classList.add("hidden");
+    listEl.innerHTML = items.map((item) => {
+      const sizeMb = (item.size_bytes / (1024 * 1024)).toFixed(1);
+      const epLabel = item.episode_num != null ? `第 ${item.episode_num} 话` : item.extension.toUpperCase();
+      const dateStr = item.modified_secs ? new Date(item.modified_secs * 1000).toLocaleDateString() : "";
+
+      return `
+        <div class="local-media-card">
+          <div class="local-media-header">
+            <span class="local-media-badge">${escapeHtml(epLabel)}</span>
+            <div class="local-media-title" title="${escapeHtml(item.filename)}">${escapeHtml(item.clean_title || item.filename)}</div>
+          </div>
+          <div class="local-media-meta">
+            <span>📦 ${sizeMb} MB</span>
+            <span>📅 ${dateStr}</span>
+            <span>🎞️ ${item.extension.toUpperCase()}</span>
+          </div>
+          <div class="local-media-actions">
+            <button class="ghost small local-search-btn" data-title="${escapeHtml(item.clean_title)}" title="在 Bangumi 搜索该番剧">🔍 搜番剧</button>
+            <button class="primary small local-play-btn" data-path="${escapeHtml(item.path)}" data-title="${escapeHtml(item.clean_title)}" data-ep="${item.episode_num ?? ''}">▶ 立即播放</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // 绑定播放与搜索按钮
+    listEl.querySelectorAll(".local-play-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        const p = btn.getAttribute("data-path");
+        const title = btn.getAttribute("data-title");
+        const ep = btn.getAttribute("data-ep");
+        await playLocalScannedVideo(p, title, ep ? parseFloat(ep) : null);
+      };
+    });
+
+    listEl.querySelectorAll(".local-search-btn").forEach((btn) => {
+      btn.onclick = () => {
+        const title = btn.getAttribute("data-title");
+        if (title) {
+          $("local-media-modal")?.classList.add("hidden");
+          const searchInput = $("search-input");
+          if (searchInput) {
+            searchInput.value = title;
+            handleSearch();
+          }
+        }
+      };
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="meta" style="color:#ef4444;grid-column:1/-1;padding:20px;">扫描失败: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+async function playLocalScannedVideo(filePath, cleanTitle, episodeNum) {
+  try {
+    const url = await invoke("get_local_media_url", { path: filePath });
+    $("local-media-modal")?.classList.add("hidden");
+
+    // 开启播放视图
+    state.subView = "player";
+    switchView("player");
+    $("player-back")?.classList.remove("hidden");
+
+    const v = $("video");
+    if (v) {
+      v.src = url;
+      v.play().catch(() => {});
+    }
+
+    if ($("player-title")) {
+      $("player-title").textContent = cleanTitle || "本地视频";
+    }
+    if ($("player-ep-title")) {
+      const epName = episodeNum != null ? `第 ${episodeNum} 话` : (filePath.split(/[/\\]/).pop() || "正片");
+      $("player-ep-title").textContent = epName;
+    }
+
+    toast(`正在播放本地视频：${cleanTitle}，正在关联弹幕…`, true);
+
+    // 自动关联弹幕
+    if (cleanTitle) {
+      try {
+        const dmMatches = await invoke("danmaku_search_episodes", {
+          anime: cleanTitle,
+          episode: episodeNum ? String(episodeNum) : null,
+        });
+        if (dmMatches && dmMatches.length) {
+          const match = dmMatches[0];
+          const comments = await invoke("danmaku_fetch_by_episode_id", {
+            episodeId: match.episode_id,
+          });
+          if (comments && comments.length) {
+            danmakuTimeline = comments;
+            initDanmakuCanvas();
+            toast(`已自动匹配并加载 ${comments.length} 条弹弹play 弹幕！`, true);
+          }
+        }
+      } catch (_) {}
+    }
+  } catch (err) {
+    toast(`播放本地文件失败: ${err}`);
+  }
+}
+
+// --------------------------------------------------------------------------
+// 事件绑定初始化 (Event Listeners Wiring)
+// --------------------------------------------------------------------------
+
+$("syncplay-nav-btn")?.addEventListener("click", () => toggleSyncplayModal(true));
+$("syncplay-modal-close")?.addEventListener("click", () => toggleSyncplayModal(false));
+$("player-syncplay-btn")?.addEventListener("click", () => toggleSyncplayDrawer());
+$("syncplay-drawer-close")?.addEventListener("click", () => toggleSyncplayDrawer(false));
+
+$("syncplay-tab-host")?.addEventListener("click", () => switchSyncplayTab("host"));
+$("syncplay-tab-join")?.addEventListener("click", () => switchSyncplayTab("join"));
+
+$("syncplay-host-start-btn")?.addEventListener("click", startSyncplayHost);
+$("syncplay-host-stop-btn")?.addEventListener("click", stopSyncplayHost);
+
+$("syncplay-join-connect-btn")?.addEventListener("click", joinSyncplayRoom);
+$("syncplay-join-leave-btn")?.addEventListener("click", leaveSyncplayRoom);
+
+$("syncplay-copy-invite-btn")?.addEventListener("click", copySyncplayInvite);
+$("syncplay-open-drawer-btn")?.addEventListener("click", () => {
+  toggleSyncplayModal(false);
+  toggleSyncplayDrawer(true);
+});
+$("syncplay-join-drawer-btn")?.addEventListener("click", () => {
+  toggleSyncplayModal(false);
+  toggleSyncplayDrawer(true);
+});
+
+$("syncplay-chat-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("syncplay-chat-input");
+  if (input && input.value.trim()) {
+    sendSyncplayChat(input.value.trim());
+    input.value = "";
+  }
+});
+
+document.querySelectorAll(".syncplay-reaction-btn").forEach((btn) => {
+  btn.onclick = () => {
+    const emoji = btn.getAttribute("data-emoji");
+    if (emoji) sendSyncplayReaction(emoji);
+  };
+});
+
+$("sync-card-goto-btn")?.addEventListener("click", handleSyncplayGotoMedia);
+$("syncplay-ep-alert-btn")?.addEventListener("click", handleSyncplayGotoMedia);
+$("syncplay-ep-alert-close")?.addEventListener("click", () => $("syncplay-ep-alert")?.classList.add("hidden"));
+
+$("local-media-nav-btn")?.addEventListener("click", openLocalMediaModal);
+$("local-media-modal-close")?.addEventListener("click", () => $("local-media-modal")?.classList.add("hidden"));
+$("local-media-rescan-btn")?.addEventListener("click", scanAndRenderLocalMedia);
+
+const joinAutoSyncCheck = $("syncplay-join-autosync");
+if (joinAutoSyncCheck) {
+  joinAutoSyncCheck.onchange = () => {
+    syncplayState.autoSync = joinAutoSyncCheck.checked;
+  };
+}
 

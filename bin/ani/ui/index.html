@@ -57,6 +57,19 @@
       <button id="player-btn" class="ghost small" title="在线播放">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 播放
       </button>
+      <button id="syncplay-nav-btn" class="ghost small" title="与好友一起看 (Syncplay 协同观影)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg> 一起看<span id="syncplay-nav-badge" class="syncplay-badge hidden">0</span>
+      </button>
+      <button id="local-media-nav-btn" class="ghost small" title="本地视频与下载目录">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg> 本地
+      </button>
       <button id="settings-btn" class="ghost small" title="设置">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -1030,11 +1043,67 @@
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
         <button id="player-stats-btn" class="ghost small" title="播放统计信息 (I)">ℹ 统计</button>
         <button id="player-shortcuts-btn" class="ghost small" title="查看键盘快捷键速查指南 (快捷键 ?)">快捷键 ⌨</button>
+        <button id="player-syncplay-btn" class="ghost small" title="与好友一起看协同抽屉 (快捷键 Y)">一起看 👥<span id="player-syncplay-dot" class="syncplay-dot hidden"></span></button>
       </div>
       <div class="player-stage">
         <canvas id="ambient-canvas" class="player-ambient-canvas hidden"></canvas>
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
+
+        <!-- 一起看协同侧栏抽屉 -->
+        <div id="syncplay-drawer" class="syncplay-drawer hidden">
+          <div class="syncplay-drawer-head">
+            <div class="syncplay-drawer-title-wrap">
+              <div id="syncplay-drawer-title" class="syncplay-drawer-title">👥 一起看房间</div>
+              <div id="syncplay-drawer-sub" class="syncplay-drawer-sub">1 人在线</div>
+            </div>
+            <button id="syncplay-drawer-close" class="ghost small" title="收起协同抽屉">✕</button>
+          </div>
+          <div class="syncplay-drawer-body">
+            <!-- 房主当前播放状态感知卡片 -->
+            <div id="syncplay-media-sync-card" class="syncplay-media-sync-card hidden">
+              <div class="sync-card-label">房主正在播放：</div>
+              <div id="sync-card-title" class="sync-card-title">动画名称</div>
+              <button id="sync-card-goto-btn" class="primary small sync-card-btn">同步进入播放 ➔</button>
+            </div>
+            <!-- 在线成员列表 -->
+            <div class="syncplay-members-section">
+              <div class="syncplay-section-title">在线成员</div>
+              <div id="syncplay-members-list" class="syncplay-members-list"></div>
+            </div>
+            <!-- 聊天与弹幕记录 -->
+            <div class="syncplay-chat-section">
+              <div class="syncplay-section-title">实时交流 (上屏专属弹幕)</div>
+              <div id="syncplay-chat-box" class="syncplay-chat-box">
+                <div class="syncplay-chat-tip meta">房间内消息将实时转化为金色高光弹幕浮现在视频上方</div>
+              </div>
+            </div>
+            <!-- 名场面快捷表情共鸣 -->
+            <div class="syncplay-reactions-bar">
+              <button class="syncplay-reaction-btn" data-emoji="🔥" title="名场面！">🔥 名场面</button>
+              <button class="syncplay-reaction-btn" data-emoji="🎉" title="666">🎉 666</button>
+              <button class="syncplay-reaction-btn" data-emoji="❤️" title="喜欢">❤️ 喜欢</button>
+              <button class="syncplay-reaction-btn" data-emoji="😂" title="笑哭">😂 笑哭</button>
+              <button class="syncplay-reaction-btn" data-emoji="👏" title="好评鼓掌">👏 鼓掌</button>
+            </div>
+            <!-- 发送框 -->
+            <form id="syncplay-chat-form" class="syncplay-chat-form">
+              <input type="text" id="syncplay-chat-input" placeholder="输入聊天内容，回车发射专属弹幕…" maxlength="100" autocomplete="off" />
+              <button type="submit" class="primary small">发送</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- 房间表情气泡浮空动画容器 -->
+        <div id="syncplay-reaction-container" class="syncplay-reaction-container pointer-events-none"></div>
+
+        <!-- 房主切集浮动感应提示 -->
+        <div id="syncplay-ep-alert" class="syncplay-ep-alert hidden">
+          <span class="ep-alert-icon">⚡</span>
+          <span id="syncplay-ep-alert-text" class="ep-alert-text">房主已切换至新剧集</span>
+          <button id="syncplay-ep-alert-btn" class="primary small">一键同步</button>
+          <button id="syncplay-ep-alert-close" class="ghost small">✕</button>
+        </div>
         <div id="player-fast-forward-pill" class="player-fast-forward-pill hidden">
           <span class="ff-icon">⚡</span>
           <span id="player-ff-text" class="ff-text">2.0x 快进中</span>
@@ -1533,6 +1602,127 @@
           <button id="person-btn-search" class="primary small" title="在 Bangumi 全库检索该主创参与的其他动画作品">🎬 探索主创作品</button>
           <button id="person-btn-open-bgm" class="ghost small" title="在系统默认浏览器中打开 Bangumi 官方人物页面">🌐 Bangumi 人物主页 ↗</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 一起看（Syncplay）控制中心模态框 -->
+  <div id="syncplay-modal" class="modal-backdrop hidden">
+    <div class="modal-card syncplay-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">👥 与好友一起看 (Syncplay)</div>
+          <div class="modal-sub">跨端多人毫秒级协同观影，同步进度、弹幕与表情共鸣</div>
+        </div>
+        <button id="syncplay-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body syncplay-modal-body">
+        <div class="syncplay-tabs">
+          <button id="syncplay-tab-host" class="syncplay-tab active">创建房间 (Host)</button>
+          <button id="syncplay-tab-join" class="syncplay-tab">加入房间 (Guest)</button>
+        </div>
+
+        <!-- 房主面板 -->
+        <div id="syncplay-panel-host" class="syncplay-tab-panel">
+          <div class="syncplay-field-group">
+            <div class="syncplay-field">
+              <label>房间名称</label>
+              <input type="text" id="syncplay-host-rname" value="动漫同好追番房" placeholder="输入房间名称" />
+            </div>
+            <div class="syncplay-field">
+              <label>我的昵称 (房主)</label>
+              <input type="text" id="syncplay-host-nick" value="房主" placeholder="输入房主昵称" />
+            </div>
+            <div class="syncplay-field">
+              <label>广播端口</label>
+              <input type="number" id="syncplay-host-port" value="19280" min="1024" max="65535" />
+            </div>
+          </div>
+          <div class="syncplay-actions-row">
+            <button id="syncplay-host-start-btn" class="primary">🚀 创建并启动房间</button>
+            <button id="syncplay-host-stop-btn" class="ghost hidden">🛑 解散并停止房间</button>
+          </div>
+          <!-- 运行中状态卡片 -->
+          <div id="syncplay-host-live-card" class="syncplay-live-card hidden">
+            <div class="syncplay-live-status">
+              <span class="syncplay-status-dot pulse"></span>
+              <span class="syncplay-status-text">房间服务运行中</span>
+              <span id="syncplay-host-member-badge" class="syncplay-member-badge">1 人在线</span>
+            </div>
+            <div class="syncplay-invite-box">
+              <div class="syncplay-invite-label">将以下连接地址发送给局域网/VPN好友：</div>
+              <div class="syncplay-invite-code-row">
+                <code id="syncplay-host-invite-code" class="syncplay-invite-code">127.0.0.1:19280</code>
+                <button id="syncplay-copy-invite-btn" class="small primary" title="复制连接邀请码">📋 复制</button>
+              </div>
+              <div id="syncplay-ips-list" class="syncplay-ips-list meta"></div>
+            </div>
+            <div class="syncplay-enter-stage-row">
+              <button id="syncplay-open-drawer-btn" class="secondary small">打开播放器协同侧栏 ➔</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 成员加入面板 -->
+        <div id="syncplay-panel-join" class="syncplay-tab-panel hidden">
+          <div class="syncplay-field-group">
+            <div class="syncplay-field">
+              <label>房主连接地址 (IP:端口 或 邀请码)</label>
+              <input type="text" id="syncplay-join-addr" placeholder="例如 192.168.1.100:19280" />
+            </div>
+            <div class="syncplay-field">
+              <label>我的昵称</label>
+              <input type="text" id="syncplay-join-nick" value="群友" placeholder="输入您的昵称" />
+            </div>
+          </div>
+          <div class="syncplay-checkbox-row">
+            <label class="syncplay-checkbox-label">
+              <input type="checkbox" id="syncplay-join-autosync" checked />
+              <span>自动跟随房主播放、暂停与进度拖动</span>
+            </label>
+          </div>
+          <div class="syncplay-actions-row">
+            <button id="syncplay-join-connect-btn" class="primary">🔗 加入房间</button>
+            <button id="syncplay-join-leave-btn" class="ghost hidden">🚪 退出当前房间</button>
+          </div>
+          <div id="syncplay-join-status-card" class="syncplay-live-card hidden">
+            <div class="syncplay-live-status">
+              <span class="syncplay-status-dot pulse"></span>
+              <span id="syncplay-join-status-text" class="syncplay-status-text">已连接到房间</span>
+              <span id="syncplay-join-member-badge" class="syncplay-member-badge">2 人在线</span>
+            </div>
+            <div id="syncplay-join-room-title" class="syncplay-room-title">房间名：—</div>
+            <div class="syncplay-enter-stage-row">
+              <button id="syncplay-join-drawer-btn" class="secondary small">打开播放器协同侧栏 ➔</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 本地视频与下载管理模态框 -->
+  <div id="local-media-modal" class="modal-backdrop hidden">
+    <div class="modal-card local-media-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">📂 本地视频与下载目录</div>
+          <div class="modal-sub">智能扫描本地已下载的动画视频，自动剥离杂质标题并关联全网弹幕</div>
+        </div>
+        <button id="local-media-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body local-media-modal-body">
+        <div class="local-media-toolbar">
+          <div class="local-media-dir-info">
+            <span class="meta">当前扫描目录：</span>
+            <code id="local-media-dir-path" class="local-dir-path">默认下载目录</code>
+          </div>
+          <div class="local-media-actions">
+            <button id="local-media-rescan-btn" class="primary small" title="刷新扫描视频文件">🔄 重新扫描</button>
+          </div>
+        </div>
+        <div id="local-media-empty" class="empty-tip hidden">未在目标目录找到视频文件（支持 .mp4, .mkv, .webm, .avi）</div>
+        <div id="local-media-list" class="local-media-grid"></div>
       </div>
     </div>
   </div>

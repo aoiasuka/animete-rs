@@ -558,6 +558,10 @@ pub async fn save_settings(
 /// 真正退出应用（托盘菜单「退出」经前端确认后调用）。
 #[tauri::command]
 pub fn app_quit(app: AppHandle) {
+    let mgr = crate::syncplay::get_syncplay_manager();
+    tauri::async_runtime::block_on(async {
+        mgr.stop().await;
+    });
     app.exit(0);
 }
 
@@ -2688,6 +2692,53 @@ pub async fn get_mikan_my_bangumi(
     let src = ds_mikan::MikanSource::with_token(Some(token)).map_err(|e| e.to_string())?;
     src.fetch_my_bangumi().await.map_err(|e| e.to_string())
 }
+
+// ---------- 一起看（Syncplay）与本地媒体扫描 ----------
+
+#[tauri::command]
+pub async fn create_syncplay_room(
+    port: Option<u16>,
+    room_name: Option<String>,
+    nickname: Option<String>,
+) -> Result<crate::syncplay::RoomInfo, String> {
+    let mgr = crate::syncplay::get_syncplay_manager();
+    let p = port.unwrap_or(19280);
+    let rname = room_name.unwrap_or_else(|| "一起看房间".to_string());
+    let nick = nickname.unwrap_or_else(|| "房主".to_string());
+    mgr.start(p, rname, nick).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn stop_syncplay_room() -> Result<(), String> {
+    let mgr = crate::syncplay::get_syncplay_manager();
+    mgr.stop().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_syncplay_room_info() -> Result<crate::syncplay::RoomInfo, String> {
+    let mgr = crate::syncplay::get_syncplay_manager();
+    Ok(mgr.get_room_info().await)
+}
+
+#[tauri::command]
+pub fn get_local_network_ips() -> Vec<String> {
+    crate::syncplay::get_local_ip_addresses()
+}
+
+#[tauri::command]
+pub async fn scan_local_videos(
+    dir_path: Option<String>,
+    ctx: State<'_, AppContext>,
+) -> Result<Vec<crate::syncplay::LocalMediaItem>, String> {
+    let path = if let Some(p) = dir_path.filter(|s| !s.trim().is_empty()) {
+        std::path::PathBuf::from(p)
+    } else {
+        ctx.effective_download_dir()
+    };
+    crate::syncplay::scan_directory_for_videos(&path).await
+}
+
 
 #[cfg(test)]
 mod tests {

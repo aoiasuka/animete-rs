@@ -5,6 +5,7 @@ mod cache;
 mod commands;
 mod settings;
 mod state;
+mod syncplay;
 
 use state::AppContext;
 use tauri::menu::{Menu, MenuItem};
@@ -114,6 +115,11 @@ fn main() {
             commands::get_bangumi_subject_collection,
             commands::set_bangumi_subject_collection,
             commands::get_playback_statistics,
+            commands::create_syncplay_room,
+            commands::stop_syncplay_room,
+            commands::get_syncplay_room_info,
+            commands::get_local_network_ips,
+            commands::scan_local_videos,
         ])
         // 离线缓存回放：http://anicache.localhost/<id>/<file>（对应 Ani 的本地缓存 MediaSource）
         .register_asynchronous_uri_scheme_protocol("anicache", |_ctx, request, responder| {

@@ -6050,6 +6050,650 @@ body.window-drag-over::after {
   border-color: rgba(16, 185, 129, 0.45);
 }
 
+/* ==========================================================================
+   一起看（Syncplay）协同观影与本地视频扫描系统
+   ========================================================================== */
+
+/* 顶部导航与播放器栏徽标 */
+.syncplay-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-radius: 999px;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.syncplay-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #10b981;
+  animation: syncPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.3); }
+}
+
+/* 一起看控制中心模态框 */
+.syncplay-modal-card {
+  width: 580px;
+  max-width: 92vw;
+  background: rgba(22, 27, 34, 0.94);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.syncplay-tabs {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 16px;
+}
+
+.syncplay-tab {
+  flex: 1;
+  padding: 9px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.syncplay-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.syncplay-tab.active {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #c4b5fd;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+}
+
+.syncplay-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.syncplay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.syncplay-field label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.syncplay-field input[type="text"],
+.syncplay-field input[type="number"] {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.syncplay-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25);
+}
+
+.syncplay-checkbox-row {
+  margin-bottom: 14px;
+}
+
+.syncplay-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.syncplay-actions-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.syncplay-live-card {
+  padding: 14px;
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.syncplay-live-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.syncplay-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.syncplay-status-dot.pulse {
+  box-shadow: 0 0 8px #10b981;
+  animation: syncPulse 1.2s infinite;
+}
+
+.syncplay-member-badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6ee7b7;
+}
+
+.syncplay-invite-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.syncplay-invite-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.syncplay-invite-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.syncplay-invite-code {
+  flex: 1;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: #f1f5f9;
+  letter-spacing: 0.5px;
+  user-select: all;
+}
+
+.syncplay-ips-list {
+  font-size: 11.5px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.syncplay-room-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.syncplay-enter-stage-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 播放器协同抽屉 (Syncplay Drawer) */
+.syncplay-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: rgba(15, 20, 30, 0.88);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.6);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+
+.syncplay-drawer.hidden {
+  display: none;
+}
+
+.syncplay-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.syncplay-drawer-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.syncplay-drawer-sub {
+  font-size: 11px;
+  color: #10b981;
+  font-weight: 600;
+}
+
+.syncplay-drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+.syncplay-media-sync-card {
+  padding: 8px 10px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sync-card-label {
+  font-size: 10.5px;
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+.sync-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.syncplay-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.syncplay-members-section {
+  max-height: 110px;
+  overflow-y: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 8px;
+}
+
+.syncplay-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.syncplay-member-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+}
+
+.syncplay-member-item .member-name {
+  flex: 1;
+  font-weight: 600;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syncplay-member-item .member-role {
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 3px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.syncplay-member-item .member-sync-tag {
+  font-size: 10px;
+  color: #10b981;
+}
+
+.syncplay-member-item .member-sync-tag.lagging {
+  color: #f59e0b;
+}
+
+.syncplay-chat-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.syncplay-chat-box {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.syncplay-chat-tip {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  padding: 4px;
+}
+
+.syncplay-chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.syncplay-chat-msg.self {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.syncplay-chat-author {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.syncplay-chat-text {
+  color: #f8fafc;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.syncplay-reactions-bar {
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.syncplay-reaction-btn {
+  flex: 1;
+  padding: 4px 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.syncplay-reaction-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.syncplay-reaction-btn:active {
+  transform: scale(0.92);
+}
+
+.syncplay-chat-form {
+  display: flex;
+  gap: 6px;
+}
+
+.syncplay-chat-form input {
+  flex: 1;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.syncplay-chat-form input:focus {
+  border-color: var(--accent);
+}
+
+/* 浮空表情共鸣气泡容器 */
+.syncplay-reaction-container {
+  position: absolute;
+  right: 20px;
+  bottom: 80px;
+  width: 140px;
+  height: 240px;
+  pointer-events: none;
+  z-index: 55;
+  overflow: hidden;
+}
+
+.syncplay-bubble {
+  position: absolute;
+  bottom: 0;
+  font-size: 28px;
+  animation: syncplayFloat 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+@keyframes syncplayFloat {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(0.6);
+  }
+  20% {
+    transform: translateY(-40px) scale(1.1);
+  }
+  70% {
+    opacity: 0.9;
+    transform: translateY(-160px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-240px) scale(0.85);
+  }
+}
+
+/* 房间专属高光金色弹幕 */
+.danmaku-item.danmaku-room {
+  background: rgba(20, 15, 5, 0.78);
+  border: 1.5px solid #facc15 !important;
+  color: #fef08a !important;
+  font-weight: 700 !important;
+  padding: 2px 10px !important;
+  border-radius: 999px !important;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.6) !important;
+  letter-spacing: 0.3px;
+  z-index: 100 !important;
+}
+
+/* 房主切集浮动感应提示 */
+.syncplay-ep-alert {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(22, 27, 34, 0.92);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(139, 92, 246, 0.3);
+  z-index: 65;
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.syncplay-ep-alert.hidden {
+  display: none;
+}
+
+.syncplay-ep-alert .ep-alert-icon {
+  font-size: 16px;
+}
+
+.syncplay-ep-alert .ep-alert-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+/* 本地视频模态框 */
+.local-media-modal-card {
+  width: 820px;
+  max-width: 94vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.local-media-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.local-media-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+}
+
+.local-dir-path {
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #38bdf8;
+}
+
+.local-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+
+.local-media-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.local-media-card:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateY(-2px);
+}
+
+.local-media-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.local-media-badge {
+  padding: 2px 6px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #38bdf8;
+  white-space: nowrap;
+}
+
+.local-media-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1.35;
+}
+
+.local-media-meta {
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 10px;
+}
+
+.local-media-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+
 
 
 
