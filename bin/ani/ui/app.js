@@ -1666,10 +1666,17 @@ function rebuildDlActions(node, t) {
       try {
         const path = await invoke("download_video_path", { id: t.id });
         if (!path) return toast("未找到视频文件");
+        playLocalVideoFile(path);
+      } catch (e) { toast("播放失败：" + e); }
+    });
+    mkBtn("外部播放 ↗", async () => {
+      try {
+        const path = await invoke("download_video_path", { id: t.id });
+        if (!path) return toast("未找到视频文件");
         const via = await invoke("spawn_player", { path });
         toast("已在" + via + "中播放", true);
       } catch (e) { toast("播放失败：" + e); }
-    });
+    }, true);
     mkBtn("打开目录", async () => {
       try {
         const path = await invoke("download_video_path", { id: t.id });
@@ -2723,6 +2730,19 @@ function bindSettings() {
     }
   };
 
+  // --- 蜜柑计划 (Mikan) ---
+  const mikanInput = $("set-mikan-token");
+  if (mikanInput) {
+    mikanInput.value = d.mikan?.token ?? "";
+    mikanInput.oninput = () => {
+      if (!d.mikan) d.mikan = { token: "" };
+      d.mikan.token = mikanInput.value.trim();
+      updateMikanBtnVisibility();
+      scheduleSave();
+    };
+  }
+  updateMikanBtnVisibility();
+
   // --- 弹幕 ---
   $("set-dm-enable").checked = !!d.danmaku_source?.enabled;
   $("set-dm-enable").onchange = () => {
@@ -3631,7 +3651,248 @@ let lastSavedSec = -10;
 // 应用内 BT 播放（anibt://）失败时回落外部播放器用的本地路径
 let btFallbackPath = null;
 let btErrorListener = null;
+let currentLocalPath = null;
 const RATES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+
+const LOOP_MODES = ["sequential", "repeat-one", "repeat-all", "once"];
+let currentLoopMode = localStorage.getItem("ani_loop_mode") || "sequential";
+
+function updateLoopBtn() {
+  const btn = $("player-loop-btn");
+  if (!btn) return;
+  btn.className = "ghost small";
+  switch (currentLoopMode) {
+    case "repeat-one":
+      btn.textContent = "单集 🔂";
+      btn.classList.add("active-one");
+      btn.title = "循环模式：单集循环 🔂 (快捷键 R)";
+      break;
+    case "repeat-all":
+      btn.textContent = "列表 🔁";
+      btn.classList.add("active-all");
+      btn.title = "循环模式：列表循环 🔁 (快捷键 R)";
+      break;
+    case "once":
+      btn.textContent = "即止 ⏹";
+      btn.classList.add("active-once");
+      btn.title = "循环模式：播完即止 ⏹ (快捷键 R)";
+      break;
+    case "sequential":
+    default:
+      btn.textContent = "连播 ⏭";
+      btn.title = "循环模式：顺序连播 ⏭ (快捷键 R)";
+      break;
+  }
+}
+
+function cycleLoopMode() {
+  const idx = LOOP_MODES.indexOf(currentLoopMode);
+  currentLoopMode = LOOP_MODES[(idx + 1) % LOOP_MODES.length];
+  localStorage.setItem("ani_loop_mode", currentLoopMode);
+  updateLoopBtn();
+  const names = {
+    "sequential": "顺序连播 ⏭（播完自动播放下一集）",
+    "repeat-one": "单集循环 🔂（播完自动重新从头播放）",
+    "repeat-all": "列表循环 🔁（最后一集播完回到第 1 集）",
+    "once": "播完即止 ⏹（本集播毕停止）",
+  };
+  showPlayerOsd(`循环模式：${names[currentLoopMode] || currentLoopMode}`);
+  toast(`循环模式已切换为：${names[currentLoopMode] || currentLoopMode}`, true);
+}
+
+async function openInExternalPlayer() {
+  const v = $("video");
+  let target = currentLocalPath || btFallbackPath;
+  if (!target && currentMediaUrl) {
+    if (currentMediaUrl.startsWith("http://anilocal.localhost/v/")) {
+      const hex = currentMediaUrl.split("/v/")[1]?.split("?")[0];
+      if (hex) {
+        let str = "";
+        for (let i = 0; i < hex.length; i += 2) {
+          str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+        }
+        try {
+          target = decodeURIComponent(escape(str));
+        } catch (_) {
+          target = str;
+        }
+      }
+    } else {
+      target = currentMediaUrl;
+    }
+  }
+  if (!target) return toast("当前没有正在播放的媒体");
+  if (v && !v.paused) v.pause();
+  try {
+    const via = await invoke("spawn_player", { path: target });
+    toast(`已在 ${via} 中播放`, true);
+    showPlayerOsd(`已切换至外部播放器（${via}）`);
+  } catch (e) {
+    toast("启动外部播放器失败：" + e);
+  }
+}
+
+async function playLocalVideoFile(path, fileObj = null) {
+  try {
+    let url = "";
+    let rawName = "";
+    if (path) {
+      currentLocalPath = path;
+      btFallbackPath = path;
+      url = await invoke("get_local_media_url", { path });
+      rawName = path.split(/[/\\]/).pop() || path;
+    } else if (fileObj) {
+      currentLocalPath = fileObj.path || null;
+      btFallbackPath = fileObj.path || null;
+      url = URL.createObjectURL(fileObj);
+      rawName = fileObj.name;
+    }
+    if (!url) return toast("无法加载该本地视频文件");
+
+    const meta = await invoke("parse_video_filename", { filename: rawName });
+    const animeTitle = meta.anime_title || rawName;
+    const epNum = meta.episode;
+    const displayTitle = epNum != null ? `${animeTitle} - 第 ${epNum} 集` : animeTitle;
+
+    toast(`正在加载本地视频：${displayTitle}…`, true);
+    openPlayer(url, displayTitle, { localPath: path || fileObj?.path });
+
+    if (animeTitle) {
+      invoke("danmaku_fetch", { subjectName: animeTitle, ep: epNum || 1.0 })
+        .then((r) => {
+          if (r && r.matched && r.comments.length) {
+            DanmakuOverlay.load(r.comments);
+            toast(`弹幕已自动秒配：${r.comments.length} 条（${r.title}）`, true);
+            showPlayerOsd(`🔥 弹幕已秒配：${r.title}`);
+          }
+        })
+        .catch(() => {});
+    }
+  } catch (e) {
+    toast("播放本地视频失败：" + e);
+  }
+}
+
+function updateMikanBtnVisibility() {
+  const btn = $("mikan-my-bangumi-btn");
+  if (!btn) return;
+  const token = settingsState.data?.mikan?.token;
+  if (token && token.trim()) {
+    btn.classList.remove("hidden");
+  } else {
+    btn.classList.add("hidden");
+  }
+}
+
+function openMikanModal() {
+  const modal = $("mikan-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  loadMikanSubscriptions();
+}
+
+function closeMikanModal() {
+  const modal = $("mikan-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function loadMikanSubscriptions() {
+  const listEl = $("mikan-list");
+  const loadEl = $("mikan-loading");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (loadEl) loadEl.classList.remove("hidden");
+  try {
+    const matches = await invoke("get_mikan_my_bangumi");
+    if (loadEl) loadEl.classList.add("hidden");
+    if (!matches || !matches.length) {
+      listEl.innerHTML = `<div class="empty">蜜柑计划专属订阅暂无更新，或 Token 需重新确认</div>`;
+      return;
+    }
+    listEl.innerHTML = "";
+    matches.forEach((m) => {
+      const media = m.media;
+      const item = document.createElement("div");
+      item.className = "mikan-item";
+
+      const main = document.createElement("div");
+      main.className = "mikan-item-main";
+
+      const title = document.createElement("div");
+      title.className = "mikan-item-title";
+      title.textContent = media.title;
+
+      const meta = document.createElement("div");
+      meta.className = "mikan-item-meta";
+      const sizeStr = media.properties.size_bytes ? fmtSize(media.properties.size_bytes) : "";
+      const resStr = media.properties.resolution?.height ? `${media.properties.resolution.height}p` : "";
+      const tags = [sizeStr, resStr].filter(Boolean).join(" · ");
+      meta.textContent = tags || "种子资源";
+
+      main.appendChild(title);
+      main.appendChild(meta);
+
+      const actions = document.createElement("div");
+      actions.className = "mikan-item-actions";
+
+      const uri = media.download?.type === "torrent" ? media.download.uri : null;
+      if (uri) {
+        const playBtn = document.createElement("button");
+        playBtn.className = "ghost small";
+        playBtn.textContent = "▶ 播放";
+        playBtn.title = "在线边下边播";
+        playBtn.onclick = () => {
+          closeMikanModal();
+          startStream(uri, media.title);
+        };
+        actions.appendChild(playBtn);
+
+        const dlBtn = document.createElement("button");
+        dlBtn.className = "ghost small";
+        dlBtn.textContent = "⬇ 下载";
+        dlBtn.title = "添加到下载任务";
+        dlBtn.onclick = () => {
+          startTorrent(uri, media.title);
+        };
+        actions.appendChild(dlBtn);
+
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "ghost small";
+        copyBtn.textContent = "📋";
+        copyBtn.title = "复制下载链接";
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(uri).then(() => toast("下载链接已复制", true));
+        };
+        actions.appendChild(copyBtn);
+      }
+
+      const searchBtn = document.createElement("button");
+      searchBtn.className = "ghost small";
+      searchBtn.textContent = "🔍";
+      searchBtn.title = "在条目库中搜索";
+      searchBtn.onclick = async () => {
+        closeMikanModal();
+        try {
+          const info = await invoke("parse_video_filename", { filename: media.title });
+          const kw = info.anime_title || media.title;
+          const input = $("search-input");
+          if (input) input.value = kw;
+          doSearch(kw);
+        } catch (_) {
+          doSearch(media.title);
+        }
+      };
+      actions.appendChild(searchBtn);
+
+      item.appendChild(main);
+      item.appendChild(actions);
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    if (loadEl) loadEl.classList.add("hidden");
+    listEl.innerHTML = `<div class="empty">拉取失败：${escapeHtml(String(e))}</div>`;
+  }
+}
 
 function mediaKey(str) {
   let h = 5381;
@@ -4535,6 +4796,9 @@ function showPlayerEmpty() {
 function showPlayer(url, title, extra = {}) {
   destroyPlayer();
   currentMediaUrl = url || "";
+  currentLocalPath = extra?.localPath || null;
+  if (extra?.localPath) btFallbackPath = extra.localPath;
+  updateLoopBtn();
   $("player-title").textContent = title || "在线播放";
   showView("player");
   updatePlayerNextBtn();
@@ -4602,19 +4866,19 @@ function showPlayer(url, title, extra = {}) {
       }
     });
   } else {
-    if (url.startsWith("http://anibt.localhost/")) {
-      // 应用内 BT 播放失败（容器不受支持/区间长时间无数据）→ 自动回落外部播放器
+    if (url.startsWith("http://anibt.localhost/") || url.startsWith("http://anilocal.localhost/")) {
+      // 应用内播放失败（容器不受支持/区间长时间无数据）→ 自动回落外部播放器
       btErrorListener = () => {
-        if (!btFallbackPath) {
+        const fallback = currentLocalPath || btFallbackPath;
+        if (!fallback) {
           toast("播放失败：该视频格式可能不受 WebView 支持");
           return;
         }
         toast("应用内播放失败，改用外部播放器…");
-        const fallback = btFallbackPath;
         destroyPlayer();
         showView(playerPrev);
         invoke("spawn_player", { path: fallback })
-          .then((via) => toast("已在" + via + "中播放（边下边播，请勿关闭下载面板）", true))
+          .then((via) => toast("已在" + via + "中播放", true))
           .catch((e) => toast("启动播放器失败：" + e));
       };
       v.addEventListener("error", btErrorListener, { once: true });
@@ -5723,16 +5987,106 @@ if (pStage) {
     if (!files.length) return;
     for (const file of files) {
       const n = file.name.toLowerCase();
-      if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass") || n.endsWith(".ssa")) {
+      if (n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".webm") || n.endsWith(".flv") || n.endsWith(".m4v") || n.endsWith(".avi") || n.endsWith(".ts")) {
+        playLocalVideoFile(file.path || null, file);
+      } else if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass") || n.endsWith(".ssa")) {
         loadSubtitleFile(file);
       } else if (n.endsWith(".xml") || n.endsWith(".json")) {
         loadDanmakuFile(file);
       } else {
-        toast("仅支持拖入字幕文件 (.srt/.vtt/.ass) 或弹幕文件 (.xml/.json)");
+        toast("支持拖入视频文件 (.mp4/.mkv/…)、字幕 (.ass/.srt) 或弹幕 (.xml/.json)");
       }
     }
   });
 }
+
+// 窗口全局拖放反馈
+let bodyDragCount = 0;
+document.body.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  bodyDragCount++;
+  document.body.classList.add("window-drag-over");
+});
+document.body.addEventListener("dragover", (e) => {
+  e.preventDefault();
+});
+document.body.addEventListener("dragleave", (e) => {
+  bodyDragCount--;
+  if (bodyDragCount <= 0) {
+    bodyDragCount = 0;
+    document.body.classList.remove("window-drag-over");
+  }
+});
+document.body.addEventListener("drop", (e) => {
+  e.preventDefault();
+  bodyDragCount = 0;
+  document.body.classList.remove("window-drag-over");
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (!files.length) return;
+  const first = files[0];
+  const n = first.name.toLowerCase();
+  if (n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".webm") || n.endsWith(".flv") || n.endsWith(".m4v") || n.endsWith(".avi") || n.endsWith(".ts")) {
+    playLocalVideoFile(first.path || null, first);
+  } else if (n.endsWith(".srt") || n.endsWith(".vtt") || n.endsWith(".ass") || n.endsWith(".ssa")) {
+    loadSubtitleFile(first);
+  } else if (n.endsWith(".xml") || n.endsWith(".json")) {
+    loadDanmakuFile(first);
+  }
+});
+
+// Tauri 2 窗口原生文件拖放事件（能直接获取磁盘绝对路径，完美驱动字幕同级检索与流式协议）
+listen("tauri://drag-drop", async (event) => {
+  document.body.classList.remove("window-drag-over");
+  const paths = event.payload?.paths || [];
+  if (!paths.length) return;
+  const first = paths[0];
+  const lower = first.toLowerCase();
+  if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm") || lower.endsWith(".flv") || lower.endsWith(".m4v") || lower.endsWith(".avi") || lower.endsWith(".ts")) {
+    playLocalVideoFile(first);
+  } else if (lower.endsWith(".srt") || lower.endsWith(".vtt") || lower.endsWith(".ass") || lower.endsWith(".ssa")) {
+    try {
+      const text = await invoke("read_local_text_file", { path: first });
+      loadSubtitleFromText(text, first.split(/[/\\]/).pop());
+      toast("已挂载拖入的外挂字幕", true);
+    } catch (e) { toast("读取字幕文件失败：" + e); }
+  } else if (lower.endsWith(".xml") || lower.endsWith(".json")) {
+    try {
+      const text = await invoke("read_local_text_file", { path: first });
+      loadDanmakuFromText(text, first.split(/[/\\]/).pop());
+    } catch (e) { toast("读取弹幕文件失败：" + e); }
+  }
+}).catch(() => {});
+
+// 本地视频打开按钮绑定
+const openLocalBtn = $("open-local-video-btn");
+const localVideoInput = $("local-video-file-input");
+if (openLocalBtn && localVideoInput) {
+  openLocalBtn.onclick = () => localVideoInput.click();
+  localVideoInput.onchange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    playLocalVideoFile(file.path || null, file);
+    e.target.value = "";
+  };
+}
+
+// 蜜柑计划专属订阅模态框与快捷入口绑定
+const mikanBtn = $("mikan-my-bangumi-btn");
+if (mikanBtn) mikanBtn.onclick = openMikanModal;
+const mikanCloseBtn = $("mikan-modal-close");
+if (mikanCloseBtn) mikanCloseBtn.onclick = closeMikanModal;
+const mikanModal = $("mikan-modal");
+if (mikanModal) {
+  mikanModal.onclick = (e) => {
+    if (e.target === mikanModal) closeMikanModal();
+  };
+}
+
+// 播放器循环按钮与外部播放按钮绑定
+const loopBtn = $("player-loop-btn");
+if (loopBtn) loopBtn.onclick = cycleLoopMode;
+const extBtn = $("player-external-btn");
+if (extBtn) extBtn.onclick = openInExternalPlayer;
 
 // 画面比例、视效菜单与跳过片头控制绑定
 const visualBtn = $("player-visual-btn");
@@ -5962,7 +6316,7 @@ document.addEventListener("keydown", (e) => {
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
     "w", "W", "s", "S", "c", "C", "p", "P", "d", "D", "[", "]", "\\", "-", "=", "_", "+",
-    ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X"
+    ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X", "r", "R", "o", "O"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
   e.preventDefault();
@@ -6057,6 +6411,8 @@ document.addEventListener("keydown", (e) => {
     case "i": case "I": toggleStatsOsd(); break;
     case "z": case "Z": adjustSubOffset(-0.5); break;
     case "x": case "X": adjustSubOffset(0.5); break;
+    case "r": case "R": cycleLoopMode(); break;
+    case "o": case "O": openInExternalPlayer(); break;
   }
 });
 
@@ -6090,6 +6446,23 @@ $("video").addEventListener("ended", () => {
     return;
   }
 
+  // 循环模式调度
+  if (currentLoopMode === "repeat-one") {
+    clearTimeout(autoPlayTimer);
+    const v = $("video");
+    if (v) {
+      v.currentTime = 0;
+      v.play().catch(() => {});
+      showPlayerOsd("🔂 单集循环：重新播放本集");
+    }
+    return;
+  }
+  if (currentLoopMode === "once") {
+    clearTimeout(autoPlayTimer);
+    showPlayerOsd("⏹ 播完即止：已停止播放");
+    return;
+  }
+
   // 自动连播下一集（3 秒倒计时）
   const nextEp = getNextEpisode();
   if (nextEp) {
@@ -6099,6 +6472,16 @@ $("video").addEventListener("ended", () => {
     autoPlayTimer = setTimeout(() => {
       if (!$("view-player").classList.contains("hidden")) {
         playNextEpisode();
+      }
+    }, 3000);
+  } else if (currentLoopMode === "repeat-all" && state.episodes && state.episodes.length > 0) {
+    const firstEp = state.episodes[0];
+    toast(`3 秒后列表循环播放第 ${firstEp.ep} 集…`, true);
+    showPlayerOsd(`3 秒后列表循环播放第 ${firstEp.ep} 集…`);
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = setTimeout(() => {
+      if (!$("view-player").classList.contains("hidden")) {
+        playEpisodeByObject(firstEp);
       }
     }, 3000);
   }

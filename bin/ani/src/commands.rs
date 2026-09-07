@@ -530,6 +530,10 @@ pub async fn save_settings(
         ctx.registry.set_enabled("jellyfin", false);
         *ctx.jellyfin_applied.lock().unwrap() = None;
     }
+    // 蜜柑计划 Token 更新：即时生效到数据源
+    if let Ok(mikan_src) = ds_mikan::MikanSource::with_token(Some(settings.mikan.token.clone())) {
+        ctx.registry.replace(std::sync::Arc::new(mikan_src));
+    }
     for info in ctx.registry.list_info() {
         ctx.registry
             .set_enabled(&info.id, settings.source_enabled(&info.id));
@@ -2211,6 +2215,256 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
     })
 }
 
+/// 纯标准库十六进制编码/解码（避免额外引入小依赖）。
+pub fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
+
+pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// 将本地文件绝对路径编码为 anilocal:// 协议安全可访问的 URL。
+#[tauri::command]
+pub async fn get_local_media_url(path: String) -> Result<String, String> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("本地文件不存在或不是普通文件：{path}"));
+    }
+    let hex = hex_encode(path.as_bytes());
+    Ok(format!("http://anilocal.localhost/v/{hex}"))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct VideoFilenameInfo {
+    pub raw_name: String,
+    pub anime_title: String,
+    pub episode: Option<f32>,
+}
+
+pub fn clean_video_filename_info(filename: &str) -> VideoFilenameInfo {
+    let raw = std::path::Path::new(filename)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(filename);
+
+    let episode = match ani_domain::episode_in_title(raw) {
+        Some(ani_domain::TitleEpisode::Single(n)) => Some(n),
+        _ => None,
+    };
+
+    // 去除常见视频扩展名
+    let name_without_ext = if let Some((base, _)) = raw.rsplit_once('.') {
+        if is_video(raw) {
+            base
+        } else {
+            raw
+        }
+    } else {
+        raw
+    };
+
+    // 常见发布组与元数据标签（小写比较）
+    let is_spec_tag = |s: &str| -> bool {
+        let l = s.to_lowercase();
+        let trimmed = l.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        if trimmed
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == 'v')
+        {
+            return true;
+        }
+        if trimmed.starts_with("ep") && trimmed[2..].chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+        if trimmed.starts_with('第')
+            && (trimmed.ends_with('集') || trimmed.ends_with('话') || trimmed.ends_with('話'))
+        {
+            return true;
+        }
+        matches!(
+            trimmed,
+            "1080p"
+                | "720p"
+                | "2160p"
+                | "4k"
+                | "x264"
+                | "x265"
+                | "h264"
+                | "h265"
+                | "hevc"
+                | "avc"
+                | "aac"
+                | "flac"
+                | "mp4"
+                | "mkv"
+                | "8bit"
+                | "10bit"
+                | "web-dl"
+                | "webdl"
+                | "webrip"
+                | "bdrip"
+                | "baha"
+                | "bahamut"
+                | "bilibili"
+                | "cr"
+                | "chs"
+                | "cht"
+                | "gb"
+                | "big5"
+                | "简繁内封"
+                | "简中"
+                | "繁中"
+                | "外挂"
+                | "内封"
+                | "1920x1080"
+                | "1280x720"
+        )
+    };
+
+    // 检查 S01E05 / S1E05 命名形式
+    let mut s_e_split = None;
+    let upper = name_without_ext.to_uppercase();
+    if let Some(pos) = upper
+        .find("S01E")
+        .or_else(|| upper.find("S02E"))
+        .or_else(|| upper.find("S03E"))
+        .or_else(|| upper.find("S1E"))
+        .or_else(|| upper.find("S2E"))
+    {
+        let prefix = &name_without_ext[..pos];
+        let cleaned = prefix.trim_matches(|c: char| c == '.' || c == '_' || c == ' ' || c == '-');
+        if !cleaned.is_empty() {
+            s_e_split = Some(cleaned.replace(['.', '_'], " ").trim().to_string());
+        }
+    }
+
+    let anime_title = if let Some(t) = s_e_split {
+        t
+    } else {
+        let chars: Vec<char> = name_without_ext.chars().collect();
+        let mut bracket_tags = Vec::new();
+        let mut outside_chars = Vec::new();
+        let mut in_bracket = false;
+        let mut cur_bracket = String::new();
+
+        for &c in &chars {
+            match c {
+                '[' | '【' | '(' | '（' => {
+                    in_bracket = true;
+                    cur_bracket.clear();
+                }
+                ']' | '】' | ')' | '）' => {
+                    if in_bracket {
+                        bracket_tags.push(cur_bracket.trim().to_string());
+                        in_bracket = false;
+                        cur_bracket.clear();
+                    }
+                }
+                _ => {
+                    if in_bracket {
+                        cur_bracket.push(c);
+                    } else {
+                        outside_chars.push(c);
+                    }
+                }
+            }
+        }
+
+        let outside: String = outside_chars.into_iter().collect();
+        let mut outside_clean = outside.trim().to_string();
+
+        if !outside_clean.is_empty() {
+            if let Some((left, right)) = outside_clean.rsplit_once(" - ") {
+                let right_trim = right.trim();
+                let is_ep_part = right_trim
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == 'v')
+                    || right_trim.starts_with('第')
+                    || is_spec_tag(right_trim);
+                if is_ep_part && !left.trim().is_empty() {
+                    outside_clean = left.trim().to_string();
+                }
+            } else if let Some((left, right)) = outside_clean.rsplit_once(' ') {
+                let right_trim = right.trim();
+                if right_trim
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == 'v')
+                    && !left.trim().is_empty()
+                {
+                    outside_clean = left.trim().to_string();
+                }
+            }
+        }
+
+        outside_clean = outside_clean
+            .trim_matches(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '/')
+            .trim()
+            .to_string();
+
+        if !outside_clean.is_empty() && outside_clean.chars().count() > 1 {
+            outside_clean
+        } else {
+            let mut candidate = String::new();
+            for (idx, tag) in bracket_tags.iter().enumerate() {
+                if idx == 0 && bracket_tags.len() > 1 {
+                    continue;
+                }
+                if !is_spec_tag(tag) {
+                    candidate = tag.clone();
+                    break;
+                }
+            }
+            if candidate.is_empty() && !bracket_tags.is_empty() {
+                candidate = bracket_tags[0].clone();
+            }
+            candidate
+        }
+    };
+
+    VideoFilenameInfo {
+        raw_name: raw.to_string(),
+        anime_title,
+        episode,
+    }
+}
+
+/// 解析本地视频文件名，提取番剧标题与集数（供弹幕自动匹配与播放展示）。
+#[tauri::command]
+pub fn parse_video_filename(filename: String) -> VideoFilenameInfo {
+    clean_video_filename_info(&filename)
+}
+
+/// 获取当前用户在蜜柑计划 (Mikan) 上的专属订阅资源。
+#[tauri::command]
+pub async fn get_mikan_my_bangumi(
+    ctx: State<'_, AppContext>,
+) -> Result<Vec<ani_core::MediaMatch>, String> {
+    let token = {
+        let st = ctx.settings.read().unwrap();
+        st.mikan.token.trim().to_string()
+    };
+    if token.is_empty() {
+        return Err("请先在「设置 - 数据源」中填写蜜柑计划个人 Token".into());
+    }
+    let src = ds_mikan::MikanSource::with_token(Some(token)).map_err(|e| e.to_string())?;
+    src.fetch_my_bangumi().await.map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2296,5 +2550,31 @@ mod tests {
         assert!(!is_newer_version("0.1.0", "0.1.0"));
         assert!(!is_newer_version("0.1.0", "0.2.0"));
         assert!(!is_newer_version("0.1.0", "0.1.1"));
+    }
+
+    #[test]
+    fn test_clean_video_filename_info() {
+        let r1 =
+            clean_video_filename_info("[Lilith-Raws] Sousou no Frieren - 04 [Baha][1080p].mp4");
+        assert_eq!(r1.anime_title, "Sousou no Frieren");
+        assert_eq!(r1.episode, Some(4.0));
+
+        let r2 = clean_video_filename_info("[喵萌奶茶屋] 葬送的芙莉莲 - 04 [WEB-DL 1080p].mp4");
+        assert_eq!(r2.anime_title, "葬送的芙莉莲");
+        assert_eq!(r2.episode, Some(4.0));
+
+        let r3 = clean_video_filename_info("Show.S01E05.1080p.mkv");
+        assert_eq!(r3.anime_title, "Show");
+        assert_eq!(r3.episode, Some(5.0));
+
+        let r4 = clean_video_filename_info(
+            "[NC-Raws] 孤独摇滚！ - 08 (B-Global 1920x1080 HEVC AAC MKV).mkv",
+        );
+        assert_eq!(r4.anime_title, "孤独摇滚！");
+        assert_eq!(r4.episode, Some(8.0));
+
+        let r5 = clean_video_filename_info("[Moe] [SPY x FAMILY] [01] [1080p].mp4");
+        assert_eq!(r5.anime_title, "SPY x FAMILY");
+        assert_eq!(r5.episode, Some(1.0));
     }
 }

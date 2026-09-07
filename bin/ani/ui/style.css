@@ -2121,6 +2121,44 @@ main {
   box-shadow: 0 0 0 3px var(--accent), 0 0 40px rgba(139, 92, 246, 0.5) !important;
 }
 
+body.window-drag-over::after {
+  content: "📂 释放以立即播放视频或挂载字幕/弹幕";
+  position: fixed;
+  inset: 12px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  color: #a78bfa;
+  font-size: 20px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+#player-loop-btn.active-one {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+#player-loop-btn.active-all {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
+#player-loop-btn.active-once {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+#player-external-btn:hover {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.6);
+}
+
 /* 现代原生 WebVTT 字幕渲染样式 */
 ::cue {
   color: var(--sub-color, #ffffff);
@@ -4356,6 +4394,59 @@ main {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* 蜜柑个人专属订阅模态框 */
+.mikan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mikan-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.mikan-item:hover {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.06);
+}
+
+.mikan-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mikan-item-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  word-break: break-word;
+  color: var(--text-main);
+}
+
+.mikan-item-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.mikan-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 

@@ -107,6 +107,9 @@ fn main() {
             commands::win_toggle_maximize,
             commands::win_close,
             commands::win_is_maximized,
+            commands::get_local_media_url,
+            commands::parse_video_filename,
+            commands::get_mikan_my_bangumi,
         ])
         // 离线缓存回放：http://anicache.localhost/<id>/<file>（对应 Ani 的本地缓存 MediaSource）
         .register_asynchronous_uri_scheme_protocol("anicache", |_ctx, request, responder| {
@@ -118,6 +121,35 @@ fn main() {
                 .map(|s| s.to_string());
             tauri::async_runtime::spawn(async move {
                 responder.respond(cache::serve_file_with_range(&path, range.as_deref()));
+            });
+        })
+        // 本地媒体文件流播：http://anilocal.localhost/v/<hex_path>
+        .register_asynchronous_uri_scheme_protocol("anilocal", |_ctx, request, responder| {
+            let uri_path = request.uri().path().to_string();
+            let range = request
+                .headers()
+                .get("range")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            tauri::async_runtime::spawn(async move {
+                let path_opt = uri_path
+                    .trim_start_matches('/')
+                    .strip_prefix("v/")
+                    .or_else(|| uri_path.trim_start_matches('/').strip_prefix('v'))
+                    .and_then(commands::hex_decode)
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .map(std::path::PathBuf::from);
+
+                let resp = match path_opt {
+                    Some(p) if p.is_file() => {
+                        cache::serve_file_path_with_range(&p, range.as_deref())
+                    }
+                    _ => tauri::http::Response::builder()
+                        .status(tauri::http::StatusCode::NOT_FOUND)
+                        .body(Vec::new())
+                        .expect("static response"),
+                };
+                responder.respond(resp);
             });
         })
         // BT 渐进播放：http://anibt.localhost/v/<info_hash>/<file_index>，

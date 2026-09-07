@@ -454,7 +454,6 @@ pub fn serve_file_with_range(
     rel_path: &str,
     range_hdr: Option<&str>,
 ) -> tauri::http::Response<Vec<u8>> {
-    use std::io::{Read, Seek, SeekFrom};
     use tauri::http::{Response, StatusCode};
 
     let bad = |code: StatusCode| {
@@ -468,7 +467,24 @@ pub fn serve_file_with_range(
         return bad(StatusCode::NOT_FOUND);
     }
     let p = cache_root().join(rel);
-    let mut file = match std::fs::File::open(&p) {
+    serve_file_path_with_range(&p, range_hdr)
+}
+
+/// 支持 HTTP Range 请求与大文件流式回传（供 anicache:// 与 anilocal:// 协议共享）。
+pub fn serve_file_path_with_range(
+    p: &Path,
+    range_hdr: Option<&str>,
+) -> tauri::http::Response<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    use tauri::http::{Response, StatusCode};
+
+    let bad = |code: StatusCode| {
+        Response::builder()
+            .status(code)
+            .body(Vec::new())
+            .expect("static response")
+    };
+    let mut file = match std::fs::File::open(p) {
         Ok(f) => f,
         Err(_) => return bad(StatusCode::NOT_FOUND),
     };
@@ -481,7 +497,7 @@ pub fn serve_file_with_range(
     }
 
     let len = meta.len();
-    let mime = mime_of(&p);
+    let mime = mime_of(p);
 
     if len == 0 {
         return Response::builder()

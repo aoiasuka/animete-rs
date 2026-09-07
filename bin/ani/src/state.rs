@@ -39,14 +39,16 @@ pub struct AppContext {
 impl AppContext {
     pub async fn build() -> anyhow::Result<Self> {
         let bgm = BangumiSource::new()?;
+        let settings = SettingsData::load();
         let registry = MediaSourceRegistry::new();
         registry.register(Arc::new(ds_dmhy::DmhySource::new()?));
-        registry.register(Arc::new(ds_mikan::MikanSource::new()?));
+        registry.register(Arc::new(ds_mikan::MikanSource::with_token(Some(
+            settings.mikan.token.clone(),
+        ))?));
         registry.register(Arc::new(ds_acgrip::AcgRipSource::new()?));
         registry.register(Arc::new(ds_nyaa::NyaaSource::new()?));
         let db = ani_db::open(&ani_db::default_db_path()).await?;
 
-        let settings = SettingsData::load();
         let mut jellyfin_applied = None;
         // Jellyfin：配置了服务器才作为源出现
         if settings.jellyfin.is_configured() {

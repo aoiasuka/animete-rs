@@ -18,14 +18,22 @@ const BASE: &str = "https://mikanani.me";
 pub struct MikanSource {
     http: Client,
     info: MediaSourceInfo,
+    token: Option<String>,
 }
 
 impl MikanSource {
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_token(None)
+    }
+
+    pub fn with_token(token: Option<String>) -> anyhow::Result<Self> {
         let http = Client::builder()
             .user_agent(USER_AGENT)
             .timeout(std::time::Duration::from_secs(15))
             .build()?;
+        let token = token
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
         Ok(Self {
             http,
             info: MediaSourceInfo {
@@ -35,21 +43,55 @@ impl MikanSource {
                 tier: MediaSourceTier::Medium,
                 enabled: true,
             },
+            token,
         })
     }
 
-    /// 关键词搜索（注意：mikan 匿名 /RSS/Search 已停用，恒返回空，
-    /// 仅作为无条目 ID 时的兜底路径）。
+    pub fn set_token(&mut self, token: Option<String>) {
+        self.token = token
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+    }
+
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
+    /// 关键词搜索（带 token 时可解锁完整搜索结果）。
     #[allow(dead_code)]
     async fn fetch_rss(&self, searchterm: &str) -> Result<String, UserError> {
-        let url = format!("{BASE}/RSS/Search?searchterm={}", urlencode(searchterm));
+        let mut url = format!("{BASE}/RSS/Search?searchterm={}", urlencode(searchterm));
+        if let Some(token) = &self.token {
+            url.push_str(&format!("&token={}", urlencode(token)));
+        }
         self.get_with_retry(&url).await
     }
 
     /// 按 Bangumi 条目 ID 拉全集 RSS（当前可用的接口，无需登录/字幕组 ID）。
     async fn fetch_rss_by_bangumi(&self, bangumi_id: u32) -> Result<String, UserError> {
-        let url = format!("{BASE}/RSS/Bangumi?bangumiId={bangumi_id}");
+        let mut url = format!("{BASE}/RSS/Bangumi?bangumiId={bangumi_id}");
+        if let Some(token) = &self.token {
+            url.push_str(&format!("&token={}", urlencode(token)));
+        }
         self.get_with_retry(&url).await
+    }
+
+    /// 拉取当前用户的专属订阅 RSS (/RSS/MyBangumi?token=...)。
+    pub async fn fetch_my_bangumi(&self) -> Result<Vec<MediaMatch>, UserError> {
+        let Some(token) = &self.token else {
+            return Err(UserError::internal(
+                "请先在设置中填写蜜柑计划 Token 才能拉取专属订阅",
+            ));
+        };
+        let url = format!("{BASE}/RSS/MyBangumi?token={}", urlencode(token));
+        let xml = self.get_with_retry(&url).await?;
+        Ok(parse_rss(&xml)
+            .into_iter()
+            .map(|m| MediaMatch {
+                match_kind: MatchKind::Fuzzy,
+                media: m,
+            })
+            .collect())
     }
 
     /// GET + 传输失败重试（代理/跨境链路瞬断很常见）。
@@ -193,5 +235,15 @@ mod tests {
         assert!(uri.ends_with(".torrent"));
         assert_eq!(m.properties.size_bytes, Some(356_515_840));
         assert_eq!(m.properties.resolution.unwrap().height, 1080);
+    }
+
+    #[test]
+    fn test_token_configuration() {
+        let mut src = MikanSource::with_token(Some("test_token_123".into())).unwrap();
+        assert_eq!(src.token(), Some("test_token_123"));
+        src.set_token(None);
+        assert_eq!(src.token(), None);
+        src.set_token(Some("   ".into()));
+        assert_eq!(src.token(), None);
     }
 }

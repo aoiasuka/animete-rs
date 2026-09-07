@@ -119,6 +119,14 @@ impl BangumiAuthSettings {
     }
 }
 
+/// 蜜柑计划（Mikan）用户专属设置。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MikanSettings {
+    /// 用户个人 Token（在 mikanani.me 个人设置页的 RSS 地址中获取，如 ?token=xxxx）
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SettingsData {
@@ -130,6 +138,8 @@ pub struct SettingsData {
     /// 弹幕源（dandanplay 开放 API 凭据）
     pub danmaku_source: DanmakuSourceSettings,
     pub torrent: TorrentSettings,
+    /// 蜜柑计划专属配置（个人 Token 订阅）
+    pub mikan: MikanSettings,
     /// Jellyfin 媒体服务器（配置后作为高分片源出现，支持在线播放）
     pub jellyfin: JellyfinSettings,
     /// Bangumi 账号（看完自动打卡收藏/进度）
@@ -146,6 +156,7 @@ impl Default for SettingsData {
             danmaku: DanmakuFilter::default(),
             danmaku_source: DanmakuSourceSettings::default(),
             torrent: TorrentSettings::default(),
+            mikan: MikanSettings::default(),
             jellyfin: JellyfinSettings::default(),
             bangumi: BangumiAuthSettings::default(),
             sources: Vec::new(),
