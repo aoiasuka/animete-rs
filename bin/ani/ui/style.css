@@ -4802,6 +4802,404 @@ body.window-drag-over::after {
   border-radius: var(--radius-pill);
 }
 
+/* ---------- 制作人员 STAFF 展台 ---------- */
+.persons-wrap {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+}
+
+.persons-head-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.persons-head-row h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+}
+
+.persons-list {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+}
+
+.persons-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.persons-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+
+.person-card {
+  flex: 0 0 148px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, background-color 0.2s;
+}
+
+.person-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.person-avatar-wrap {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid var(--line);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.person-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-relation-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-light);
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: var(--radius-pill);
+  padding: 1px 7px;
+  margin-bottom: 6px;
+  max-width: 130px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.person-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.3;
+  margin-bottom: 3px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-career {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Bangumi 评分分布图谱 ---------- */
+.subject-rating-chart-wrap {
+  margin: 12px 0;
+}
+
+.rating-chart-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.rating-chart-score-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 90px;
+  border-right: 1px solid var(--line);
+  padding-right: 16px;
+}
+
+.rating-score-main {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.rating-score-val {
+  font-size: 32px;
+  font-weight: 900;
+  color: #f59e0b;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.rating-score-max {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rating-score-details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.rating-rank-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ec4899;
+  background: rgba(236, 72, 153, 0.12);
+  border-radius: var(--radius-pill);
+  padding: 1px 6px;
+}
+
+.rating-total-votes {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rating-bars-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.rating-bars-title {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.rating-bars-grid {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 52px;
+  padding-top: 4px;
+}
+
+.rating-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  cursor: pointer;
+  position: relative;
+}
+
+.rating-bar-track {
+  width: 100%;
+  max-width: 14px;
+  height: 38px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px 3px 1px 1px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.rating-bar-fill {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.3s ease, background-color 0.2s;
+}
+
+.rating-bar-col:hover .rating-bar-fill {
+  background: var(--accent);
+}
+
+.rating-bar-fill.max-score {
+  background: linear-gradient(to top, #d97706, #f59e0b);
+}
+
+.rating-bar-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+
+/* ---------- 弹幕类型屏蔽胶囊与弹幕屏蔽词管理 ---------- */
+.dm-filter-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.dm-filter-chip {
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  border-radius: var(--radius-pill) !important;
+  border: 1px solid var(--line) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: var(--text-muted) !important;
+  transition: all 0.15s;
+}
+
+.dm-filter-chip:hover {
+  border-color: var(--text-main) !important;
+  color: var(--text-main) !important;
+}
+
+.dm-filter-chip.active {
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #f87171 !important;
+  text-decoration: line-through;
+}
+
+.dm-filter-modal-card {
+  width: 540px;
+  max-width: 92vw;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.dm-filter-add-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dm-kw-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.dm-kw-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dm-filter-presets-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
+
+.dm-presets-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.dm-preset-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dm-preset-btn {
+  font-size: 11px !important;
+  padding: 3px 8px !important;
+  border-radius: var(--radius-pill) !important;
+}
+
+.dm-filter-list-section {
+  margin-bottom: 14px;
+}
+
+.dm-filter-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.dm-filter-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.danger-text {
+  color: #f87171 !important;
+}
+
+.danger-text:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+.dm-kw-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.dm-kw-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.dm-kw-tag-del {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.dm-kw-tag-del:hover {
+  color: #f87171;
+}
+
+.dm-filter-stats-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+
 
 
 

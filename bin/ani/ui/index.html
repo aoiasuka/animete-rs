@@ -218,6 +218,24 @@
           </div>
           <div id="subject-meta" class="meta"></div>
           <div id="subject-badges" class="subject-badges hidden"></div>
+          <div id="subject-rating-chart-wrap" class="subject-rating-chart-wrap hidden">
+            <div class="rating-chart-card">
+              <div class="rating-chart-score-box">
+                <div class="rating-score-main">
+                  <span id="rating-score-val" class="rating-score-val">-</span>
+                  <span class="rating-score-max">/10</span>
+                </div>
+                <div class="rating-score-details">
+                  <span id="rating-rank-badge" class="rating-rank-badge">Rank -</span>
+                  <span id="rating-total-votes" class="rating-total-votes">- 人评价</span>
+                </div>
+              </div>
+              <div class="rating-bars-box">
+                <div class="rating-bars-title">Bangumi 评分分布（10星 ~ 1星）</div>
+                <div id="rating-bars-grid" class="rating-bars-grid"></div>
+              </div>
+            </div>
+          </div>
           <div id="subject-tags" class="subject-tags hidden"></div>
           <div id="subject-synopsis-wrap" class="subject-synopsis-wrap hidden">
             <p id="subject-synopsis" class="subject-synopsis collapsed"></p>
@@ -234,6 +252,16 @@
           </div>
         </div>
         <div id="characters-list" class="characters-list"></div>
+      </div>
+      <!-- 制作人员 STAFF 演职员展台 -->
+      <div id="persons-wrap" class="persons-wrap hidden">
+        <div class="persons-head-row">
+          <div class="persons-head-left">
+            <h3>制作人员 STAFF</h3>
+            <span id="persons-count" class="meta"></span>
+          </div>
+        </div>
+        <div id="persons-list" class="persons-list"></div>
       </div>
       <div id="detail-related-wrap" class="related-wrap hidden">
         <div class="related-head-row">
@@ -739,6 +767,17 @@
                 <button id="dm-delay-reset" class="ghost small" title="重置弹幕时间">重置</button>
               </div>
             </div>
+            <div class="sub-menu-sep"></div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">类型屏蔽</span>
+              <div class="dm-filter-chips">
+                <button id="dm-filter-scroll" class="ghost small dm-filter-chip" title="屏蔽滚动弹幕">滚动</button>
+                <button id="dm-filter-top" class="ghost small dm-filter-chip" title="屏蔽顶部弹幕">顶部</button>
+                <button id="dm-filter-bottom" class="ghost small dm-filter-chip" title="屏蔽底部弹幕">底部</button>
+                <button id="dm-filter-color" class="ghost small dm-filter-chip" title="屏蔽彩色弹幕（全部强制白色）">彩色</button>
+              </div>
+            </div>
+            <button id="dm-open-blocklist-btn" class="sub-menu-item">🚫 弹幕屏蔽词管理 (<span id="dm-blocklist-count-badge">0</span>)</button>
           </div>
         </div>
         <div class="player-sub-wrap">
@@ -1290,6 +1329,46 @@
         <div class="stats-section">
           <div class="stats-section-title">观看时长 Top 5 番剧榜单</div>
           <div id="stats-top-list" class="stats-top-list"><div class="meta">暂无数据</div></div>
+        </div>
+      </div>
+    </div>
+  <!-- 弹幕屏蔽词与规则过滤器模态框 -->
+  <div id="dm-filter-modal" class="modal-backdrop hidden">
+    <div class="modal-card dm-filter-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">🚫 弹幕屏蔽与高级过滤</div>
+          <div class="modal-sub">实时屏蔽剧透、引战、刷屏弹幕，支持关键词与正则表达式</div>
+        </div>
+        <button id="dm-filter-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="dm-filter-add-bar">
+          <input type="text" id="dm-kw-input" class="dm-kw-input" placeholder="输入屏蔽词（如：剧透、结局）或 /正则/（如：/第.*集/i）…" />
+          <button id="dm-kw-add-btn" class="primary small">添加屏蔽词</button>
+        </div>
+
+        <div class="dm-filter-presets-section">
+          <div class="dm-presets-label">快速预设屏蔽包：</div>
+          <div class="dm-preset-chips">
+            <button class="ghost small dm-preset-btn" data-preset="spoiler" title="一键导入常见剧透特征词">🛡 防剧透</button>
+            <button class="ghost small dm-preset-btn" data-preset="spam" title="一键导入常见打卡、复读与刷屏词">⛔ 防刷屏/打卡</button>
+            <button class="ghost small dm-preset-btn" data-preset="flame" title="一键导入争吵、引战与贬损词">⚔ 防引战/骂战</button>
+          </div>
+        </div>
+
+        <div class="dm-filter-list-section">
+          <div class="dm-filter-list-header">
+            <span class="dm-filter-list-title">当前已启用屏蔽词（<span id="dm-filter-active-count">0</span>）</span>
+            <button id="dm-filter-clear-all" class="ghost small danger-text" title="清空全部自定义屏蔽词">清空全部</button>
+          </div>
+          <div id="dm-kw-tags-wrap" class="dm-kw-tags-wrap">
+            <div class="meta empty-hint">暂未配置屏蔽词，添加后可实时过滤弹幕</div>
+          </div>
+        </div>
+
+        <div class="dm-filter-stats-bar">
+          <span id="dm-session-blocked-info" class="meta mono">本次播放已拦截 0 条弹幕</span>
         </div>
       </div>
     </div>

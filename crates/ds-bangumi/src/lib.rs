@@ -85,6 +85,20 @@ pub struct RelatedSubject {
     pub cover_url: Option<String>,
 }
 
+/// 条目关联的制作人员与演职员（STAFF）信息。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubjectPerson {
+    pub id: u64,
+    pub name: String,
+    pub relation: String,
+    #[serde(default)]
+    pub person_type: u8,
+    #[serde(default)]
+    pub career: Vec<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+}
+
 /// 条目全量详情（包含评分、排名、简介、标签、总集数等）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SubjectDetail {
@@ -97,6 +111,8 @@ pub struct SubjectDetail {
     pub score: Option<f32>,
     pub rank: Option<u32>,
     pub rating_total: Option<u32>,
+    #[serde(default)]
+    pub rating_count: Option<[u32; 10]>,
     pub total_episodes: Option<u32>,
     pub platform: Option<String>,
     pub tags: Vec<String>,
@@ -334,6 +350,8 @@ impl BangumiSource {
             score: Option<f32>,
             rank: Option<u32>,
             total: Option<u32>,
+            #[serde(default)]
+            count: Option<std::collections::HashMap<String, u32>>,
         }
         #[derive(serde::Deserialize)]
         struct TagObj {
@@ -391,6 +409,17 @@ impl BangumiSource {
 
         let total_eps = it.eps.or(it.total_episodes);
 
+        let rating_count = it.rating.as_ref().and_then(|r| {
+            r.count.as_ref().map(|map| {
+                let mut arr = [0u32; 10];
+                for (i, slot) in arr.iter_mut().enumerate() {
+                    let key = (i + 1).to_string();
+                    *slot = map.get(&key).copied().unwrap_or(0);
+                }
+                arr
+            })
+        });
+
         Ok(SubjectDetail {
             id: it.id,
             display_title: if it.name_cn.is_empty() {
@@ -405,6 +434,7 @@ impl BangumiSource {
             score: it.rating.as_ref().and_then(|r| r.score),
             rank: it.rating.as_ref().and_then(|r| r.rank),
             rating_total: it.rating.as_ref().and_then(|r| r.total),
+            rating_count,
             total_episodes: total_eps,
             platform: it.platform,
             tags: top_tags,
@@ -529,6 +559,75 @@ impl BangumiSource {
             _ => 2,
         });
 
+        Ok(list)
+    }
+
+    /// 查询条目制作人员（STAFF）列表（核心职位排在前面）。
+    pub async fn persons(&self, SubjectId(id): SubjectId) -> Result<Vec<SubjectPerson>, UserError> {
+        #[derive(serde::Deserialize)]
+        struct PersonItem {
+            id: u64,
+            name: String,
+            #[serde(default)]
+            relation: String,
+            #[serde(rename = "type", default)]
+            person_type: u8,
+            #[serde(default)]
+            career: Vec<String>,
+            #[serde(default)]
+            images: Option<Images>,
+        }
+
+        let resp: Vec<PersonItem> = self
+            .http
+            .get(format!("{API}/v0/subjects/{id}/persons"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut list: Vec<SubjectPerson> = resp
+            .into_iter()
+            .map(|item| {
+                let image_url = item
+                    .images
+                    .and_then(|img| best_cover(&img))
+                    .map(|u| u.to_string());
+                SubjectPerson {
+                    id: item.id,
+                    name: item.name,
+                    relation: item.relation,
+                    person_type: item.person_type,
+                    career: item.career,
+                    image_url,
+                }
+            })
+            .collect();
+
+        // 核心职能排序优先
+        fn person_relation_priority(rel: &str) -> u8 {
+            if rel.contains("监督") || rel.contains("导演") || rel.contains("原作") {
+                0
+            } else if rel.contains("系列构成") || rel.contains("脚本") || rel.contains("编剧")
+            {
+                1
+            } else if rel.contains("人物设定")
+                || rel.contains("角色设计")
+                || rel.contains("总作画监督")
+                || rel.contains("作画监督")
+            {
+                2
+            } else if rel.contains("音乐") || rel.contains("音响") {
+                3
+            } else if rel.contains("动画制作") || rel.contains("制作") {
+                4
+            } else {
+                5
+            }
+        }
+
+        list.sort_by_key(|p| (person_relation_priority(&p.relation), p.id));
         Ok(list)
     }
 
@@ -854,7 +953,11 @@ mod tests {
             "rating": {
                 "score": 8.5,
                 "rank": 42,
-                "total": 36127
+                "total": 36127,
+                "count": {
+                    "1": 10,
+                    "10": 4000
+                }
             },
             "eps": 28,
             "total_episodes": 28,
@@ -870,6 +973,8 @@ mod tests {
             score: Option<f32>,
             rank: Option<u32>,
             total: Option<u32>,
+            #[serde(default)]
+            count: Option<std::collections::HashMap<String, u32>>,
         }
         #[derive(serde::Deserialize)]
         struct TagObj {
@@ -902,6 +1007,17 @@ mod tests {
         tags.sort_by_key(|b| std::cmp::Reverse(b.count));
         let top_tags: Vec<String> = tags.into_iter().map(|t| t.name).collect();
 
+        let rating_count = it.rating.as_ref().and_then(|r| {
+            r.count.as_ref().map(|map| {
+                let mut arr = [0u32; 10];
+                for (i, slot) in arr.iter_mut().enumerate() {
+                    let key = (i + 1).to_string();
+                    *slot = map.get(&key).copied().unwrap_or(0);
+                }
+                arr
+            })
+        });
+
         let detail = SubjectDetail {
             id: it.id,
             display_title: if it.name_cn.is_empty() {
@@ -916,6 +1032,7 @@ mod tests {
             score: it.rating.as_ref().and_then(|r| r.score),
             rank: it.rating.as_ref().and_then(|r| r.rank),
             rating_total: it.rating.as_ref().and_then(|r| r.total),
+            rating_count,
             total_episodes: it.eps,
             platform: it.platform,
             tags: top_tags,
@@ -930,6 +1047,73 @@ mod tests {
         assert_eq!(detail.tags[0], "治愈"); // highest count
         assert_eq!(detail.tags[1], "MADHOUSE");
         assert_eq!(detail.tags[2], "奇幻");
+        assert_eq!(detail.rating_count.unwrap()[0], 10);
+        assert_eq!(detail.rating_count.unwrap()[9], 4000);
+    }
+
+    #[test]
+    fn test_persons_sorting_priority() {
+        let mut persons = [
+            SubjectPerson {
+                id: 1,
+                name: "MADHOUSE".into(),
+                relation: "动画制作".into(),
+                person_type: 2,
+                career: vec!["producer".into()],
+                image_url: None,
+            },
+            SubjectPerson {
+                id: 2,
+                name: "斎藤圭一郎".into(),
+                relation: "导演".into(),
+                person_type: 1,
+                career: vec!["director".into()],
+                image_url: None,
+            },
+            SubjectPerson {
+                id: 3,
+                name: "Evan Call".into(),
+                relation: "音乐".into(),
+                person_type: 1,
+                career: vec!["artist".into()],
+                image_url: None,
+            },
+            SubjectPerson {
+                id: 4,
+                name: "铃木智寻".into(),
+                relation: "系列构成".into(),
+                person_type: 1,
+                career: vec!["writer".into()],
+                image_url: None,
+            },
+        ];
+
+        fn person_relation_priority(rel: &str) -> u8 {
+            if rel.contains("监督") || rel.contains("导演") || rel.contains("原作") {
+                0
+            } else if rel.contains("系列构成") || rel.contains("脚本") || rel.contains("编剧")
+            {
+                1
+            } else if rel.contains("人物设定")
+                || rel.contains("角色设计")
+                || rel.contains("总作画监督")
+                || rel.contains("作画监督")
+            {
+                2
+            } else if rel.contains("音乐") || rel.contains("音响") {
+                3
+            } else if rel.contains("动画制作") || rel.contains("制作") {
+                4
+            } else {
+                5
+            }
+        }
+
+        persons.sort_by_key(|p| (person_relation_priority(&p.relation), p.id));
+        assert_eq!(persons[0].relation, "导演");
+        assert_eq!(persons[1].relation, "系列构成");
+        assert_eq!(persons[2].relation, "音乐");
+        assert_eq!(persons[3].relation, "动画制作");
     }
 
     #[test]

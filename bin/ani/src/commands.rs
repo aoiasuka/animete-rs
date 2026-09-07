@@ -93,6 +93,17 @@ pub async fn get_subject_characters(
 }
 
 #[tauri::command]
+pub async fn get_subject_persons(
+    ctx: State<'_, AppContext>,
+    subject_id: u32,
+) -> Result<Vec<ds_bangumi::SubjectPerson>, String> {
+    ctx.bgm
+        .persons(ani_core::SubjectId(subject_id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_related_subjects(
     ctx: State<'_, AppContext>,
     subject_id: u32,

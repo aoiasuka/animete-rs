@@ -45,6 +45,7 @@ fn main() {
             commands::search_subjects,
             commands::episode_list,
             commands::get_subject_characters,
+            commands::get_subject_persons,
             commands::get_related_subjects,
             commands::get_subject_detail,
             commands::get_subject_comments,
