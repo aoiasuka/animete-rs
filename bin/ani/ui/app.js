@@ -140,6 +140,7 @@ async function loadHome(force = false) {
     homeState.today = todayWeekdayId();
     homeState.loaded = true;
     renderCalendar();
+    updateTodayBroadcastBanner();
   } catch (e) {
     $("calendar-grid").innerHTML = `<div class="empty">时间表加载失败：${escapeHtml(String(e))}</div>`;
   }
@@ -226,6 +227,81 @@ function getTodayAirSubjectIds() {
   const curDay = homeState.calendar.find((d) => d.weekday.id === homeState.today);
   if (!curDay || !curDay.items) return new Set();
   return new Set(curDay.items.map((it) => Number(it.id?.id ?? it.id ?? it.bangumi_id)));
+}
+
+function updateTodayBroadcastBanner() {
+  const banner = $("today-broadcast-banner");
+  if (!banner) return;
+  const todayAirIds = getTodayAirSubjectIds();
+  if (!todayAirIds.size || !cachedCollections.length) {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  const todayFollowed = cachedCollections.filter((it) => {
+    const sId = Number(it.id?.id ?? it.id ?? it.bangumi_id);
+    return todayAirIds.has(sId);
+  });
+
+  if (!todayFollowed.length) {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  banner.classList.remove("hidden");
+  const badgeEl = $("today-banner-badge");
+  if (badgeEl) badgeEl.textContent = `${todayFollowed.length} 部今日更新`;
+
+  const descEl = $("today-banner-desc");
+  if (descEl) {
+    const names = todayFollowed.map((it) => it.display_title || it.name_cn || it.name);
+    descEl.textContent = `今日放送：${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等共 ${names.length} 部作品` : ""}`;
+  }
+
+  const previewsEl = $("today-banner-previews");
+  if (previewsEl) {
+    previewsEl.innerHTML = todayFollowed
+      .slice(0, 5)
+      .map((it) => {
+        const cover = it.cover_url || "";
+        const title = it.display_title || it.name_cn || it.name;
+        const sId = Number(it.id?.id ?? it.id ?? it.bangumi_id);
+        return cover
+          ? `<img class="today-banner-thumb" src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" title="${escapeAttr(title)} (点击直达详情)" data-id="${sId}" referrerpolicy="no-referrer" />`
+          : "";
+      })
+      .join("");
+
+    previewsEl.querySelectorAll(".today-banner-thumb").forEach((img) => {
+      img.onclick = () => {
+        const sId = Number(img.dataset.id);
+        if (sId) showSubjectDetail(sId);
+      };
+    });
+  }
+
+  const filterBtn = $("today-banner-filter-btn");
+  if (filterBtn) {
+    filterBtn.onclick = () => {
+      colFilterState.status = "today_air";
+      const statusTabs = $("collection-status-tabs");
+      if (statusTabs) {
+        statusTabs.querySelectorAll(".col-tab").forEach((tab) => {
+          tab.classList.toggle("active", tab.getAttribute("data-status") === "today_air");
+        });
+      }
+      renderCollectionsList();
+      const colSec = $("collection-section");
+      if (colSec) colSec.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
+
+  const closeBtn = $("today-banner-close-btn");
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      banner.classList.add("hidden");
+    };
+  }
 }
 
 function renderCollectionsList() {
@@ -393,8 +469,10 @@ async function loadCollections() {
     }));
     sec.classList.remove("hidden");
     renderCollectionsList();
+    updateTodayBroadcastBanner();
   } catch {
     sec.classList.add("hidden");
+    updateTodayBroadcastBanner();
   }
 }
 
@@ -1265,7 +1343,7 @@ async function loadCharacters(subjectId, seq) {
     }
     if (countEl) countEl.textContent = `${chars.length} 位角色`;
     listEl.innerHTML = chars
-      .map((c) => {
+      .map((c, i) => {
         const avatarHtml = c.image_url
           ? `<img class="character-avatar" src="${escapeHtml(c.image_url)}" alt="${escapeHtml(c.name)}" referrerpolicy="no-referrer" loading="lazy" />`
           : `<div class="character-avatar" style="display:flex;align-items:center;justify-content:center;font-size:24px;background:rgba(255,255,255,0.06)">🎭</div>`;
@@ -1284,7 +1362,7 @@ async function loadCharacters(subjectId, seq) {
         }
 
         return `
-          <div class="character-card">
+          <div class="character-card" data-idx="${i}" title="点击查看「${escapeHtml(c.name)}」人设与声优名鉴">
             <div class="character-avatar-wrap">${avatarHtml}</div>
             <div class="character-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
             <div class="${badgeClass}">${escapeHtml(c.relation || "角色")}</div>
@@ -1293,6 +1371,16 @@ async function loadCharacters(subjectId, seq) {
         `;
       })
       .join("");
+
+    listEl.querySelectorAll(".character-card").forEach((card) => {
+      card.onclick = () => {
+        const idx = Number(card.dataset.idx);
+        if (!isNaN(idx) && chars[idx]) {
+          showCharacterModal(chars[idx]);
+        }
+      };
+    });
+
     wrap.classList.remove("hidden");
   };
 
@@ -1312,6 +1400,168 @@ async function loadCharacters(subjectId, seq) {
   }
 }
 
+function showCharacterModal(c) {
+  const modal = $("character-modal");
+  if (!modal || !c) return;
+
+  const titleEl = $("char-modal-title");
+  if (titleEl) titleEl.textContent = `角色名鉴 · ${c.name}`;
+
+  const nameEl = $("char-modal-name");
+  if (nameEl) nameEl.textContent = c.name;
+
+  const jpNameEl = $("char-modal-jp-name");
+  if (jpNameEl) jpNameEl.textContent = c.relation ? `关系：${c.relation}` : "";
+
+  const roleBadge = $("char-modal-role-badge");
+  if (roleBadge) {
+    roleBadge.textContent = c.relation || "角色";
+    roleBadge.className = `char-modal-role-badge ${c.relation === "主角" ? "main" : (c.relation === "配角" ? "sub" : "")}`;
+  }
+
+  const avatarImg = $("char-modal-avatar");
+  const fallback = $("char-modal-avatar-fallback");
+  if (c.image_url) {
+    if (avatarImg) {
+      avatarImg.src = c.image_url;
+      avatarImg.classList.remove("hidden");
+    }
+    if (fallback) fallback.classList.add("hidden");
+  } else {
+    if (avatarImg) avatarImg.classList.add("hidden");
+    if (fallback) fallback.classList.remove("hidden");
+  }
+
+  const actorsList = $("char-modal-actors-list");
+  if (actorsList) {
+    if (c.actors && c.actors.length > 0) {
+      actorsList.innerHTML = c.actors
+        .map((a) => {
+          const aImg = a.image_url
+            ? `<img class="char-actor-avatar-mini" src="${escapeAttr(a.image_url)}" referrerpolicy="no-referrer" />`
+            : `<div class="char-actor-avatar-mini" style="display:flex;align-items:center;justify-content:center;font-size:12px;background:rgba(255,255,255,0.1)">🎙️</div>`;
+          return `<div class="char-actor-row">${aImg}<span class="char-actor-name-text">${escapeHtml(a.name)}</span></div>`;
+        })
+        .join("");
+    } else {
+      actorsList.innerHTML = `<span class="meta" style="font-size:12px">暂无 CV 声优记录</span>`;
+    }
+  }
+
+  const searchCharBtn = $("char-btn-search-char");
+  if (searchCharBtn) {
+    searchCharBtn.onclick = () => {
+      modal.classList.add("hidden");
+      const input = $("search-input");
+      if (input) input.value = c.name;
+      showView("home");
+      doSearch();
+    };
+  }
+
+  const searchCvBtn = $("char-btn-search-cv");
+  if (searchCvBtn) {
+    if (c.actors && c.actors.length > 0 && c.actors[0].name) {
+      searchCvBtn.classList.remove("hidden");
+      searchCvBtn.textContent = `🎙️ 探索 ${c.actors[0].name} 作品`;
+      searchCvBtn.onclick = () => {
+        modal.classList.add("hidden");
+        const input = $("search-input");
+        if (input) input.value = c.actors[0].name;
+        showView("home");
+        doSearch();
+      };
+    } else {
+      searchCvBtn.classList.add("hidden");
+    }
+  }
+
+  const openBgmBtn = $("char-btn-open-bgm");
+  if (openBgmBtn) {
+    openBgmBtn.onclick = () => {
+      if (c.id) {
+        invoke("open_url", { url: `https://bgm.tv/character/${c.id}` }).catch(() => {});
+      }
+    };
+  }
+
+  const closeBtn = $("char-modal-close");
+  if (closeBtn) {
+    closeBtn.onclick = () => modal.classList.add("hidden");
+  }
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  };
+
+  modal.classList.remove("hidden");
+}
+
+function showPersonModal(p) {
+  const modal = $("person-modal");
+  if (!modal || !p) return;
+
+  const titleEl = $("person-modal-title");
+  if (titleEl) titleEl.textContent = `主创名鉴 · ${p.name}`;
+
+  const nameEl = $("person-modal-name");
+  if (nameEl) nameEl.textContent = p.name;
+
+  const careerEl = $("person-modal-career");
+  if (careerEl) {
+    const careerText = p.career && p.career.length ? p.career.join(" / ") : (p.relation || "STAFF");
+    careerEl.textContent = careerText;
+  }
+
+  const roleBadge = $("person-modal-role-badge");
+  if (roleBadge) {
+    roleBadge.textContent = p.relation || "STAFF";
+  }
+
+  const avatarImg = $("person-modal-avatar");
+  const fallback = $("person-modal-avatar-fallback");
+  if (p.image_url) {
+    if (avatarImg) {
+      avatarImg.src = p.image_url;
+      avatarImg.classList.remove("hidden");
+    }
+    if (fallback) fallback.classList.add("hidden");
+  } else {
+    if (avatarImg) avatarImg.classList.add("hidden");
+    if (fallback) fallback.classList.remove("hidden");
+  }
+
+  const searchBtn = $("person-btn-search");
+  if (searchBtn) {
+    searchBtn.textContent = `🎬 探索 ${p.name} 的作品`;
+    searchBtn.onclick = () => {
+      modal.classList.add("hidden");
+      const input = $("search-input");
+      if (input) input.value = p.name;
+      showView("home");
+      doSearch();
+    };
+  }
+
+  const openBgmBtn = $("person-btn-open-bgm");
+  if (openBgmBtn) {
+    openBgmBtn.onclick = () => {
+      if (p.id) {
+        invoke("open_url", { url: `https://bgm.tv/person/${p.id}` }).catch(() => {});
+      }
+    };
+  }
+
+  const closeBtn = $("person-modal-close");
+  if (closeBtn) {
+    closeBtn.onclick = () => modal.classList.add("hidden");
+  }
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  };
+
+  modal.classList.remove("hidden");
+}
+
 async function loadPersons(subjectId, seq) {
   const wrap = $("persons-wrap");
   const listEl = $("persons-list");
@@ -1328,14 +1578,14 @@ async function loadPersons(subjectId, seq) {
     }
     if (countEl) countEl.textContent = `${persons.length} 位演职员/主创`;
     listEl.innerHTML = persons
-      .map((p) => {
+      .map((p, i) => {
         const avatarHtml = p.image_url
           ? `<img class="person-avatar" src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}" referrerpolicy="no-referrer" loading="lazy" />`
           : `<div class="person-avatar" style="display:flex;align-items:center;justify-content:center;font-size:22px;background:rgba(255,255,255,0.06)">🎬</div>`;
         const careerText = p.career && p.career.length ? p.career.join(" / ") : "";
 
         return `
-          <div class="person-card" data-name="${escapeHtml(p.name)}" title="点击搜索「${escapeHtml(p.name)}」的作品">
+          <div class="person-card" data-idx="${i}" title="点击查看主创「${escapeHtml(p.name)}」名鉴与探索作品">
             <div class="person-avatar-wrap">${avatarHtml}</div>
             <div class="person-relation-badge">${escapeHtml(p.relation || "STAFF")}</div>
             <div class="person-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
@@ -1347,12 +1597,9 @@ async function loadPersons(subjectId, seq) {
 
     listEl.querySelectorAll(".person-card").forEach((card) => {
       card.onclick = () => {
-        const name = card.dataset.name;
-        if (name) {
-          const input = $("search-input");
-          if (input) input.value = name;
-          showView("home");
-          doSearch();
+        const idx = Number(card.dataset.idx);
+        if (!isNaN(idx) && persons[idx]) {
+          showPersonModal(persons[idx]);
         }
       };
     });
@@ -2009,8 +2256,45 @@ function renderEpisodes(eps) {
       state.currentEpId = epId;
       fetchMedias(e.ep);
     };
+    chip.dataset.ep = String(e.ep);
     wrap.appendChild(chip);
   }
+
+  updateEpisodeCacheBadges(wrap);
+}
+
+let currentCacheList = [];
+async function updateEpisodeCacheBadges(wrap) {
+  if (!wrap) return;
+  try {
+    const items = await invoke("cache_list");
+    currentCacheList = items || [];
+    if (!currentCacheList.length) return;
+
+    const sName = (state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "").toLowerCase();
+    wrap.querySelectorAll(".ep").forEach((chip) => {
+      const epNum = Number(chip.dataset.ep || chip.querySelector(".epno")?.textContent || -1);
+      if (epNum <= 0) return;
+
+      const cached = currentCacheList.find((c) => {
+        const title = (c.title || "").toLowerCase();
+        const epMatches = title.includes(`[${epNum}]`) || title.includes(`第${epNum}集`) || title.includes(`第${epNum}话`) || title.includes(` ${epNum} `) || title.includes(`e${epNum}`);
+        const subjectMatches = !sName || title.includes(sName.slice(0, 4));
+        return (c.state === "completed" || c.downloaded_bytes > 0) && epMatches && subjectMatches;
+      });
+
+      if (cached) {
+        chip.classList.add("cached");
+        if (!chip.querySelector(".ep-cached-badge")) {
+          const badge = document.createElement("span");
+          badge.className = "ep-cached-badge";
+          badge.textContent = "⚡已缓存";
+          badge.title = `已完成本地离线缓存: ${cached.title} (极速秒开)`;
+          chip.appendChild(badge);
+        }
+      }
+    });
+  } catch (e) {}
 }
 
 // ---------- 第三步：多源聚合 + 自动选源 ----------
@@ -2086,6 +2370,39 @@ function renderSelection(sel) {
       };
     }
     return;
+  }
+
+  const sName = (state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "").toLowerCase();
+  const cachedForEp = currentCacheList.find((item) => {
+    const title = (item.title || "").toLowerCase();
+    const epNum = state.currentEp;
+    const epMatches = epNum != null && (title.includes(`[${epNum}]`) || title.includes(`第${epNum}集`) || title.includes(`第${epNum}话`) || title.includes(` ${epNum} `) || title.includes(`e${epNum}`));
+    const subjectMatches = !sName || title.includes(sName.slice(0, 4));
+    return (item.state === "completed" || item.downloaded_bytes > 0) && epMatches && subjectMatches;
+  });
+
+  if (cachedForEp) {
+    const cacheDiv = document.createElement("div");
+    cacheDiv.className = "candidate available";
+    cacheDiv.style.border = "1px solid rgba(16, 185, 129, 0.6)";
+    cacheDiv.style.background = "linear-gradient(135deg, rgba(16, 185, 129, 0.14) 0%, rgba(15, 23, 42, 0.4) 100%)";
+    cacheDiv.innerHTML = `
+      <div class="meta" style="color:#34d399;font-weight:700">⚡ 本地离线缓存（已就绪，免流极速秒开）</div>
+      <div class="title" style="color:#ecfdf5">${escapeHtml(cachedForEp.title)}</div>
+      <div class="tags">
+        <span class="tag" style="background:#10b981;color:#fff;font-weight:700">本地已缓存</span>
+        <span class="tag res">极速离线</span>
+        <span class="tag">${fmtSize(cachedForEp.total_bytes || cachedForEp.downloaded_bytes)}</span>
+      </div>
+      <div class="actions">
+        <button class="btn primary btn-cached-play">▶ 离线秒开播放</button>
+      </div>
+    `;
+    cacheDiv.querySelector(".btn-cached-play").onclick = () => {
+      openPlayer(`http://anicache.localhost/${cachedForEp.id}/master.m3u8`, cachedForEp.title);
+      toast("已从本地离线缓存极速启动播放", true);
+    };
+    wrap.appendChild(cacheDiv);
   }
 
   filtered.slice(0, 40).forEach((c, i) => {
@@ -3919,21 +4236,34 @@ function renderDanmakuHeatmap(events, duration) {
 
   const track = $("heatmap-track");
   const hoverTip = $("heatmap-hover-tip");
+  const hoverLine = $("heatmap-hover-line");
   if (track) {
     track.onmousemove = (e) => {
       const rect = track.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const clientX = e.clientX - rect.left;
+      const ratio = Math.max(0, Math.min(1, clientX / rect.width));
       const hoverSec = ratio * duration;
       const binIdx = Math.min(NUM_BINS - 1, Math.floor(hoverSec / binSec));
       const count = bins[binIdx] || 0;
+
+      if (hoverLine) {
+        hoverLine.style.transform = `translateX(${clientX}px)`;
+        hoverLine.classList.remove("hidden");
+      }
+
       if (hoverTip) {
         hoverTip.classList.remove("hidden");
-        hoverTip.style.left = `${ratio * 100}%`;
-        hoverTip.textContent = `${fmtTime(hoverSec)} · ${count} 条弹幕`;
+        const tipPct = Math.max(8, Math.min(92, ratio * 100));
+        hoverTip.style.left = `${tipPct}%`;
+        const pct = Math.round(ratio * 100);
+        const isPeak = selected && selected.some((idx) => Math.abs(idx - binIdx) <= 2);
+        const peakHtml = isPeak ? `<span class="heatmap-hover-peak-tag">🔥 名场面</span>` : "";
+        hoverTip.innerHTML = `<span>${fmtTime(hoverSec)} / ${fmtTime(duration)}</span> <span class="meta mono">(${pct}%)</span> ${peakHtml} <span class="meta" style="font-size:10.5px">(${count}条)</span>`;
       }
     };
     track.onmouseleave = () => {
       if (hoverTip) hoverTip.classList.add("hidden");
+      if (hoverLine) hoverLine.classList.add("hidden");
     };
     track.onclick = (e) => {
       const rect = track.getBoundingClientRect();
@@ -5172,6 +5502,7 @@ const visualState = {
   mirror: false,
   rotateDeg: 0,
   filter: localStorage.getItem("ani_visual_filter") || "none",
+  ambient: localStorage.getItem("ani_visual_ambient") || "off",
   brightness: parseInt(localStorage.getItem("ani_visual_brightness") || "100", 10),
   contrast: parseInt(localStorage.getItem("ani_visual_contrast") || "100", 10),
   saturation: parseInt(localStorage.getItem("ani_visual_saturation") || "100", 10),
@@ -5182,6 +5513,9 @@ const visualState = {
 
 let opAutoSkipped = false;
 let edAutoSkipped = false;
+let ambientTimer = null;
+let ambientSampleCanvas = null;
+let ambientSampleCtx = null;
 
 const ASPECT_LABELS = {
   default: "自适应",
@@ -5324,8 +5658,84 @@ function applyVisualEffects(notify = false) {
     autoSkipEdBtn.classList.toggle("active", visualState.autoSkipEd > 0);
   }
 
+  applyAmbientGlow();
+
   if (notify) {
     showPlayerOsd(`画面比例: ${ASPECT_LABELS[visualState.aspect] || visualState.aspect}`);
+  }
+}
+
+function applyAmbientGlow() {
+  const canvas = $("ambient-canvas");
+  if (!canvas) return;
+
+  const mode = visualState.ambient || "off";
+  document.querySelectorAll(".visual-ambient-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-ambient") === mode);
+  });
+
+  if (mode === "off") {
+    canvas.className = "player-ambient-canvas hidden";
+    stopAmbientLoop();
+  } else {
+    canvas.className = `player-ambient-canvas ${mode}`;
+    const v = $("video");
+    if (v && !v.paused && !v.ended) {
+      startAmbientLoop();
+    }
+  }
+}
+
+function startAmbientLoop() {
+  if (visualState.ambient === "off") return;
+  const canvas = $("ambient-canvas");
+  const v = $("video");
+  if (!canvas || !v) return;
+
+  if (!ambientSampleCanvas) {
+    ambientSampleCanvas = document.createElement("canvas");
+    ambientSampleCanvas.width = 32;
+    ambientSampleCanvas.height = 18;
+    ambientSampleCtx = ambientSampleCanvas.getContext("2d", { willReadFrequently: false });
+  }
+
+  const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: false });
+  if (!ctx) return;
+
+  if (ambientTimer) {
+    clearTimeout(ambientTimer);
+    ambientTimer = null;
+  }
+
+  const sampleFrame = () => {
+    if (v && !v.paused && !v.ended && v.readyState >= 2 && ambientSampleCtx && ctx) {
+      try {
+        if (canvas.width !== 320 || canvas.height !== 180) {
+          canvas.width = 320;
+          canvas.height = 180;
+        }
+        ambientSampleCtx.drawImage(v, 0, 0, 32, 18);
+        ctx.drawImage(ambientSampleCanvas, 0, 0, canvas.width, canvas.height);
+      } catch (e) {}
+    }
+
+    if (v && !v.paused && !v.ended && visualState.ambient !== "off") {
+      ambientTimer = setTimeout(() => {
+        ambientTimer = null;
+        requestAnimationFrame(sampleFrame);
+      }, 100);
+    } else {
+      ambientTimer = null;
+    }
+  };
+
+  sampleFrame();
+}
+
+function stopAmbientLoop() {
+  if (ambientTimer) {
+    clearTimeout(ambientTimer);
+    ambientTimer = null;
   }
 }
 
@@ -5674,6 +6084,9 @@ async function togglePiP() {
 function destroyPlayer() {
   const v = $("video");
   v.pause();
+  stopAmbientLoop();
+  const ambCanvas = $("ambient-canvas");
+  if (ambCanvas) ambCanvas.classList.add("hidden");
   DanmakuOverlay.clear();
   clearTimeout(autoPlayTimer);
   autoPlayTimer = null;
@@ -6008,9 +6421,14 @@ $("video").addEventListener("dblclick", () => {
 });
 $("video").addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  if (visualState.ambient !== "off") startAmbientLoop();
 });
 $("video").addEventListener("pause", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+  stopAmbientLoop();
+});
+$("video").addEventListener("ended", () => {
+  stopAmbientLoop();
 });
 
 function toggleFullscreen() {
@@ -7490,6 +7908,16 @@ document.querySelectorAll(".visual-filter-opt").forEach((btn) => {
   };
 });
 
+document.querySelectorAll(".visual-ambient-opt").forEach((btn) => {
+  btn.onclick = () => {
+    visualState.ambient = btn.getAttribute("data-ambient") || "off";
+    localStorage.setItem("ani_visual_ambient", visualState.ambient);
+    applyVisualEffects();
+    const labels = { off: "关闭", soft: "柔和", vivid: "鲜明" };
+    showPlayerOsd(`影院环境光: ${labels[visualState.ambient] || visualState.ambient}`);
+  };
+});
+
 const btnMirror = $("btn-mirror");
 if (btnMirror) {
   btnMirror.onclick = () => {
@@ -8317,6 +8745,16 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const charModal = $("character-modal");
+    if (charModal && !charModal.classList.contains("hidden")) {
+      charModal.classList.add("hidden");
+      return;
+    }
+    const personModal = $("person-modal");
+    if (personModal && !personModal.classList.contains("hidden")) {
+      personModal.classList.add("hidden");
+      return;
+    }
     const dmFilterModal = $("dm-filter-modal");
     if (dmFilterModal && !dmFilterModal.classList.contains("hidden")) {
       closeDmFilterModal();

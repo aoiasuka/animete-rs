@@ -88,6 +88,26 @@
     <!-- 首页：继续观看 + 我的追番 + 新番时间表 + 最近搜索 / 搜索结果 -->
     <section id="view-subjects" class="view">
       <div id="home-section">
+        <!-- 今日追更放送提醒横幅 -->
+        <div id="today-broadcast-banner" class="today-broadcast-banner hidden">
+          <div class="today-banner-glow"></div>
+          <div class="today-banner-content">
+            <div class="today-banner-icon">🔥</div>
+            <div class="today-banner-info">
+              <div class="today-banner-title">
+                <span>今日新番放送</span>
+                <span id="today-banner-badge" class="today-banner-badge">0 部更新</span>
+              </div>
+              <div id="today-banner-desc" class="today-banner-desc">正在加载今日放送状态…</div>
+            </div>
+            <div id="today-banner-previews" class="today-banner-previews"></div>
+            <div class="today-banner-actions">
+              <button id="today-banner-filter-btn" class="primary small" title="一键在下方筛选查看今日追更">今日追更 ⚡</button>
+              <button id="today-banner-close-btn" class="ghost small" title="关闭横幅">✕</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 继续观看 -->
         <div id="continue-section" class="home-block hidden">
           <div class="home-head">
@@ -884,6 +904,14 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">影院环境光</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-ambient-opt active" data-ambient="off" title="关闭环境氛围光">关闭</button>
+                <button class="ghost small visual-ambient-opt" data-ambient="soft" title="柔和环境光 (40% 亮度)">柔和</button>
+                <button class="ghost small visual-ambient-opt" data-ambient="vivid" title="鲜明环境光 (80% 亮度)">鲜明</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">色彩滤镜</span>
               <div class="visual-btn-group">
                 <button class="ghost small visual-filter-opt active" data-filter="none">原画</button>
@@ -1004,6 +1032,7 @@
         <button id="player-shortcuts-btn" class="ghost small" title="查看键盘快捷键速查指南 (快捷键 ?)">快捷键 ⌨</button>
       </div>
       <div class="player-stage">
+        <canvas id="ambient-canvas" class="player-ambient-canvas hidden"></canvas>
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
         <div id="player-fast-forward-pill" class="player-fast-forward-pill hidden">
@@ -1028,6 +1057,7 @@
           <div class="heatmap-track" id="heatmap-track">
             <canvas id="danmaku-heatmap-canvas" class="danmaku-heatmap-canvas"></canvas>
             <div id="heatmap-playhead" class="heatmap-playhead"></div>
+            <div id="heatmap-hover-line" class="heatmap-hover-line hidden"></div>
             <div id="heatmap-hover-tip" class="heatmap-hover-tip hidden"></div>
           </div>
         </div>
@@ -1435,6 +1465,73 @@
 
         <div class="dm-filter-stats-bar">
           <span id="dm-session-blocked-info" class="meta mono">本次播放已拦截 0 条弹幕</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 角色与声优名鉴模态框 -->
+  <div id="character-modal" class="modal-backdrop hidden">
+    <div class="modal-card character-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title" id="char-modal-title">角色名鉴</div>
+          <div class="modal-sub" id="char-modal-sub">Bangumi 官方人设与配音演员档案</div>
+        </div>
+        <button id="char-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body character-modal-body">
+        <div class="char-hero-section">
+          <div class="char-avatar-box">
+            <img id="char-modal-avatar" class="char-modal-avatar" src="" alt="" referrerpolicy="no-referrer" />
+            <div id="char-modal-avatar-fallback" class="char-avatar-fallback hidden">🎭</div>
+            <div id="char-modal-role-badge" class="char-modal-role-badge">主角</div>
+          </div>
+          <div class="char-main-info">
+            <div class="char-title-row">
+              <h3 id="char-modal-name" class="char-modal-name">角色名</h3>
+              <span id="char-modal-jp-name" class="char-modal-jp-name meta"></span>
+            </div>
+            <div id="char-modal-actors-box" class="char-modal-actors-box">
+              <div class="char-actor-label">CV 配音演员：</div>
+              <div id="char-modal-actors-list" class="char-modal-actors-list"></div>
+            </div>
+          </div>
+        </div>
+        <div class="char-actions-row">
+          <button id="char-btn-search-char" class="ghost small" title="检索该角色出场的其他番剧">🔍 检索角色</button>
+          <button id="char-btn-search-cv" class="primary small" title="一键检索该声优出演的其他动画作品">🎙️ 探索声优作品</button>
+          <button id="char-btn-open-bgm" class="ghost small" title="在系统默认浏览器中打开 Bangumi 官方角色百科">🌐 Bangumi 角色主页 ↗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 演职员与制作人员名鉴模态框 -->
+  <div id="person-modal" class="modal-backdrop hidden">
+    <div class="modal-card person-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title" id="person-modal-title">主创演职员名鉴</div>
+          <div class="modal-sub" id="person-modal-sub">制作人员、监督与原画师档案</div>
+        </div>
+        <button id="person-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body person-modal-body">
+        <div class="person-hero-section">
+          <div class="person-avatar-box">
+            <img id="person-modal-avatar" class="person-modal-avatar" src="" alt="" referrerpolicy="no-referrer" />
+            <div id="person-modal-avatar-fallback" class="person-avatar-fallback hidden">🎬</div>
+            <div id="person-modal-role-badge" class="person-modal-role-badge">STAFF</div>
+          </div>
+          <div class="person-main-info">
+            <h3 id="person-modal-name" class="person-modal-name">主创姓名</h3>
+            <div id="person-modal-career" class="person-modal-career meta">监督 / 编剧</div>
+          </div>
+        </div>
+        <div class="person-actions-row">
+          <button id="person-btn-search" class="primary small" title="在 Bangumi 全库检索该主创参与的其他动画作品">🎬 探索主创作品</button>
+          <button id="person-btn-open-bgm" class="ghost small" title="在系统默认浏览器中打开 Bangumi 官方人物页面">🌐 Bangumi 人物主页 ↗</button>
         </div>
       </div>
     </div>
