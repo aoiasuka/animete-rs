@@ -111,6 +111,7 @@
               <input type="text" id="collection-filter-input" class="collection-filter-input" placeholder="筛选追番…" />
               <div class="collection-status-tabs" id="collection-status-tabs">
                 <button class="ghost small col-tab active" data-status="all">全部</button>
+                <button class="ghost small col-tab" data-status="today_air" title="今日正有新集放送的追番条目">今日更新 🔥</button>
                 <button class="ghost small col-tab" data-status="type_3">在看 📺</button>
                 <button class="ghost small col-tab" data-status="type_1">想看 💡</button>
                 <button class="ghost small col-tab" data-status="type_2">看过 ✓</button>
@@ -118,6 +119,13 @@
                 <button class="ghost small col-tab" data-status="pending">待看</button>
                 <button class="ghost small col-tab" data-status="caught_up">已追平</button>
               </div>
+              <select id="collection-sort-select" class="select small" title="追番列表多维排序">
+                <option value="default">默认排序</option>
+                <option value="score_desc">Bangumi 评分 (高→低)</option>
+                <option value="air_desc">放送日期 (新→旧)</option>
+                <option value="unwatched_first">待看优先</option>
+                <option value="title">名称首字母 (A-Z)</option>
+              </select>
               <button id="col-export-btn" class="ghost small" title="将追番列表导出为 Markdown / 纯文本">导出清单 📋</button>
               <button id="btn-refresh-collections" class="ghost small" title="并发检查全部追番条目更新状态">检查追更 🔄</button>
             </div>
@@ -967,6 +975,16 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">音画同步</span>
+              <div class="sub-sync-btns">
+                <button id="audio-delay-minus" class="ghost small" title="提前 50ms (快捷键 Shift+[)">-50ms</button>
+                <span id="audio-delay-val" class="meta mono">0ms</span>
+                <button id="audio-delay-plus" class="ghost small" title="延后 50ms (快捷键 Shift+])">+50ms</button>
+                <button id="audio-delay-bt-btn" class="ghost small" title="一键补偿蓝牙耳机常见延迟 (+200ms)">蓝牙 +200ms</button>
+                <button id="audio-delay-reset" class="ghost small" title="重置音频延迟为 0ms">重置</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">睡眠定时</span>
               <div class="visual-btn-group">
                 <button class="ghost small visual-sleep-opt active" data-sleep="off" title="关闭定时">关闭</button>
@@ -988,6 +1006,10 @@
       <div class="player-stage">
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
+        <div id="player-fast-forward-pill" class="player-fast-forward-pill hidden">
+          <span class="ff-icon">⚡</span>
+          <span id="player-ff-text" class="ff-text">2.0x 快进中</span>
+        </div>
         <div id="player-shutter-flash" class="player-shutter-flash hidden"></div>
         <div id="player-osd" class="player-osd hidden"></div>
         <div id="player-spinner" class="player-spinner hidden">
@@ -1206,6 +1228,9 @@
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><kbd>M</kbd></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">降低 / 提高播放倍速 (0.5x ~ 3.0x)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">长按画面 / 长按快进键极速快进 (2.0x ⚡)</span><span class="sg-highlight">长按鼠标左键 或 长按 <kbd>→</kbd></span></div>
+          <div class="sg-item"><span class="sg-desc">鼠标滚轮调音 / 进度微调</span><span class="sg-highlight">滚轮调音量 · <kbd>Shift</kbd>+滚轮调进度 · <kbd>Ctrl</kbd>+滚轮倍速</span></div>
+          <div class="sg-item"><span class="sg-desc">音画同步 (音频提前 50ms / 延后 50ms)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>[</kbd> <kbd>]</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">名场面截帧保存并复制到剪贴板</span><kbd>C</kbd></div>
           <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>

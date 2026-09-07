@@ -34,3 +34,4 @@ chrono = { workspace = true }
 dirs = { workspace = true }
 smol_str = { workspace = true }
 url = { workspace = true }
+encoding_rs = { workspace = true }

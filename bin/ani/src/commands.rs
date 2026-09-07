@@ -842,13 +842,72 @@ pub async fn find_sibling_subtitles(video_path: String) -> Result<Vec<serde_json
     Ok(subs)
 }
 
-/// 安全读取本地文本文件（用于加载字幕），支持 UTF-8 兼容解码。
+/// 智能解码文本字节（自动探测 UTF-8 BOM, UTF-16LE/BE BOM, GB18030/GBK, Big5），彻底解决字幕乱码
+pub fn decode_text_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    // 1. 检测 UTF-8 BOM (\xEF\xBB\xBF)
+    if bytes.starts_with(b"\xEF\xBB\xBF") {
+        if let Ok(s) = std::str::from_utf8(&bytes[3..]) {
+            return s.to_string();
+        }
+    }
+    // 2. 检测 UTF-16LE BOM (\xFF\xFE)
+    if bytes.starts_with(b"\xFF\xFE") {
+        let (cow, _, had_errors) = encoding_rs::UTF_16LE.decode(&bytes[2..]);
+        if !had_errors {
+            return cow.into_owned();
+        }
+    }
+    // 3. 检测 UTF-16BE BOM (\xFE\xFF)
+    if bytes.starts_with(b"\xFE\xFF") {
+        let (cow, _, had_errors) = encoding_rs::UTF_16BE.decode(&bytes[2..]);
+        if !had_errors {
+            return cow.into_owned();
+        }
+    }
+    // 4. 标准有效 UTF-8 检测
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    // 5. 尝试 GB18030（兼容 GBK/GB2312）与 Big5，按字符合规度（避免落入 PUA 私有区）进行优选
+    let (cow_gb, _, had_errors_gb) = encoding_rs::GB18030.decode(bytes);
+    let (cow_big5, _, had_errors_big5) = encoding_rs::BIG5.decode(bytes);
+
+    let gb_pua_count = cow_gb
+        .chars()
+        .filter(|&c| ('\u{E000}'..='\u{F8FF}').contains(&c))
+        .count();
+    let big5_pua_count = cow_big5
+        .chars()
+        .filter(|&c| ('\u{E000}'..='\u{F8FF}').contains(&c))
+        .count();
+
+    // 如果 Big5 无错且没有私有区映射，而 GB18030 含有私有区生僻字映射，说明应为 Big5 编码
+    if !had_errors_big5 && big5_pua_count == 0 && gb_pua_count > 0 {
+        return cow_big5.into_owned();
+    }
+
+    if !had_errors_gb {
+        return cow_gb.into_owned();
+    }
+
+    if !had_errors_big5 {
+        return cow_big5.into_owned();
+    }
+
+    // 6. 兜底容错返回
+    cow_gb.into_owned()
+}
+
+/// 安全读取本地文本文件（用于加载字幕），支持 UTF-8 / GBK / Big5 / UTF-16 智能解码。
 #[tauri::command]
 pub async fn read_local_text_file(path: String) -> Result<String, String> {
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|e| format!("读取文件失败: {e}"))?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    Ok(decode_text_bytes(&bytes))
 }
 
 /// 格式是否受 WebView2 原生 HTML5 播放器支持。
@@ -2741,5 +2800,33 @@ mod tests {
         let r5 = clean_video_filename_info("[Moe] [SPY x FAMILY] [01] [1080p].mp4");
         assert_eq!(r5.anime_title, "SPY x FAMILY");
         assert_eq!(r5.episode, Some(1.0));
+    }
+
+    #[test]
+    fn test_decode_text_bytes() {
+        // 1. 标准 UTF-8
+        let utf8_text = "你好，世界！Anime Subtitle 测试";
+        assert_eq!(decode_text_bytes(utf8_text.as_bytes()), utf8_text);
+
+        // 2. 带 UTF-8 BOM
+        let mut with_bom = vec![0xEF, 0xBB, 0xBF];
+        with_bom.extend_from_slice(utf8_text.as_bytes());
+        assert_eq!(decode_text_bytes(&with_bom), utf8_text);
+
+        // 3. GBK / GB18030 编码
+        let (gbk_bytes, _, _) = encoding_rs::GB18030.encode("澄空学园字幕组 繁化姬");
+        assert_eq!(decode_text_bytes(&gbk_bytes), "澄空学园字幕组 繁化姬");
+
+        // 4. Big5 繁体编码
+        let (big5_bytes, _, _) = encoding_rs::BIG5.encode("極影字幕社 動畫特報");
+        assert_eq!(decode_text_bytes(&big5_bytes), "極影字幕社 動畫特報");
+
+        // 5. UTF-16LE 带 BOM
+        let u16_text: Vec<u16> = "UTF-16LE字幕".encode_utf16().collect();
+        let mut u16le_bytes = vec![0xFF, 0xFE];
+        for b in u16_text {
+            u16le_bytes.extend_from_slice(&b.to_le_bytes());
+        }
+        assert_eq!(decode_text_bytes(&u16le_bytes), "UTF-16LE字幕");
     }
 }

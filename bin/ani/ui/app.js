@@ -218,8 +218,15 @@ async function loadContinueWatching() {
   }
 }
 
-let colFilterState = { text: "", status: "all" };
+let colFilterState = { text: "", status: "all", sort: "default" };
 let cachedCollections = [];
+
+function getTodayAirSubjectIds() {
+  if (!homeState.calendar || !homeState.today) return new Set();
+  const curDay = homeState.calendar.find((d) => d.weekday.id === homeState.today);
+  if (!curDay || !curDay.items) return new Set();
+  return new Set(curDay.items.map((it) => Number(it.id?.id ?? it.id ?? it.bangumi_id)));
+}
 
 function renderCollectionsList() {
   const grid = $("collection-grid");
@@ -227,29 +234,59 @@ function renderCollectionsList() {
   if (!grid) return;
   const kw = colFilterState.text.toLowerCase().trim();
   const status = colFilterState.status;
+  const todayAirIds = getTodayAirSubjectIds();
 
   const filtered = cachedCollections.filter((item) => {
+    const subjectId = Number(item.id?.id ?? item.id);
     if (kw) {
       const t1 = (item.display_title || item.name_cn || "").toLowerCase();
       const t2 = (item.original_title || item.name || "").toLowerCase();
       if (!t1.includes(kw) && !t2.includes(kw)) return false;
     }
     if (status !== "all") {
-      if (status.startsWith("type_")) {
+      if (status === "today_air") {
+        if (!todayAirIds.has(subjectId)) return false;
+      } else if (status.startsWith("type_")) {
         const wantType = Number(status.replace("type_", ""));
         const itemType = Number(item.collection_type || 3);
         if (itemType !== wantType) return false;
       } else if (status === "pending") {
-        const subjectId = Number(item.id?.id ?? item.id);
         const update = state.collectionUpdates?.[subjectId];
         if (!update || !update.has_unwatched) return false;
       } else if (status === "caught_up") {
-        const subjectId = Number(item.id?.id ?? item.id);
         const update = state.collectionUpdates?.[subjectId];
         if (update && update.has_unwatched) return false;
       }
     }
     return true;
+  });
+
+  // 多维排序
+  const sortMode = colFilterState.sort || "default";
+  filtered.sort((a, b) => {
+    const sIdA = Number(a.id?.id ?? a.id);
+    const sIdB = Number(b.id?.id ?? b.id);
+    if (sortMode === "score_desc") {
+      const scoreA = typeof a.score === "number" ? a.score : (a.rate > 0 ? a.rate : -1);
+      const scoreB = typeof b.score === "number" ? b.score : (b.rate > 0 ? b.rate : -1);
+      return scoreB - scoreA;
+    }
+    if (sortMode === "air_desc") {
+      const dateA = a.air_date || "";
+      const dateB = b.air_date || "";
+      return dateB.localeCompare(dateA);
+    }
+    if (sortMode === "unwatched_first") {
+      const uA = state.collectionUpdates?.[sIdA]?.has_unwatched ? 1 : 0;
+      const uB = state.collectionUpdates?.[sIdB]?.has_unwatched ? 1 : 0;
+      if (uA !== uB) return uB - uA;
+    }
+    if (sortMode === "title") {
+      const tA = (a.display_title || a.name_cn || a.name || "").trim();
+      const tB = (b.display_title || b.name_cn || b.name || "").trim();
+      return tA.localeCompare(tB, "zh-CN");
+    }
+    return 0;
   });
 
   if (countEl) {
@@ -277,12 +314,21 @@ async function loadCollections() {
   const refreshBtn = $("btn-refresh-collections");
   const filterInput = $("collection-filter-input");
   const statusTabs = $("collection-status-tabs");
+  const sortSelect = $("collection-sort-select");
   if (!sec || !grid) return;
 
   if (filterInput && !filterInput.__bound) {
     filterInput.__bound = true;
     filterInput.oninput = () => {
       colFilterState.text = filterInput.value;
+      renderCollectionsList();
+    };
+  }
+
+  if (sortSelect && !sortSelect.__bound) {
+    sortSelect.__bound = true;
+    sortSelect.onchange = () => {
+      colFilterState.sort = sortSelect.value;
       renderCollectionsList();
     };
   }
@@ -537,11 +583,12 @@ document.querySelectorAll(".cal-filter-tab").forEach((tab) => {
 });
 
 function subjectCard(s, isTodayAiring = false) {
+  const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
+  const isAiringToday = isTodayAiring || getTodayAirSubjectIds().has(bangumiId);
   const card = document.createElement("div");
-  card.className = "card" + (isTodayAiring ? " today-airing" : "");
+  card.className = "card" + (isAiringToday ? " today-airing" : "");
   const displayTitle = s.display_title || s.name_cn || s.name || "动画";
   const originalTitle = s.original_title || s.name || "";
-  const bangumiId = Number(s.id ? (s.id.id ?? s.id) : (s.bangumi_id ?? s.id));
   const coverImg = s.cover_url
     ? `<img src="${escapeAttr(s.cover_url)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.opacity='0.15'" />`
     : `<div style="display:grid;place-items:center;height:100%;color:var(--text-dim);font-size:32px">🎬</div>`;
@@ -576,9 +623,11 @@ function subjectCard(s, isTodayAiring = false) {
       colTypeBadge = `<div class="card-update-badge" style="top:auto;bottom:6px;left:6px;background:${tInfo.bg};border:none;">${tInfo.text}${starText}</div>`;
     }
   }
+  const todayBadge = isAiringToday ? `<div class="card-today-air-badge" title="今日正有新集放送！">今日更新 🔥</div>` : "";
   card.innerHTML = `
     <div class="card-cover">
       ${coverImg}
+      ${todayBadge}
       ${scoreBadge}
       ${updateBadge}
       ${colTypeBadge}
@@ -1048,6 +1097,7 @@ function hoverStarRatingDisplay(score) {
 
 async function openSubject(s) {
   const my = ++subjectSeq;
+  prefetchCandidatesPool.clear();
   const displayTitle = s.display_title || s.name_cn || s.name || "动画";
   const originalTitle = s.original_title || s.name || "";
   s.display_title = displayTitle;
@@ -2059,7 +2109,8 @@ function renderSelection(sel) {
     const actions = magnet || httpUrl
       ? `<div class="actions">
            ${httpUrl
-             ? `<button class="btn" data-play="${escapeAttr(httpUrl)}" data-title="${escapeAttr(m.title)}"${learnAttrs}>▶ 在线播放</button>`
+             ? `<button class="btn" data-play="${escapeAttr(httpUrl)}" data-title="${escapeAttr(m.title)}"${learnAttrs}>▶ 在线播放</button>
+                <button class="btn secondary" data-copy-link="${escapeAttr(httpUrl)}">复制直链</button>`
              : `<button class="btn" data-stream="${escapeAttr(magnet)}" data-title="${escapeAttr(m.title)}"${learnAttrs}>▶ 在线播放</button>
                 <button class="btn secondary" data-magnet="${escapeAttr(magnet)}" data-title="${escapeAttr(m.title)}"${learnAttrs}>下载</button>`}
            ${magnet ? `<button class="btn secondary" data-copy="${escapeAttr(magnet)}">复制磁力</button>` : ""}
@@ -2092,6 +2143,16 @@ function renderSelection(sel) {
       try {
         await navigator.clipboard.writeText(b.dataset.copy);
         toast("磁力链接已复制", true);
+      } catch (e) {
+        toast("复制失败：" + e);
+      }
+    };
+  });
+  wrap.querySelectorAll("[data-copy-link]").forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(b.dataset.copyLink);
+        toast("片源直链已复制到剪贴板", true);
       } catch (e) {
         toast("复制失败：" + e);
       }
@@ -4696,6 +4757,22 @@ function fmtTime(sec) {
 
 let autoPlayTimer = null;
 let isSwitchingEp = false;
+const prefetchCandidatesPool = new Map();
+
+function prefetchNextEpisodeCandidates() {
+  const nextEp = getNextEpisode();
+  if (!nextEp || !state.subject) return;
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  if (!subjectId) return;
+  const epNo = nextEp.ep;
+  const key = `${subjectId}:${epNo}`;
+  if (prefetchCandidatesPool.has(key)) return;
+  const p = invoke("fetch_medias", { subjectId, ep: epNo }).catch(() => {
+    prefetchCandidatesPool.delete(key);
+    return null;
+  });
+  prefetchCandidatesPool.set(key, p);
+}
 
 function getNextEpisode() {
   if (!state.episodes || !state.episodes.length || state.currentEp == null) return null;
@@ -4751,7 +4828,16 @@ async function playNextEpisode() {
   showPlayerOsd(`准备第 ${epNo} 集：${nextEp.display_title}…`);
   toast(`正在准备第 ${epNo} 集：${nextEp.display_title}…`);
   try {
-    const sel = await invoke("fetch_medias", { subjectId, ep: epNo });
+    const prefetchKey = `${subjectId}:${epNo}`;
+    let sel = null;
+    if (prefetchCandidatesPool.has(prefetchKey)) {
+      try {
+        sel = await prefetchCandidatesPool.get(prefetchKey);
+      } catch {}
+    }
+    if (!sel || !sel.candidates) {
+      sel = await invoke("fetch_medias", { subjectId, ep: epNo });
+    }
     state.candidates = sel.candidates;
     const best = sel.candidates.find((c) => c.type === "available") || sel.candidates[0];
     if (!best) {
@@ -5330,13 +5416,15 @@ function clearAbLoop(notify = true) {
   }
 }
 
-// ---------- Web Audio 音量超频增益与音频均衡器系统 ----------
+// ---------- Web Audio 音量超频增益、音频均衡器与音画同步系统 ----------
 const audioBoostState = {
   level: parseFloat(localStorage.getItem("ani_audio_boost")) || 1.0,
   eqMode: localStorage.getItem("ani_audio_eq") || "flat",
+  delayMs: parseFloat(localStorage.getItem("ani_audio_delay")) || 0,
   ctx: null,
   sourceNode: null,
   gainNode: null,
+  delayNode: null,
   lowFilter: null,
   midFilter: null,
   highFilter: null,
@@ -5378,12 +5466,16 @@ function initAudioBoost() {
       audioBoostState.gainNode = audioBoostState.ctx.createGain();
       audioBoostState.gainNode.gain.value = audioBoostState.level;
 
-      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> gainNode -> destination
+      audioBoostState.delayNode = audioBoostState.ctx.createDelay(2.0);
+      audioBoostState.delayNode.delayTime.value = Math.max(0, audioBoostState.delayMs / 1000);
+
+      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> gainNode -> delayNode -> destination
       audioBoostState.sourceNode.connect(audioBoostState.lowFilter);
       audioBoostState.lowFilter.connect(audioBoostState.midFilter);
       audioBoostState.midFilter.connect(audioBoostState.highFilter);
       audioBoostState.highFilter.connect(audioBoostState.gainNode);
-      audioBoostState.gainNode.connect(audioBoostState.ctx.destination);
+      audioBoostState.gainNode.connect(audioBoostState.delayNode);
+      audioBoostState.delayNode.connect(audioBoostState.ctx.destination);
 
       applyAudioEq(audioBoostState.eqMode);
     } catch {
@@ -5440,6 +5532,30 @@ function adjustAudioBoost(step = 0.5) {
   let nextIdx = curIdx >= 0 ? curIdx + (step > 0 ? 1 : -1) : 0;
   nextIdx = Math.max(0, Math.min(BOOST_LEVELS.length - 1, nextIdx));
   setAudioBoost(BOOST_LEVELS[nextIdx], true);
+}
+
+function setAudioDelay(delayMs, notify = false) {
+  audioBoostState.delayMs = delayMs;
+  localStorage.setItem("ani_audio_delay", String(delayMs));
+  initAudioBoost();
+  if (audioBoostState.delayNode) {
+    audioBoostState.delayNode.delayTime.value = Math.max(0, delayMs / 1000);
+  }
+  const valEl = $("audio-delay-val");
+  if (valEl) {
+    valEl.textContent = (delayMs >= 0 ? "+" : "") + Math.round(delayMs) + "ms";
+  }
+  if (notify) {
+    const sign = delayMs >= 0 ? "+" : "";
+    const msg = `🔊 音画同步: ${sign}${Math.round(delayMs)}ms` + (delayMs === 200 ? " (蓝牙常用补偿)" : "");
+    showPlayerOsd(msg);
+    toast(msg, true);
+  }
+}
+
+function adjustAudioDelay(stepMs = 50) {
+  const next = Math.max(-500, Math.min(1000, audioBoostState.delayMs + stepMs));
+  setAudioDelay(next, true);
 }
 
 // ---------- 名场面无损截帧与系统剪贴板分享 ----------
@@ -5761,9 +5877,77 @@ async function startStream(uri, title) {
   }
 }
 
-// 视频点击播放/暂停；防抖避免双击全屏时误触发暂停/播放
+// // ---------- 播放器长按倍速快进 (Press-and-Hold Fast Forward) ----------
+let isFastForwarding = false;
+let fastForwardSavedRate = 1.0;
+let fastForwardTimer = null;
+let suppressNextClick = false;
+
+function startFastForward() {
+  const v = $("video");
+  if (!v || isFastForwarding || v.paused) return;
+  isFastForwarding = true;
+  fastForwardSavedRate = v.playbackRate;
+  const targetRate = Math.abs(fastForwardSavedRate - 2.0) < 0.1 ? 3.0 : 2.0;
+  v.playbackRate = targetRate;
+
+  const pill = $("player-fast-forward-pill");
+  const textEl = $("player-ff-text");
+  if (pill) {
+    if (textEl) textEl.textContent = `${targetRate.toFixed(1)}x 快进中`;
+    pill.classList.remove("hidden");
+  }
+  showPlayerOsd(`⚡ ${targetRate.toFixed(1)}x 高能快进中 (松手恢复)`);
+}
+
+function stopFastForward() {
+  if (!isFastForwarding) return;
+  const v = $("video");
+  if (v) {
+    v.playbackRate = fastForwardSavedRate;
+    $("player-rate").textContent = `倍速 ${fastForwardSavedRate}x`;
+  }
+  const pill = $("player-fast-forward-pill");
+  if (pill) pill.classList.add("hidden");
+  isFastForwarding = false;
+  suppressNextClick = true;
+  setTimeout(() => {
+    suppressNextClick = false;
+  }, 260);
+  showPlayerOsd(`恢复 ${fastForwardSavedRate}x 倍速`);
+}
+
+// 视频鼠标长按快进与点击播放/暂停；防抖避免双击全屏时误触发暂停/播放
 let videoClickTimer = null;
+const vElNode = $("video");
+if (vElNode) {
+  vElNode.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    const rect = vElNode.getBoundingClientRect();
+    if (e.clientY - rect.top > rect.height - 60) return;
+    if (vElNode.paused) return;
+    fastForwardTimer = setTimeout(() => {
+      fastForwardTimer = null;
+      startFastForward();
+    }, 350);
+  });
+
+  const clearFf = () => {
+    if (fastForwardTimer) {
+      clearTimeout(fastForwardTimer);
+      fastForwardTimer = null;
+    }
+    if (isFastForwarding) {
+      stopFastForward();
+    }
+  };
+
+  vElNode.addEventListener("mouseup", clearFf);
+  vElNode.addEventListener("mouseleave", clearFf);
+}
+
 $("video").addEventListener("click", (e) => {
+  if (suppressNextClick) return;
   const v = $("video");
   const rect = v.getBoundingClientRect();
   if (e.clientY - rect.top > rect.height - 60) return;
@@ -5783,6 +5967,38 @@ $("video").addEventListener("click", (e) => {
     }
   }, 220);
 });
+
+// 鼠标滚轮手势：滚轮调音量、Shift+滚轮微调进度、Ctrl+滚轮微调倍速
+const playerStageEl = document.querySelector(".player-stage");
+if (playerStageEl) {
+  playerStageEl.addEventListener("wheel", (e) => {
+    const v = $("video");
+    if (!v || $("view-player").classList.contains("hidden")) return;
+    e.preventDefault();
+
+    if (e.shiftKey) {
+      // Shift+滚轮：微调视频进度 (±5s)
+      const step = e.deltaY < 0 ? 5 : -5;
+      v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + step));
+      showPlayerOsd((step > 0 ? "⏩ 快进 5s · " : "⏪ 快退 5s · ") + fmtTime(v.currentTime));
+    } else if (e.ctrlKey) {
+      // Ctrl+滚轮：微调倍速 (±0.25x)
+      const delta = e.deltaY < 0 ? 0.25 : -0.25;
+      const nextRate = Math.max(0.5, Math.min(3.0, Math.round((v.playbackRate + delta) * 100) / 100));
+      v.playbackRate = nextRate;
+      $("player-rate").textContent = `倍速 ${nextRate}x`;
+      showPlayerOsd(`倍速: ${nextRate}x`);
+      localStorage.setItem("ani_rate", String(nextRate));
+    } else {
+      // 默认滚轮：平滑微调音量 (±5%)
+      v.muted = false;
+      const delta = e.deltaY < 0 ? 0.05 : -0.05;
+      v.volume = Math.max(0, Math.min(1.0, Math.round((v.volume + delta) * 100) / 100));
+      showPlayerOsd("🔊 音量: " + Math.round(v.volume * 100) + "%");
+    }
+  }, { passive: false });
+}
+
 $("video").addEventListener("dblclick", () => {
   if (videoClickTimer) {
     clearTimeout(videoClickTimer);
@@ -5834,7 +6050,7 @@ listen("stream-ready", async (ev) => {
   } catch (e) {
     toast("启动播放器失败：" + e);
   }
-}).catch(() => {});
+});
 
 listen("stream-failed", (ev) => {
   setStatus("");
@@ -5842,11 +6058,10 @@ listen("stream-failed", (ev) => {
 }).catch(() => {});
 
 $("player-back").onclick = () => {
-  // 先存进度再销毁：destroyPlayer 的 v.load() 会把 duration 变 NaN
-  saveProgress(false);
-  destroyPlayer();
-  if (playerPrev === "detail") showView("detail");
-  else {
+  closePlayer();
+  if (playerPrev === "detail") {
+    showView("detail");
+  } else {
     showView("subjects");
     playerPrev === "results" ? showSearchSection() : showHomeSection();
   }
@@ -5854,7 +6069,12 @@ $("player-back").onclick = () => {
 $("player-url-btn").onclick = () => {
   const u = $("player-url-input").value.trim();
   if (!u) return;
-  openPlayer(u, "直链播放");
+  if (u.startsWith("magnet:?")) {
+    startStream(u, "磁力流播");
+    toast("识别到磁力链接，正在解析种子元数据并启动 BT 流播…", true);
+  } else {
+    openPlayer(u, "直链播放");
+  }
 };
 $("player-url-input").addEventListener("keydown", (e) => e.key === "Enter" && $("player-url-btn").onclick());
 
@@ -5866,6 +6086,11 @@ $("video").addEventListener("timeupdate", () => {
   if (v.currentTime - lastSavedSec >= 5) {
     lastSavedSec = v.currentTime;
     saveProgress(false);
+  }
+
+  // 接近片尾（78% 进度以上）后台静默预选源下一集
+  if (v.duration > 0 && v.currentTime / v.duration >= 0.78) {
+    prefetchNextEpisodeCandidates();
   }
 
   // A-B 片段循环播放
@@ -7430,6 +7655,15 @@ document.querySelectorAll(".visual-eq-opt").forEach((btn) => {
   };
 });
 
+const audioDelayMinus = $("audio-delay-minus");
+if (audioDelayMinus) audioDelayMinus.onclick = () => adjustAudioDelay(-50);
+const audioDelayPlus = $("audio-delay-plus");
+if (audioDelayPlus) audioDelayPlus.onclick = () => adjustAudioDelay(50);
+const audioDelayBtBtn = $("audio-delay-bt-btn");
+if (audioDelayBtBtn) audioDelayBtBtn.onclick = () => setAudioDelay(200, true);
+const audioDelayReset = $("audio-delay-reset");
+if (audioDelayReset) audioDelayReset.onclick = () => setAudioDelay(0, true);
+
 const sleepState = {
   mode: "off",
   timerId: null,
@@ -7489,7 +7723,20 @@ if (vEl) {
   });
 }
 
-// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / Shift+↑↓ 音效超频 / C 截图 / P 画中画 / M 静音 / 0-9 进度跳转 / < > 倍速 / W 画面比例 / S 跳过片头 / [ ] \ A-B循环 / - = 弹幕微调 / Z X 字幕延迟微调
+let keyboardFfTimer = null;
+document.addEventListener("keyup", (e) => {
+  if (e.key === "ArrowRight") {
+    if (keyboardFfTimer) {
+      clearTimeout(keyboardFfTimer);
+      keyboardFfTimer = null;
+    }
+    if (isFastForwarding) {
+      stopFastForward();
+    }
+  }
+});
+
+// 键盘快捷键：空格暂停 / ←→ 或 JL 快退快进 10s / ↑↓ 音量 / Shift+↑↓ 音效超频 / C 截图 / P 画中画 / M 静音 / 0-9 进度跳转 / < > 倍速 / W 画面比例 / S 跳过片头 / [ ] \ A-B循环 / Shift+[] 音画同步 / - = 弹幕微调 / Z X 字幕延迟微调
 document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
@@ -7500,7 +7747,7 @@ document.addEventListener("keydown", (e) => {
   const keys = [
     " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
     "f", "F", "n", "N", "m", "M", "j", "J", "l", "L",
-    "w", "W", "s", "S", "c", "C", "p", "P", "d", "D", "[", "]", "\\", "-", "=", "_", "+",
+    "w", "W", "s", "S", "c", "C", "p", "P", "d", "D", "[", "]", "{", "}", "\\", "-", "=", "_", "+",
     ",", "<", ".", ">", "i", "I", "e", "E", "z", "Z", "x", "X", "r", "R", "o", "O"
   ];
   if (!keys.includes(e.key) && !isDigit) return;
@@ -7530,8 +7777,16 @@ document.addEventListener("keydown", (e) => {
       showPlayerOsd("⏪ 快退 10s · " + fmtTime(v.currentTime));
       break;
     case "ArrowRight": case "l": case "L":
-      v.currentTime += 10;
-      showPlayerOsd("⏩ 快进 10s · " + fmtTime(v.currentTime));
+      if (e.key === "ArrowRight" && !e.repeat && !keyboardFfTimer && !isFastForwarding) {
+        keyboardFfTimer = setTimeout(() => {
+          keyboardFfTimer = null;
+          startFastForward();
+        }, 400);
+      }
+      if (!isFastForwarding) {
+        v.currentTime += 10;
+        showPlayerOsd("⏩ 快进 10s · " + fmtTime(v.currentTime));
+      }
       break;
     case "ArrowUp":
       if (e.shiftKey) {
@@ -7584,8 +7839,20 @@ document.addEventListener("keydown", (e) => {
       }
       break;
     }
-    case "[": setAbPointA(); break;
-    case "]": setAbPointB(); break;
+    case "{":
+      adjustAudioDelay(-50);
+      break;
+    case "}":
+      adjustAudioDelay(50);
+      break;
+    case "[":
+      if (e.shiftKey) adjustAudioDelay(-50);
+      else setAbPointA();
+      break;
+    case "]":
+      if (e.shiftKey) adjustAudioDelay(50);
+      else setAbPointB();
+      break;
     case "\\": clearAbLoop(); break;
     case "-": case "_": DanmakuOverlay.adjustOffset(-0.5); break;
     case "=": case "+": DanmakuOverlay.adjustOffset(0.5); break;

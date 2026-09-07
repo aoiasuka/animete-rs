@@ -78,6 +78,7 @@ dependencies = [
  "ds-jellyfin",
  "ds-mikan",
  "ds-nyaa",
+ "encoding_rs",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
