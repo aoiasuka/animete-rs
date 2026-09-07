@@ -234,11 +234,17 @@ function renderCollectionsList() {
       if (!t1.includes(kw) && !t2.includes(kw)) return false;
     }
     if (status !== "all") {
-      const subjectId = Number(item.id?.id ?? item.id);
-      const update = state.collectionUpdates?.[subjectId];
-      if (status === "pending") {
+      if (status.startsWith("type_")) {
+        const wantType = Number(status.replace("type_", ""));
+        const itemType = Number(item.collection_type || 3);
+        if (itemType !== wantType) return false;
+      } else if (status === "pending") {
+        const subjectId = Number(item.id?.id ?? item.id);
+        const update = state.collectionUpdates?.[subjectId];
         if (!update || !update.has_unwatched) return false;
       } else if (status === "caught_up") {
+        const subjectId = Number(item.id?.id ?? item.id);
+        const update = state.collectionUpdates?.[subjectId];
         if (update && update.has_unwatched) return false;
       }
     }
@@ -318,14 +324,26 @@ async function loadCollections() {
   }
 
   try {
-    const list = await invoke("list_subject_collections");
+    const list = await invoke("list_subject_collections", { collectionType: null });
     if (!list || !list.length) {
       sec.classList.add("hidden");
       grid.innerHTML = "";
       cachedCollections = [];
       return;
     }
-    cachedCollections = list;
+    cachedCollections = list.map((item) => ({
+      id: item.bangumi_id,
+      name_cn: item.name_cn,
+      name: item.name,
+      cover_url: item.cover_url,
+      air_date: item.air_date,
+      collection_type: item.collection_type,
+      rate: item.rate,
+      comment: item.comment,
+      private: item.private,
+      display_title: item.name_cn || item.name,
+      original_title: item.name,
+    }));
     sec.classList.remove("hidden");
     renderCollectionsList();
   } catch {
@@ -496,10 +514,26 @@ function subjectCard(s, isTodayAiring = false) {
       updateBadge = `<div class="card-update-badge caught-up" title="已全部观看完成">已追平 · 共 ${updateInfo.latest_ep} 集 ✓</div>`;
     }
   }
+  let colTypeBadge = "";
+  if (s.collection_type) {
+    const tMap = {
+      1: { text: "想看", bg: "rgba(245, 158, 11, 0.9)" },
+      2: { text: "看过", bg: "rgba(16, 185, 129, 0.9)" },
+      3: { text: "在看", bg: "rgba(14, 165, 233, 0.9)" },
+      4: { text: "搁置", bg: "rgba(139, 92, 246, 0.9)" },
+      5: { text: "抛弃", bg: "rgba(148, 163, 184, 0.9)" },
+    };
+    const tInfo = tMap[s.collection_type];
+    if (tInfo) {
+      const starText = s.rate > 0 ? ` · ★${s.rate}` : "";
+      colTypeBadge = `<div class="card-update-badge" style="top:auto;bottom:6px;left:6px;background:${tInfo.bg};border:none;">${tInfo.text}${starText}</div>`;
+    }
+  }
   card.innerHTML = `
     <div class="card-cover">
       ${coverImg}
       ${updateBadge}
+      ${colTypeBadge}
       <div class="card-play-hint">
         <div class="card-play-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -712,50 +746,252 @@ if (searchSortSelect) {
 // ---------- 第二步：条目详情 + 剧集 ----------
 
 let isCurrentSubjectCollected = false;
+let currentSubjectBgmCollection = null;
+
+const BGM_COLLECTION_TYPES = {
+  1: { text: "想看", icon: "💡", color: "#fbbf24" },
+  2: { text: "看过", icon: "✓", color: "#34d399" },
+  3: { text: "在看", icon: "📺", color: "#38bdf8" },
+  4: { text: "搁置", icon: "⏸", color: "#a78bfa" },
+  5: { text: "抛弃", icon: "✕", color: "#94a3b8" },
+};
+
+const BGM_RATING_DESCS = {
+  0: "未评分",
+  1: "1分 · 不忍直视",
+  2: "2分 · 很差",
+  3: "3分 · 差",
+  4: "4分 · 较差",
+  5: "5分 · 不过不失",
+  6: "6分 · 还行",
+  7: "7分 · 推荐",
+  8: "8分 · 力荐",
+  9: "9分 · 神作",
+  10: "10分 · 超神作",
+};
+
+let colEditSelectedType = 3;
+let colEditSelectedRate = 0;
 
 async function updateCollectBtn(bangumiId, s) {
   const btn = $("subject-collect-btn");
+  const rateBadge = $("subject-user-rating-badge");
   if (!btn) return;
+
+  currentSubjectBgmCollection = null;
+  isCurrentSubjectCollected = false;
+
   try {
-    isCurrentSubjectCollected = await invoke("is_subject_collected", { bangumiId: Number(bangumiId) });
+    const bgmCol = await invoke("get_bangumi_subject_collection", { bangumiId: Number(bangumiId) });
+    if (bgmCol) {
+      currentSubjectBgmCollection = bgmCol;
+      isCurrentSubjectCollected = true;
+    } else {
+      isCurrentSubjectCollected = await invoke("is_subject_collected", { bangumiId: Number(bangumiId) });
+    }
   } catch {
     isCurrentSubjectCollected = false;
   }
-  setCollectBtnUI(isCurrentSubjectCollected);
 
-  btn.onclick = async () => {
-    try {
-      const res = await invoke("toggle_subject_collection", {
-        bangumiId: Number(bangumiId),
-        nameCn: s.name_cn || s.display_title || "",
-        name: s.original_title || s.name || "",
-        coverUrl: s.cover_url || null,
-        airDate: s.air_date || null,
-      });
-      const isNow = typeof res === "boolean" ? res : res.collected;
-      const synced = res?.bangumi_synced;
-      isCurrentSubjectCollected = isNow;
-      setCollectBtnUI(isNow);
-      if (isNow) {
-        toast(synced ? "已加入追番（已同步至 Bangumi 在看 ✓）" : "已加入我的追番", true);
-      } else {
-        toast("已取消追番", true);
-      }
-      loadCollections();
-    } catch (e) {
-      toast("追番操作失败：" + e);
-    }
-  };
+  setCollectBtnUI(isCurrentSubjectCollected, currentSubjectBgmCollection);
+
+  btn.onclick = () => openCollectionEditModal(bangumiId, s);
+  if (rateBadge) {
+    rateBadge.onclick = () => openCollectionEditModal(bangumiId, s);
+  }
 }
 
-function setCollectBtnUI(collected) {
+function setCollectBtnUI(collected, bgmCol) {
   const btn = $("subject-collect-btn");
+  const rateBadge = $("subject-user-rating-badge");
   if (!btn) return;
+
   btn.classList.toggle("collected", collected);
   const txt = btn.querySelector(".collect-text");
-  if (txt) txt.textContent = collected ? "已追番" : "追番";
   const icon = btn.querySelector(".collect-icon");
-  if (icon) icon.textContent = collected ? "♥" : "♡";
+
+  if (collected) {
+    const cType = bgmCol?.collection_type || 3;
+    const tInfo = BGM_COLLECTION_TYPES[cType] || BGM_COLLECTION_TYPES[3];
+    if (txt) txt.textContent = `已追番 (${tInfo.text})`;
+    if (icon) icon.textContent = tInfo.icon;
+  } else {
+    if (txt) txt.textContent = "追番";
+    if (icon) icon.textContent = "♥";
+  }
+
+  if (rateBadge) {
+    if (collected && bgmCol && bgmCol.rate > 0) {
+      rateBadge.textContent = `★ ${bgmCol.rate}分 (${BGM_RATING_DESCS[bgmCol.rate]?.split("· ")[1] || ""})`;
+      rateBadge.title = bgmCol.comment ? `我的短评：${bgmCol.comment}` : "点击修改评分与评价";
+      rateBadge.classList.remove("hidden");
+    } else {
+      rateBadge.classList.add("hidden");
+    }
+  }
+}
+
+function openCollectionEditModal(bangumiId, s) {
+  const modal = $("collection-edit-modal");
+  if (!modal) return;
+  const titleEl = $("col-edit-subject-title");
+  if (titleEl) {
+    titleEl.textContent = `追番管理 · ${s.display_title || s.name_cn || s.name || "动画"}`;
+  }
+
+  const bgmCol = currentSubjectBgmCollection;
+  colEditSelectedType = bgmCol ? bgmCol.collection_type : (isCurrentSubjectCollected ? 3 : 3);
+  colEditSelectedRate = bgmCol ? (bgmCol.rate || 0) : 0;
+
+  // Pills
+  const pillsWrap = $("col-type-pills");
+  if (pillsWrap) {
+    pillsWrap.querySelectorAll(".col-type-pill").forEach((pill) => {
+      const pType = Number(pill.getAttribute("data-type"));
+      pill.classList.toggle("active", pType === colEditSelectedType);
+      pill.onclick = () => {
+        pillsWrap.querySelectorAll(".col-type-pill").forEach((p) => p.classList.remove("active"));
+        pill.classList.add("active");
+        colEditSelectedType = pType;
+      };
+    });
+  }
+
+  // Star Rating
+  updateStarRatingDisplay(colEditSelectedRate);
+  const starsWrap = $("star-rating-widget");
+  if (starsWrap && !starsWrap.__bound) {
+    starsWrap.__bound = true;
+    starsWrap.querySelectorAll(".star-item").forEach((star) => {
+      const val = Number(star.getAttribute("data-val"));
+      star.onmouseenter = () => hoverStarRatingDisplay(val);
+      star.onmouseleave = () => updateStarRatingDisplay(colEditSelectedRate);
+      star.onclick = () => {
+        colEditSelectedRate = val;
+        updateStarRatingDisplay(colEditSelectedRate);
+      };
+    });
+    const clearBtn = $("col-rating-clear-btn");
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        colEditSelectedRate = 0;
+        updateStarRatingDisplay(0);
+      };
+    }
+  }
+
+  // Comment & Tags & Private
+  const commentEl = $("col-edit-comment");
+  if (commentEl) commentEl.value = bgmCol?.comment || "";
+
+  const tagsEl = $("col-edit-tags");
+  if (tagsEl) tagsEl.value = (bgmCol?.tags || []).join(" ");
+
+  const privateEl = $("col-edit-private");
+  if (privateEl) privateEl.checked = !!bgmCol?.private;
+
+  // Buttons
+  const closeBtn = $("col-edit-close");
+  const cancelBtn = $("col-edit-cancel-btn");
+  const saveBtn = $("col-edit-save-btn");
+
+  const close = () => modal.classList.add("hidden");
+  if (closeBtn) closeBtn.onclick = close;
+  if (cancelBtn) cancelBtn.onclick = close;
+
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "保存中…";
+
+        if (colEditSelectedType === 0) {
+          // 取消追番
+          await invoke("toggle_subject_collection", {
+            bangumiId: Number(bangumiId),
+            nameCn: s.name_cn || s.display_title || "",
+            name: s.original_title || s.name || "",
+            coverUrl: s.cover_url || null,
+            airDate: s.air_date || null,
+          });
+          currentSubjectBgmCollection = null;
+          isCurrentSubjectCollected = false;
+          setCollectBtnUI(false, null);
+          toast("已取消追番", true);
+        } else {
+          // 完整更新
+          const commentVal = commentEl ? commentEl.value.trim() : "";
+          const tagsVal = tagsEl ? tagsEl.value.trim().split(/\s+/).filter(Boolean) : [];
+          const privateVal = privateEl ? privateEl.checked : false;
+
+          const res = await invoke("set_bangumi_subject_collection", {
+            bangumiId: Number(bangumiId),
+            nameCn: s.name_cn || s.display_title || "",
+            name: s.original_title || s.name || "",
+            coverUrl: s.cover_url || null,
+            airDate: s.air_date || null,
+            collectionType: colEditSelectedType,
+            rate: colEditSelectedRate > 0 ? colEditSelectedRate : null,
+            comment: commentVal ? commentVal : null,
+            tags: tagsVal.length ? tagsVal : null,
+            private: privateVal,
+          });
+
+          currentSubjectBgmCollection = {
+            type: colEditSelectedType,
+            collection_type: colEditSelectedType,
+            rate: colEditSelectedRate,
+            comment: commentVal || null,
+            tags: tagsVal,
+            private: privateVal,
+          };
+          isCurrentSubjectCollected = true;
+          setCollectBtnUI(true, currentSubjectBgmCollection);
+
+          const synced = res?.bangumi_synced;
+          const typeName = BGM_COLLECTION_TYPES[colEditSelectedType]?.text || "追番";
+          toast(synced ? `已保存为「${typeName}」（已同步至 Bangumi ✓）` : `已保存为「${typeName}」`, true);
+        }
+
+        loadCollections();
+        close();
+      } catch (err) {
+        toast("保存追番状态失败：" + err);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "保存并同步";
+      }
+    };
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function updateStarRatingDisplay(score) {
+  const starsWrap = $("star-rating-widget");
+  const textEl = $("col-rating-text");
+  if (!starsWrap) return;
+  starsWrap.querySelectorAll(".star-item").forEach((star) => {
+    const val = Number(star.getAttribute("data-val"));
+    star.classList.toggle("active", val <= score);
+    star.classList.remove("hover");
+  });
+  if (textEl) {
+    textEl.textContent = BGM_RATING_DESCS[score] || "未评分";
+  }
+}
+
+function hoverStarRatingDisplay(score) {
+  const starsWrap = $("star-rating-widget");
+  const textEl = $("col-rating-text");
+  if (!starsWrap) return;
+  starsWrap.querySelectorAll(".star-item").forEach((star) => {
+    const val = Number(star.getAttribute("data-val"));
+    star.classList.toggle("hover", val <= score);
+  });
+  if (textEl) {
+    textEl.textContent = BGM_RATING_DESCS[score] || "未评分";
+  }
 }
 
 async function openSubject(s) {
@@ -3894,6 +4130,153 @@ async function loadMikanSubscriptions() {
   }
 }
 
+async function openStatsModal() {
+  const modal = $("stats-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+
+  const closeBtn = $("stats-close");
+  if (closeBtn) closeBtn.onclick = () => modal.classList.add("hidden");
+
+  try {
+    const stats = await invoke("get_playback_statistics");
+
+    // 核心概览卡片
+    const totalHours = (stats.total_watch_seconds / 3600).toFixed(1);
+    if ($("stats-total-time")) $("stats-total-time").textContent = `${totalHours}h`;
+    if ($("stats-total-subjects")) $("stats-total-subjects").textContent = String(stats.total_subjects_collected || 0);
+    if ($("stats-total-episodes")) $("stats-total-episodes").textContent = String(stats.total_episodes_finished || 0);
+
+    const activeDays = (stats.last_7_days_activity || []).filter((a) => a.watch_seconds > 60).length;
+    if ($("stats-active-days")) $("stats-active-days").textContent = `${activeDays} 天`;
+
+    // 追番状态分布
+    const typeBars = $("stats-type-bars");
+    if (typeBars) {
+      typeBars.innerHTML = "";
+      const counts = stats.collection_type_counts || {};
+      const typeDefs = [
+        { type: 3, name: "在看", dot: "#38bdf8" },
+        { type: 1, name: "想看", dot: "#fbbf24" },
+        { type: 2, name: "看过", dot: "#34d399" },
+        { type: 4, name: "搁置", dot: "#a78bfa" },
+        { type: 5, name: "抛弃", dot: "#94a3b8" },
+      ];
+      for (const td of typeDefs) {
+        const c = counts[td.type] || 0;
+        const pill = document.createElement("div");
+        pill.className = "stats-type-pill";
+        pill.innerHTML = `<span class="stats-type-dot" style="background:${td.dot}"></span><span>${td.name}：<b>${c}</b> 部</span>`;
+        typeBars.appendChild(pill);
+      }
+    }
+
+    // 绘制近 7 天活跃趋势图
+    renderStatsActivitySvg(stats.last_7_days_activity || []);
+
+    // Top 5 榜单
+    const topList = $("stats-top-list");
+    if (topList) {
+      if (!stats.top_subjects || !stats.top_subjects.length) {
+        topList.innerHTML = `<div class="meta empty-tip">暂无观影记录，开始播放剧集后将自动聚合统计</div>`;
+      } else {
+        topList.innerHTML = stats.top_subjects
+          .map((item, idx) => {
+            const mins = Math.round(item.total_seconds / 60);
+            const durText = mins >= 60 ? `${(mins / 60).toFixed(1)} 小时` : `${mins} 分钟`;
+            const coverHtml = item.cover_url
+              ? `<img class="stats-top-cover" src="${escapeAttr(item.cover_url)}" referrerpolicy="no-referrer" />`
+              : `<div class="stats-top-cover" style="display:grid;place-items:center;">🎬</div>`;
+            return `
+              <div class="stats-top-item">
+                <div class="stats-top-rank rank-${idx + 1}">#${idx + 1}</div>
+                ${coverHtml}
+                <div class="stats-top-info">
+                  <div class="stats-top-title" title="${escapeAttr(item.subject_name)}">${escapeHtml(item.subject_name)}</div>
+                  <div class="stats-top-meta">已观看 ${item.episode_count} 话次</div>
+                </div>
+                <div class="stats-top-badge">${durText}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+    }
+  } catch (err) {
+    toast("获取观影统计失败：" + err);
+  }
+}
+
+function renderStatsActivitySvg(activityList) {
+  const svg = $("stats-activity-svg");
+  if (!svg) return;
+  svg.innerHTML = "";
+
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86400000);
+    const dateStr = d.toISOString().slice(0, 10);
+    const found = activityList.find((a) => a.date === dateStr);
+    const mins = found ? Math.round(found.watch_seconds / 60) : 0;
+    days.push({
+      date: dateStr,
+      label: `${d.getMonth() + 1}/${d.getDate()}`,
+      mins,
+    });
+  }
+
+  const maxMins = Math.max(30, ...days.map((d) => d.mins));
+  const W = 600;
+  const H = 160;
+  const padBottom = 26;
+  const padTop = 20;
+  const chartH = H - padBottom - padTop;
+  const barW = 42;
+  const stepX = W / 7;
+
+  let elements = "";
+  // 背景参考线
+  elements += `<line x1="0" y1="${padTop + chartH / 2}" x2="${W}" y2="${padTop + chartH / 2}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="3,3" />`;
+  elements += `<line x1="0" y1="${padTop + chartH}" x2="${W}" y2="${padTop + chartH}" stroke="rgba(255,255,255,0.12)" />`;
+
+  // 渐变
+  elements += `
+    <defs>
+      <linearGradient id="statsBarGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#a855f7" stop-opacity="0.95" />
+        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.65" />
+      </linearGradient>
+    </defs>
+  `;
+
+  days.forEach((day, idx) => {
+    const cx = idx * stepX + stepX / 2;
+    const barH = Math.max(4, (day.mins / maxMins) * chartH);
+    const x = cx - barW / 2;
+    const y = padTop + chartH - barH;
+
+    elements += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="5" ry="5" fill="url(#statsBarGrad)" opacity="${day.mins > 0 ? "1" : "0.2"}">
+        <title>${day.date}：观影 ${day.mins} 分钟</title>
+      </rect>
+    `;
+
+    if (day.mins > 0) {
+      elements += `<text x="${cx}" y="${Math.max(14, y - 5)}" font-size="11" fill="#c084fc" text-anchor="middle" font-weight="600">${day.mins}m</text>`;
+    }
+
+    elements += `<text x="${cx}" y="${H - 6}" font-size="11" fill="rgba(255,255,255,0.5)" text-anchor="middle">${day.label}</text>`;
+  });
+
+  svg.innerHTML = elements;
+}
+
+const statsHeaderBtn = $("stats-btn");
+if (statsHeaderBtn) {
+  statsHeaderBtn.onclick = () => openStatsModal();
+}
+
 function mediaKey(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
@@ -6863,6 +7246,16 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const colEditModal = $("collection-edit-modal");
+    if (colEditModal && !colEditModal.classList.contains("hidden")) {
+      colEditModal.classList.add("hidden");
+      return;
+    }
+    const statsModal = $("stats-modal");
+    if (statsModal && !statsModal.classList.contains("hidden")) {
+      statsModal.classList.add("hidden");
+      return;
+    }
     const batchModal = $("batch-dl-modal");
     if (batchModal && !batchModal.classList.contains("hidden")) {
       closeBatchDownloadModal();

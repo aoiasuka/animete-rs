@@ -69,6 +69,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "0005_subject_collection_flag",
         include_str!("../migrations/0005_subject_collection_flag.sql"),
     ),
+    (
+        "0006_collection_details",
+        include_str!("../migrations/0006_collection_details.sql"),
+    ),
 ];
 
 pub async fn open(path: &std::path::Path) -> anyhow::Result<SqlitePool> {
@@ -346,6 +350,125 @@ impl PlaybackRepo {
             .await?;
         Ok(())
     }
+
+    /// 聚合计算全库观影统计（累计时长、看完话数、追番状态分布、近7天活跃度、Top观看番剧）。
+    pub async fn get_statistics(&self) -> anyhow::Result<PlaybackStatistics> {
+        let total_watch_seconds = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT SUM(position_seconds) FROM playback_history",
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .unwrap_or(0.0);
+
+        let total_episodes_finished = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM playback_history WHERE finished = 1",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let total_subjects_collected = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM subject_collection WHERE collected = 1",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let type_rows = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT collection_type, COUNT(*) FROM subject_collection WHERE collected = 1 GROUP BY collection_type",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut collection_type_counts = std::collections::HashMap::new();
+        for (c_type, count) in type_rows {
+            collection_type_counts.insert(c_type as u8, count);
+        }
+
+        // 最近 7 天时间戳 (毫秒)
+        let seven_days_ago_ms = chrono::Utc::now().timestamp_millis() - 7 * 86400 * 1000;
+        let activity_rows = sqlx::query_as::<_, (String, Option<f64>, i64)>(
+            "SELECT strftime('%Y-%m-%d', updated_at / 1000, 'unixepoch', 'localtime') as day,
+                    SUM(position_seconds),
+                    COUNT(*)
+             FROM playback_history
+             WHERE updated_at >= ?1
+             GROUP BY day
+             ORDER BY day ASC",
+        )
+        .bind(seven_days_ago_ms)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let last_7_days_activity = activity_rows
+            .into_iter()
+            .map(|(date, secs, count)| DailyActivity {
+                date,
+                watch_seconds: secs.unwrap_or(0.0),
+                episode_count: count,
+            })
+            .collect();
+
+        let top_rows = sqlx::query_as::<_, (String, Option<String>, Option<f64>, i64)>(
+            "SELECT subject_name,
+                    MAX(cover_url),
+                    SUM(position_seconds) as total_sec,
+                    COUNT(*) as ep_cnt
+             FROM playback_history
+             WHERE subject_name != '' AND subject_name != '动画'
+             GROUP BY subject_name
+             ORDER BY total_sec DESC
+             LIMIT 5",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let top_subjects = top_rows
+            .into_iter()
+            .map(
+                |(subject_name, cover_url, secs, ep_cnt)| TopWatchedSubject {
+                    subject_name,
+                    cover_url,
+                    total_seconds: secs.unwrap_or(0.0),
+                    episode_count: ep_cnt,
+                },
+            )
+            .collect();
+
+        Ok(PlaybackStatistics {
+            total_watch_seconds,
+            total_episodes_finished,
+            total_subjects_collected,
+            collection_type_counts,
+            last_7_days_activity,
+            top_subjects,
+        })
+    }
+}
+
+/// 每日观影活跃度。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DailyActivity {
+    pub date: String,
+    pub watch_seconds: f64,
+    pub episode_count: i64,
+}
+
+/// 观看时长 Top 番剧。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TopWatchedSubject {
+    pub subject_name: String,
+    pub cover_url: Option<String>,
+    pub total_seconds: f64,
+    pub episode_count: i64,
+}
+
+/// 播放与追番统计数据。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PlaybackStatistics {
+    pub total_watch_seconds: f64,
+    pub total_episodes_finished: i64,
+    pub total_subjects_collected: i64,
+    pub collection_type_counts: std::collections::HashMap<u8, i64>,
+    pub last_7_days_activity: Vec<DailyActivity>,
+    pub top_subjects: Vec<TopWatchedSubject>,
 }
 
 /// 离线挂起操作记录项。
@@ -570,6 +693,10 @@ impl SearchHistoryRepo {
     }
 }
 
+fn default_collection_type() -> u8 {
+    3
+}
+
 /// 我的追番/收藏条目（对应 subject_collection 表）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SubjectCollectionItem {
@@ -579,6 +706,14 @@ pub struct SubjectCollectionItem {
     pub cover_url: Option<String>,
     pub air_date: Option<String>,
     pub updated_at: i64,
+    #[serde(default = "default_collection_type")]
+    pub collection_type: u8,
+    #[serde(default)]
+    pub rate: u8,
+    #[serde(default)]
+    pub comment: String,
+    #[serde(default)]
+    pub private: bool,
 }
 
 /// 追番收藏读写仓库。
@@ -593,10 +728,11 @@ impl CollectionRepo {
 
     pub async fn save(&self, item: &SubjectCollectionItem) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO subject_collection (bangumi_id, name_cn, name, cover_url, air_date, updated_at, collected)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+            "INSERT INTO subject_collection (bangumi_id, name_cn, name, cover_url, air_date, updated_at, collected, collection_type, rate, comment, private)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10)
              ON CONFLICT(bangumi_id) DO UPDATE SET
-               name_cn=?2, name=?3, cover_url=?4, air_date=?5, updated_at=?6, collected=1",
+               name_cn=?2, name=?3, cover_url=?4, air_date=?5, updated_at=?6, collected=1,
+               collection_type=?7, rate=?8, comment=?9, private=?10",
         )
         .bind(item.bangumi_id)
         .bind(&item.name_cn)
@@ -604,9 +740,52 @@ impl CollectionRepo {
         .bind(&item.cover_url)
         .bind(&item.air_date)
         .bind(item.updated_at)
+        .bind(item.collection_type as i64)
+        .bind(item.rate as i64)
+        .bind(&item.comment)
+        .bind(item.private as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn get(&self, bangumi_id: i64) -> anyhow::Result<Option<SubjectCollectionItem>> {
+        let row = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, i64, i64, i64, String, i64)>(
+            "SELECT bangumi_id, name_cn, name, cover_url, air_date, updated_at, collection_type, rate, comment, private
+             FROM subject_collection
+             WHERE bangumi_id = ?1 AND collected = 1",
+        )
+        .bind(bangumi_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(
+            |(
+                bangumi_id,
+                name_cn,
+                name,
+                cover_url,
+                air_date,
+                updated_at,
+                collection_type,
+                rate,
+                comment,
+                private,
+            )| {
+                SubjectCollectionItem {
+                    bangumi_id,
+                    name_cn,
+                    name,
+                    cover_url,
+                    air_date,
+                    updated_at,
+                    collection_type: collection_type as u8,
+                    rate: rate as u8,
+                    comment,
+                    private: private != 0,
+                }
+            },
+        ))
     }
 
     pub async fn remove(&self, bangumi_id: i64) -> anyhow::Result<()> {
@@ -643,19 +822,49 @@ impl CollectionRepo {
     }
 
     pub async fn list(&self) -> anyhow::Result<Vec<SubjectCollectionItem>> {
-        let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, i64)>(
-            "SELECT bangumi_id, name_cn, name, cover_url, air_date, updated_at
-             FROM subject_collection
-             WHERE collected = 1
-             ORDER BY updated_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        self.list_by_type(None).await
+    }
+
+    pub async fn list_by_type(
+        &self,
+        c_type: Option<u8>,
+    ) -> anyhow::Result<Vec<SubjectCollectionItem>> {
+        let rows = if let Some(t) = c_type {
+            sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, i64, i64, i64, String, i64)>(
+                "SELECT bangumi_id, name_cn, name, cover_url, air_date, updated_at, collection_type, rate, comment, private
+                 FROM subject_collection
+                 WHERE collected = 1 AND collection_type = ?1
+                 ORDER BY updated_at DESC",
+            )
+            .bind(t as i64)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>, i64, i64, i64, String, i64)>(
+                "SELECT bangumi_id, name_cn, name, cover_url, air_date, updated_at, collection_type, rate, comment, private
+                 FROM subject_collection
+                 WHERE collected = 1
+                 ORDER BY updated_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
 
         Ok(rows
             .into_iter()
             .map(
-                |(bangumi_id, name_cn, name, cover_url, air_date, updated_at)| {
+                |(
+                    bangumi_id,
+                    name_cn,
+                    name,
+                    cover_url,
+                    air_date,
+                    updated_at,
+                    collection_type,
+                    rate,
+                    comment,
+                    private,
+                )| {
                     SubjectCollectionItem {
                         bangumi_id,
                         name_cn,
@@ -663,6 +872,10 @@ impl CollectionRepo {
                         cover_url,
                         air_date,
                         updated_at,
+                        collection_type: collection_type as u8,
+                        rate: rate as u8,
+                        comment,
+                        private: private != 0,
                     }
                 },
             )
@@ -876,13 +1089,26 @@ mod tests {
             cover_url: Some("http://example.com/cover.jpg".into()),
             air_date: Some("2023-09-29".into()),
             updated_at: 1000,
+            collection_type: 3,
+            rate: 9,
+            comment: "绝赞！".into(),
+            private: false,
         };
         repo.save(&item).await.unwrap();
 
         assert!(repo.is_collected(12345).await.unwrap());
-        let list = repo.list().await.unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].name_cn, "芙莉莲");
+        let fetched = repo.get(12345).await.unwrap().unwrap();
+        assert_eq!(fetched.name_cn, "芙莉莲");
+        assert_eq!(fetched.collection_type, 3);
+        assert_eq!(fetched.rate, 9);
+        assert_eq!(fetched.comment, "绝赞！");
+
+        let list_all = repo.list().await.unwrap();
+        assert_eq!(list_all.len(), 1);
+        let list_do = repo.list_by_type(Some(3)).await.unwrap();
+        assert_eq!(list_do.len(), 1);
+        let list_wish = repo.list_by_type(Some(1)).await.unwrap();
+        assert_eq!(list_wish.len(), 0);
 
         repo.remove(12345).await.unwrap();
         assert!(!repo.is_collected(12345).await.unwrap());
@@ -1009,6 +1235,10 @@ mod tests {
                 cover_url: Some("http://example.com/cover.jpg".into()),
                 air_date: Some("2023-09-29".into()),
                 updated_at: 1000,
+                collection_type: 3,
+                rate: 10,
+                comment: "超越时代的佳作".into(),
+                private: false,
             })
             .await
             .unwrap();
@@ -1109,5 +1339,92 @@ mod tests {
         pb_repo.remove_pending_op(id).await.unwrap();
         let pending = pb_repo.list_pending_ops().await.unwrap();
         assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_playback_statistics() {
+        let pool = open(&std::path::PathBuf::from(":memory:")).await.unwrap();
+        let pb_repo = PlaybackRepo::new(pool.clone());
+        let col_repo = CollectionRepo::new(pool.clone());
+
+        // 插入两条追番收藏（在看 3 与想看 1）
+        col_repo
+            .save(&SubjectCollectionItem {
+                bangumi_id: 1,
+                name_cn: "鬼灭之刃".into(),
+                name: "Kimetsu no Yaiba".into(),
+                cover_url: None,
+                air_date: None,
+                updated_at: 1000,
+                collection_type: 3,
+                rate: 8,
+                comment: "".into(),
+                private: false,
+            })
+            .await
+            .unwrap();
+
+        col_repo
+            .save(&SubjectCollectionItem {
+                bangumi_id: 2,
+                name_cn: "间谍过家家".into(),
+                name: "Spy x Family".into(),
+                cover_url: None,
+                air_date: None,
+                updated_at: 2000,
+                collection_type: 1,
+                rate: 0,
+                comment: "".into(),
+                private: false,
+            })
+            .await
+            .unwrap();
+
+        // 插入两项播放进度
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        pb_repo
+            .save_position_with_meta(
+                &ani_core::PlaybackPosition {
+                    episode_id: ani_core::EpisodeId(101),
+                    position_seconds: 1400.0,
+                    duration_seconds: Some(1400.0),
+                    finished: true,
+                    updated_at: now_ms,
+                },
+                "第 1 集",
+                "鬼灭之刃",
+                None,
+                "http://example.com/v1.mp4",
+            )
+            .await
+            .unwrap();
+
+        pb_repo
+            .save_position_with_meta(
+                &ani_core::PlaybackPosition {
+                    episode_id: ani_core::EpisodeId(102),
+                    position_seconds: 600.0,
+                    duration_seconds: Some(1400.0),
+                    finished: false,
+                    updated_at: now_ms,
+                },
+                "第 2 集",
+                "鬼灭之刃",
+                None,
+                "http://example.com/v2.mp4",
+            )
+            .await
+            .unwrap();
+
+        let stats = pb_repo.get_statistics().await.unwrap();
+        assert_eq!(stats.total_subjects_collected, 2);
+        assert_eq!(stats.total_episodes_finished, 1);
+        assert_eq!(stats.total_watch_seconds, 2000.0);
+        assert_eq!(stats.collection_type_counts.get(&3), Some(&1));
+        assert_eq!(stats.collection_type_counts.get(&1), Some(&1));
+        assert_eq!(stats.top_subjects.len(), 1);
+        assert_eq!(stats.top_subjects[0].subject_name, "鬼灭之刃");
+        assert_eq!(stats.top_subjects[0].total_seconds, 2000.0);
+        assert!(!stats.last_7_days_activity.is_empty());
     }
 }

@@ -110,6 +110,9 @@ fn main() {
             commands::get_local_media_url,
             commands::parse_video_filename,
             commands::get_mikan_my_bangumi,
+            commands::get_bangumi_subject_collection,
+            commands::set_bangumi_subject_collection,
+            commands::get_playback_statistics,
         ])
         // 离线缓存回放：http://anicache.localhost/<id>/<file>（对应 Ani 的本地缓存 MediaSource）
         .register_asynchronous_uri_scheme_protocol("anicache", |_ctx, request, responder| {

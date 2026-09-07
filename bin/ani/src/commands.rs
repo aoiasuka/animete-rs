@@ -1146,6 +1146,10 @@ pub async fn toggle_subject_collection(
             cover_url,
             air_date,
             updated_at: chrono::Utc::now().timestamp_millis(),
+            collection_type: 3,
+            rate: 0,
+            comment: String::new(),
+            private: false,
         };
         repo.save(&item).await.map_err(|e| e.to_string())?;
 
@@ -1187,13 +1191,152 @@ pub async fn toggle_subject_collection(
     }
 }
 
-/// 列出所有本地追番收藏（按收藏时间新→旧）。
+/// 获取条目的用户收藏与评价详情（优先从 Bangumi 云端拉取，离线时回退到本地 SQLite 记录）。
+#[tauri::command]
+pub async fn get_bangumi_subject_collection(
+    ctx: State<'_, AppContext>,
+    bangumi_id: u32,
+) -> Result<Option<ds_bangumi::oauth::UserSubjectCollection>, String> {
+    if bangumi_id == 0 {
+        return Ok(None);
+    }
+    let is_logged_in = ctx.settings.read().unwrap().bangumi.is_logged_in();
+    if is_logged_in {
+        if let Ok(token) = valid_bangumi_token(&ctx).await {
+            if let Ok(oauth) = ds_bangumi::oauth::BangumiOAuth::new() {
+                if let Ok(Some(col)) = oauth.get_subject_collection(&token, bangumi_id).await {
+                    return Ok(Some(col));
+                }
+            }
+        }
+    }
+
+    // 未登录或云端未返回时，尝试从本地 SQLite 读取用户历史保存的收藏详情
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    if let Ok(Some(local)) = repo.get(bangumi_id as i64).await {
+        return Ok(Some(ds_bangumi::oauth::UserSubjectCollection {
+            collection_type: local.collection_type,
+            rate: local.rate,
+            comment: if local.comment.is_empty() {
+                None
+            } else {
+                Some(local.comment)
+            },
+            tags: Vec::new(),
+            private: local.private,
+            updated_at: None,
+        }));
+    }
+
+    Ok(None)
+}
+
+/// 完整更新条目收藏（多态类型：1想看 2看过 3在看 4搁置 5抛弃；评分：0..=10；短评；标签；私密），并同步至本地数据库与 Bangumi。
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn set_bangumi_subject_collection(
+    ctx: State<'_, AppContext>,
+    bangumi_id: u32,
+    name_cn: String,
+    name: String,
+    cover_url: Option<String>,
+    air_date: Option<String>,
+    collection_type: u8,
+    rate: Option<u8>,
+    comment: Option<String>,
+    tags: Option<Vec<String>>,
+    private: Option<bool>,
+) -> Result<ToggleCollectionResult, String> {
+    if bangumi_id == 0 {
+        return Err("无效的条目 ID".into());
+    }
+
+    let repo = ani_db::CollectionRepo::new(ctx.db.clone());
+    let rate_val = rate.unwrap_or(0);
+    let comment_str = comment.clone().unwrap_or_default();
+    let private_bool = private.unwrap_or(false);
+
+    let item = ani_db::SubjectCollectionItem {
+        bangumi_id: bangumi_id as i64,
+        name_cn,
+        name,
+        cover_url,
+        air_date,
+        updated_at: chrono::Utc::now().timestamp_millis(),
+        collection_type,
+        rate: rate_val,
+        comment: comment_str.clone(),
+        private: private_bool,
+    };
+    repo.save(&item).await.map_err(|e| e.to_string())?;
+
+    let mut bangumi_synced = false;
+    let is_logged_in = ctx.settings.read().unwrap().bangumi.is_logged_in();
+    if is_logged_in {
+        let res = async {
+            let token = valid_bangumi_token(&ctx).await?;
+            let oauth = ds_bangumi::oauth::BangumiOAuth::new().map_err(|e| e.to_string())?;
+            oauth
+                .set_subject_collection_full(
+                    &token,
+                    bangumi_id,
+                    collection_type,
+                    rate,
+                    comment.as_deref(),
+                    tags.as_deref(),
+                    private,
+                )
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+
+        match res {
+            Ok(_) => {
+                bangumi_synced = true;
+            }
+            Err(e) => {
+                tracing::warn!("同步收藏到 Bangumi 失败，记入离线挂起队列：{e}");
+                let play_repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+                let payload = serde_json::json!({
+                    "subject_id": bangumi_id,
+                    "collection_type": collection_type,
+                    "rate": rate_val,
+                    "comment": comment_str,
+                    "private": private_bool,
+                });
+                let _ = play_repo
+                    .enqueue_pending_op(ani_core::EpisodeId(0), "collect_subject", &payload)
+                    .await;
+            }
+        }
+    }
+
+    Ok(ToggleCollectionResult {
+        collected: true,
+        bangumi_synced,
+    })
+}
+
+/// 列出所有本地追番收藏（按收藏时间新→旧，支持按状态过滤）。
 #[tauri::command]
 pub async fn list_subject_collections(
     ctx: State<'_, AppContext>,
+    collection_type: Option<u8>,
 ) -> Result<Vec<ani_db::SubjectCollectionItem>, String> {
     let repo = ani_db::CollectionRepo::new(ctx.db.clone());
-    repo.list().await.map_err(|e| e.to_string())
+    repo.list_by_type(collection_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 查询全局观影与追番数据统计及近 7 天活跃趋势。
+#[tauri::command]
+pub async fn get_playback_statistics(
+    ctx: State<'_, AppContext>,
+) -> Result<ani_db::PlaybackStatistics, String> {
+    let repo = ani_db::PlaybackRepo::new(ctx.db.clone());
+    repo.get_statistics().await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1784,9 +1927,20 @@ pub async fn sync_pending_playback_ops(
                 .get("collection_type")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(3) as u8;
+            let rate = data.get("rate").and_then(|v| v.as_u64()).map(|r| r as u8);
+            let comment = data.get("comment").and_then(|v| v.as_str());
+            let private = data.get("private").and_then(|v| v.as_bool());
             if subject_id > 0 {
                 match oauth
-                    .collect_subject(&token, subject_id, collection_type)
+                    .set_subject_collection_full(
+                        &token,
+                        subject_id,
+                        collection_type,
+                        rate,
+                        comment,
+                        None,
+                        private,
+                    )
                     .await
                 {
                     Ok(_) => {

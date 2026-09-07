@@ -46,6 +46,24 @@ pub struct BgmUser {
     pub username: String,
 }
 
+/// 用户在 Bangumi 上的条目收藏与评价详情。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSubjectCollection {
+    /// 1: 想看, 2: 看过, 3: 在看, 4: 搁置, 5: 抛弃
+    #[serde(rename = "type")]
+    pub collection_type: u8,
+    #[serde(default)]
+    pub rate: u8,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
 impl BangumiOAuth {
     pub fn new() -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
@@ -144,6 +162,77 @@ impl BangumiOAuth {
     /// 当前用户。
     pub async fn me(&self, token: &str) -> anyhow::Result<BgmUser> {
         self.get_json("/v0/me", token).await
+    }
+
+    /// 获取当前用户对指定条目的收藏状态与评分。未收藏返回 Ok(None)。
+    pub async fn get_subject_collection(
+        &self,
+        token: &str,
+        subject_id: u32,
+    ) -> anyhow::Result<Option<UserSubjectCollection>> {
+        let r = self
+            .http
+            .get(format!("{API}/v0/users/-/collections/{subject_id}"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .context("bgm get collection request failed")?;
+
+        if r.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        let resp = r
+            .error_for_status()
+            .context("bgm get collection rejected")?;
+        let col: UserSubjectCollection =
+            resp.json().await.context("bgm get collection bad json")?;
+        Ok(Some(col))
+    }
+
+    /// 完整设置条目收藏（状态、评分、短评、标签、私密）。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn set_subject_collection_full(
+        &self,
+        token: &str,
+        subject_id: u32,
+        collection_type: u8,
+        rate: Option<u8>,
+        comment: Option<&str>,
+        tags: Option<&[String]>,
+        private: Option<bool>,
+    ) -> anyhow::Result<()> {
+        let mut body = serde_json::json!({
+            "type": collection_type,
+        });
+        if let Some(r) = rate {
+            body["rate"] = serde_json::json!(r);
+        }
+        if let Some(c) = comment {
+            body["comment"] = serde_json::json!(c);
+        }
+        if let Some(t) = tags {
+            body["tags"] = serde_json::json!(t);
+        }
+        if let Some(p) = private {
+            body["private"] = serde_json::json!(p);
+        }
+
+        let r = self
+            .http
+            .post(format!("{API}/v0/users/-/collections/{subject_id}"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .context("bgm set collection request failed")?;
+
+        if r.status() == reqwest::StatusCode::CONFLICT || r.status().is_success() {
+            return Ok(());
+        }
+        r.error_for_status()
+            .context("bgm set collection rejected")?;
+        Ok(())
     }
 
     /// 收藏条目（type: 1想看 2看过 3在看 4搁置 5抛弃）。
@@ -246,5 +335,23 @@ mod tests {
         let at = t.expires_at_ms();
         let now = chrono::Utc::now().timestamp_millis();
         assert!((at - now - 3_600_000).abs() < 2000);
+    }
+
+    #[test]
+    fn test_user_subject_collection_deser() {
+        let json = r#"{
+            "type": 3,
+            "rate": 8,
+            "comment": "作画绝美，音乐催泪",
+            "tags": ["奇幻", "冒险", "治愈"],
+            "private": false,
+            "updated_at": "2026-09-01T12:00:00Z"
+        }"#;
+        let col: UserSubjectCollection = serde_json::from_str(json).unwrap();
+        assert_eq!(col.collection_type, 3);
+        assert_eq!(col.rate, 8);
+        assert_eq!(col.comment.as_deref(), Some("作画绝美，音乐催泪"));
+        assert_eq!(col.tags.len(), 3);
+        assert!(!col.private);
     }
 }
