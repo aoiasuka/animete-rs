@@ -360,6 +360,8 @@
           </select>
         </div>
       </div>
+      <!-- 多维快速过滤胶囊行 -->
+      <div id="cand-quick-chips" class="cand-quick-chips hidden"></div>
       <div id="candidates" class="cands"></div>
 
       <!-- 社区短评与吐槽（Bangumi 漫友评价） -->
@@ -782,6 +784,10 @@
               <span class="danmaku-menu-label">高能折叠</span>
               <button id="dm-merge-dup-toggle" class="ghost small dm-action-btn active" title="在密集刷屏时自动合并相同弹幕，并显示 x2/x5/x10+ 高能徽章">合并重复弹幕: 开</button>
             </div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">防挡字幕</span>
+              <button id="dm-avoid-sub-toggle" class="ghost small dm-action-btn active" title="在底部划定字幕保护区，防止滚动弹幕与底部弹幕遮挡台词">🛡️ 防挡字幕: 开</button>
+            </div>
             <div class="sub-menu-sep"></div>
             <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">不透明度</span>
@@ -869,11 +875,31 @@
               </div>
             </div>
             <div class="sub-menu-row">
-              <span class="sub-menu-label">字号大小</span>
-              <div class="sub-size-btns">
-                <button class="ghost small sub-size-opt" data-size="sm">小</button>
-                <button class="ghost small sub-size-opt active" data-size="md">中</button>
-                <button class="ghost small sub-size-opt" data-size="lg">大</button>
+              <span class="sub-menu-label">字号微调</span>
+              <div class="sub-slider-wrap">
+                <input type="range" id="sub-size-slider" class="visual-slider sub-slider" min="14" max="38" step="1" value="21" />
+                <span id="sub-size-val" class="visual-slider-val mono">21px</span>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">垂直位置</span>
+              <div class="sub-slider-wrap">
+                <input type="range" id="sub-bottom-slider" class="visual-slider sub-slider" min="10" max="120" step="2" value="36" />
+                <span id="sub-bottom-val" class="visual-slider-val mono">36px</span>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">字重粗细</span>
+              <div class="sub-btn-group">
+                <button class="ghost small sub-weight-opt active" data-weight="600">常规</button>
+                <button class="ghost small sub-weight-opt" data-weight="800">特粗</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">描边黑度</span>
+              <div class="sub-btn-group">
+                <button class="ghost small sub-stroke-opt active" data-stroke="normal">标准</button>
+                <button class="ghost small sub-stroke-opt" data-stroke="thick">加厚黑边</button>
               </div>
             </div>
             <div class="sub-menu-row">
@@ -894,7 +920,7 @@
               </div>
             </div>
             <div class="sub-menu-row">
-              <span class="sub-menu-label">显示位置</span>
+              <span class="sub-menu-label">显示方位</span>
               <div class="sub-btn-group">
                 <button class="ghost small sub-pos-opt active" data-pos="bottom">底部</button>
                 <button class="ghost small sub-pos-opt" data-pos="top">顶部</button>
@@ -1156,6 +1182,23 @@
           <div class="spinner-ring"></div>
           <span class="spinner-text">缓冲中…</span>
         </div>
+        <!-- 片尾自动下一集浮动倒计时卡片 -->
+        <div id="player-next-ep-card" class="player-next-ep-card hidden">
+          <div class="next-ep-card-glow"></div>
+          <div class="next-ep-card-content">
+            <div class="next-ep-card-head">
+              <span class="next-ep-badge">⏭ 即将播放下一集</span>
+              <span id="next-ep-countdown-timer" class="next-ep-timer">5s</span>
+            </div>
+            <div id="next-ep-title" class="next-ep-title">下一集</div>
+            <div class="next-ep-actions">
+              <button id="next-ep-play-btn" class="primary small next-ep-btn">▶ 立即播放</button>
+              <button id="next-ep-cancel-btn" class="ghost small next-ep-cancel">✕ 取消</button>
+            </div>
+          </div>
+          <div class="next-ep-progress-bar"><div id="next-ep-progress-fill" class="next-ep-progress-fill"></div></div>
+        </div>
+
         <div id="player-skip-capsule" class="player-skip-capsule hidden">
           <span>跳过片头 OP</span>
           <kbd>S</kbd>

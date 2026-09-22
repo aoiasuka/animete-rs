@@ -2457,7 +2457,8 @@ body.window-drag-over::after {
   color: var(--sub-color, #ffffff);
   background-color: var(--sub-bg, rgba(10, 13, 20, 0.78));
   font-family: system-ui, -apple-system, sans-serif;
-  font-size: var(--sub-font-size, 20px);
+  font-size: var(--sub-font-size, 21px);
+  font-weight: var(--sub-font-weight, 600);
   text-shadow: var(--sub-shadow, 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9));
   line-height: 1.4;
   border-radius: 4px;
@@ -7019,6 +7020,232 @@ body.window-drag-over::after {
   border-color: var(--accent) !important;
   color: #e2e8f0 !important;
 }
+
+/* ==========================================================================
+   字幕高级微调滑块与样式
+   ========================================================================== */
+.sub-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.sub-slider {
+  flex: 1;
+}
+
+.sub-weight-opt.active,
+.sub-stroke-opt.active {
+  background: rgba(139, 92, 246, 0.25) !important;
+  border-color: var(--accent) !important;
+  color: #f1f5f9 !important;
+}
+
+/* ==========================================================================
+   片尾自动下一集浮动倒计时卡片 (Next Episode Floating Countdown Card)
+   ========================================================================== */
+.player-next-ep-card {
+  position: absolute;
+  bottom: 28px;
+  right: 28px;
+  z-index: 55;
+  width: 280px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 20px rgba(139, 92, 246, 0.25);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.player-next-ep-card.hidden {
+  display: none !important;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.next-ep-card-glow {
+  position: absolute;
+  top: -20px;
+  right: -20px;
+  width: 80px;
+  height: 80px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.45) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.next-ep-card-content {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.next-ep-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.next-ep-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c4b5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.next-ep-timer {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.next-ep-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #f8fafc;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.next-ep-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.next-ep-btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  border: none;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+}
+
+.next-ep-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.next-ep-cancel {
+  font-size: 11.5px;
+  padding: 6px 10px;
+  color: #94a3b8;
+}
+
+.next-ep-cancel:hover {
+  color: #e2e8f0;
+}
+
+.next-ep-progress-bar {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.next-ep-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #38bdf8);
+  transform-origin: left;
+  transition: width 0.1s linear;
+}
+
+/* ==========================================================================
+   选源候选列表多维快速过滤胶囊行 (Candidate Quick Filter Chips)
+   ========================================================================== */
+.cand-quick-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+.cand-quick-chips.hidden {
+  display: none !important;
+}
+
+.cand-chip-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cand-chip-group:not(:last-child)::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+}
+
+.cand-chip-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.cand-chip {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cand-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.cand-chip.active {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(139, 92, 246, 0.6);
+  color: #c4b5fd;
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+}
+
 
 
 

@@ -750,8 +750,8 @@ function showSearchSection() {
 
 // 请求令牌：慢返回的旧请求不得覆盖新数据
 let searchSeq = 0, subjectSeq = 0, fetchSeq = 0;
-// 候选列表过滤（字幕组/分辨率/仅看可用），配合选源页的筛选下拉
-const candFilter = { group: "", res: "", onlyAvail: true };
+// 候选列表过滤（字幕组/分辨率/编码/语种/仅看可用），配合选源页的筛选下拉与快捷胶囊
+const candFilter = { group: "", res: "", codec: "", lang: "", onlyAvail: true };
 let lastSelection = null;
 
 function fillSelect(sel, values, current, label) {
@@ -775,6 +775,72 @@ function updateCandFilter(sel) {
   fillSelect($("cand-filter-res"), [...ress].sort((a, b) => b - a), candFilter.res, "全部分辨率");
   const availEl = $("cand-filter-avail");
   if (availEl) availEl.checked = candFilter.onlyAvail;
+}
+
+function renderQuickChips(sel) {
+  const container = $("cand-quick-chips");
+  if (!container) return;
+  if (!sel || !sel.candidates || sel.candidates.length === 0) {
+    container.classList.add("hidden");
+    return;
+  }
+  container.classList.remove("hidden");
+
+  const resList = ["1080", "2160", "720"];
+  const codecList = [
+    { id: "hevc", label: "x265/HEVC" },
+    { id: "avc", label: "x264/AVC" },
+  ];
+  const langList = [
+    { id: "chs", label: "简日双语" },
+    { id: "cht", label: "繁日双语" },
+    { id: "raw", label: "生肉 RAW" },
+  ];
+
+  let html = `
+    <div class="cand-chip-group">
+      <span class="cand-chip-label">状态:</span>
+      <button class="cand-chip ${candFilter.onlyAvail ? "active" : ""}" data-type="avail">仅可用</button>
+    </div>
+    <div class="cand-chip-group">
+      <span class="cand-chip-label">分辨率:</span>
+      <button class="cand-chip ${!candFilter.res ? "active" : ""}" data-type="res" data-val="">全部</button>
+      ${resList.map((r) => `<button class="cand-chip ${candFilter.res === r ? "active" : ""}" data-type="res" data-val="${r}">${r === "2160" ? "4K" : r + "P"}</button>`).join("")}
+    </div>
+    <div class="cand-chip-group">
+      <span class="cand-chip-label">编码:</span>
+      <button class="cand-chip ${!candFilter.codec ? "active" : ""}" data-type="codec" data-val="">全部</button>
+      ${codecList.map((c) => `<button class="cand-chip ${candFilter.codec === c.id ? "active" : ""}" data-type="codec" data-val="${c.id}">${c.label}</button>`).join("")}
+    </div>
+    <div class="cand-chip-group">
+      <span class="cand-chip-label">字幕:</span>
+      <button class="cand-chip ${!candFilter.lang ? "active" : ""}" data-type="lang" data-val="">全部</button>
+      ${langList.map((l) => `<button class="cand-chip ${candFilter.lang === l.id ? "active" : ""}" data-type="lang" data-val="${l.id}">${l.label}</button>`).join("")}
+    </div>
+  `;
+
+  container.innerHTML = html;
+
+  container.querySelectorAll(".cand-chip").forEach((chip) => {
+    chip.onclick = () => {
+      const type = chip.getAttribute("data-type");
+      const val = chip.getAttribute("data-val");
+      if (type === "avail") {
+        candFilter.onlyAvail = !candFilter.onlyAvail;
+        const availEl = $("cand-filter-avail");
+        if (availEl) availEl.checked = candFilter.onlyAvail;
+      } else if (type === "res") {
+        candFilter.res = val || "";
+        const resEl = $("cand-filter-res");
+        if (resEl) resEl.value = candFilter.res;
+      } else if (type === "codec") {
+        candFilter.codec = candFilter.codec === val ? "" : (val || "");
+      } else if (type === "lang") {
+        candFilter.lang = candFilter.lang === val ? "" : (val || "");
+      }
+      renderSelection(sel);
+    };
+  });
 }
 
 $("cand-filter-group").onchange = (e) => {
@@ -2325,6 +2391,7 @@ async function fetchMedias(ep) {
 function renderSelection(sel) {
   lastSelection = sel;
   updateCandFilter(sel);
+  renderQuickChips(sel);
   const errs = $("source-errors");
   if (sel.source_errors.length) {
     errs.textContent = "部分数据源失败：" + sel.source_errors.join("；");
@@ -2335,18 +2402,27 @@ function renderSelection(sel) {
 
   const avail = sel.candidates.filter((c) => c.type === "available");
   const excluded = sel.candidates.filter((c) => c.type === "excluded");
-  const filtered = sel.candidates.filter(
-    (c) =>
-      (!candFilter.onlyAvail || c.type === "available") &&
-      (!candFilter.group || c.media.properties.subtitle_group === candFilter.group) &&
-      (!candFilter.res ||
-        (c.media.properties.resolution &&
-          String(c.media.properties.resolution.height) === candFilter.res)),
-  );
+  const filtered = sel.candidates.filter((c) => {
+    if (candFilter.onlyAvail && c.type !== "available") return false;
+    if (candFilter.group && c.media.properties.subtitle_group !== candFilter.group) return false;
+    if (candFilter.res && (!c.media.properties.resolution || String(c.media.properties.resolution.height) !== candFilter.res)) return false;
+
+    const titleLower = (c.media.title || "").toLowerCase();
+    if (candFilter.codec === "hevc" && !titleLower.includes("hevc") && !titleLower.includes("x265") && !titleLower.includes("h265") && !titleLower.includes("h.265")) return false;
+    if (candFilter.codec === "avc" && !titleLower.includes("avc") && !titleLower.includes("x264") && !titleLower.includes("h264") && !titleLower.includes("h.264")) return false;
+    if (candFilter.lang === "chs" && !titleLower.includes("chs") && !titleLower.includes("gb") && !titleLower.includes("简") && !titleLower.includes("sc")) return false;
+    if (candFilter.lang === "cht" && !titleLower.includes("cht") && !titleLower.includes("big5") && !titleLower.includes("繁") && !titleLower.includes("tc")) return false;
+    if (candFilter.lang === "raw" && !titleLower.includes("raw") && !titleLower.includes("生肉")) return false;
+
+    return true;
+  });
+
   const filterParts = [];
   if (candFilter.onlyAvail) filterParts.push("仅可用");
   if (candFilter.group) filterParts.push(candFilter.group);
   if (candFilter.res) filterParts.push(candFilter.res + "p");
+  if (candFilter.codec) filterParts.push(candFilter.codec.toUpperCase());
+  if (candFilter.lang) filterParts.push(candFilter.lang.toUpperCase());
   const filterNote = filterParts.length ? `（${filterParts.join(" · ")} 筛选后 ${filtered.length} 条）` : "";
   const clipped = filtered.length > 40 ? `（显示前 40 条）` : "";
   $("cand-count").textContent = `${avail.length} 可用 · ${excluded.length} 已排除${filterNote}${clipped}`;
@@ -2364,6 +2440,8 @@ function renderSelection(sel) {
       resetBtn.onclick = () => {
         candFilter.group = "";
         candFilter.res = "";
+        candFilter.codec = "";
+        candFilter.lang = "";
         candFilter.onlyAvail = false;
         $("cand-filter-group").value = "";
         $("cand-filter-res").value = "";
@@ -4308,6 +4386,7 @@ const DanmakuOverlay = (() => {
   let hideBottom = localStorage.getItem("ani_dm_hide_bottom") === "true";
   let hideColor = localStorage.getItem("ani_dm_hide_color") === "true";
   let mergeDuplicate = localStorage.getItem("ani_dm_merge_dup") !== "false";
+  let avoidSubtitle = localStorage.getItem("ani_dm_avoid_sub") !== "false";
   let cachedRawEvents = [];
   let sessionBlockedCount = 0;
 
@@ -4369,7 +4448,8 @@ const DanmakuOverlay = (() => {
   }
 
   function resetLanes() {
-    const scrollLaneCount = Math.max(2, Math.floor((H * areaRatio) / (fontPx + 4)));
+    const usableH = avoidSubtitle ? Math.floor(H * 0.82) : H;
+    const scrollLaneCount = Math.max(2, Math.floor((usableH * areaRatio) / (fontPx + 4)));
     scrollLanes = Array(scrollLaneCount).fill(0);
     staticLanes = Array(3).fill(0);
   }
@@ -4440,7 +4520,9 @@ const DanmakuOverlay = (() => {
       } else {
         if (age > staticMs) continue;
         alpha = age > staticMs - 600 ? (staticMs - age) / 600 : 1;
-        y = it.mode === "top" ? it.lane * (fontPx + 4) + 2 : H - (it.lane + 1) * (fontPx + 4) - 6;
+        const avoidMargin = avoidSubtitle ? Math.round(H * 0.18) : 0;
+        const bottomBase = H - avoidMargin;
+        y = it.mode === "top" ? it.lane * (fontPx + 4) + 2 : bottomBase - (it.lane + 1) * (fontPx + 4) - 6;
         x = (W - w) / 2;
       }
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha * opacity));
@@ -4681,6 +4763,14 @@ const DanmakuOverlay = (() => {
       if (cachedRawEvents && cachedRawEvents.length) {
         this.load(cachedRawEvents);
       }
+    },
+    isAvoidSubtitle() {
+      return avoidSubtitle;
+    },
+    setAvoidSubtitle(val) {
+      avoidSubtitle = !!val;
+      localStorage.setItem("ani_dm_avoid_sub", String(avoidSubtitle));
+      resetLanes();
     },
     enabled: false,
     resize,
@@ -5216,7 +5306,95 @@ function updatePlayerNextBtn() {
   }
 }
 
+// ==========================================================================
+// 片尾自动下一集浮动倒计时控制器 (Next Episode Floating Countdown Controller)
+// ==========================================================================
+
+const nextEpCountdownState = {
+  triggered: false,
+  dismissed: false,
+  timer: null,
+};
+
+function resetNextEpCountdown() {
+  if (nextEpCountdownState.timer) {
+    clearInterval(nextEpCountdownState.timer);
+    nextEpCountdownState.timer = null;
+  }
+  nextEpCountdownState.triggered = false;
+  nextEpCountdownState.dismissed = false;
+  const card = $("player-next-ep-card");
+  if (card) card.classList.add("hidden");
+}
+
+function checkNextEpCountdown(currentTime, duration) {
+  if (nextEpCountdownState.triggered || nextEpCountdownState.dismissed) return;
+  if (!duration || duration <= 60 || currentTime < 10) return;
+  if (playerLoopMode === "single" || playerLoopMode === "stop") return;
+
+  const remainTime = duration - currentTime;
+  if (remainTime <= 15 && remainTime > 2) {
+    const nextEp = getNextEpisode();
+    if (!nextEp) return;
+
+    nextEpCountdownState.triggered = true;
+    showNextEpCountdownCard(nextEp);
+  }
+}
+
+function showNextEpCountdownCard(nextEp) {
+  const card = $("player-next-ep-card");
+  const timerEl = $("next-ep-countdown-timer");
+  const titleEl = $("next-ep-title");
+  const fillEl = $("next-ep-progress-fill");
+  if (!card) return;
+
+  if (titleEl) {
+    const epTitle = nextEp.display_title || nextEp.name_cn || nextEp.name || `第 ${nextEp.ep} 话`;
+    titleEl.textContent = `第 ${nextEp.ep} 话 · ${epTitle}`;
+    titleEl.title = `第 ${nextEp.ep} 话 · ${epTitle}`;
+  }
+
+  card.classList.remove("hidden");
+  let leftSec = 5;
+  if (timerEl) timerEl.textContent = `${leftSec}s`;
+  if (fillEl) fillEl.style.width = "100%";
+
+  if (nextEpCountdownState.timer) clearInterval(nextEpCountdownState.timer);
+
+  const startMs = Date.now();
+  const totalMs = 5000;
+
+  nextEpCountdownState.timer = setInterval(() => {
+    const elapsed = Date.now() - startMs;
+    const remainingMs = Math.max(0, totalMs - elapsed);
+    const sec = Math.ceil(remainingMs / 1000);
+
+    if (timerEl) timerEl.textContent = `${sec}s`;
+    if (fillEl) fillEl.style.width = `${(remainingMs / totalMs) * 100}%`;
+
+    if (remainingMs <= 0) {
+      clearInterval(nextEpCountdownState.timer);
+      nextEpCountdownState.timer = null;
+      card.classList.add("hidden");
+      playNextEpisode();
+    }
+  }, 100);
+}
+
+function dismissNextEpCountdown() {
+  if (nextEpCountdownState.timer) {
+    clearInterval(nextEpCountdownState.timer);
+    nextEpCountdownState.timer = null;
+  }
+  nextEpCountdownState.dismissed = true;
+  const card = $("player-next-ep-card");
+  if (card) card.classList.add("hidden");
+  showPlayerOsd("已取消自动切集（继续观赏片尾彩蛋）");
+}
+
 async function playNextEpisode() {
+  resetNextEpCountdown();
   const nextEp = getNextEpisode();
   if (!nextEp) {
     toast("已经是最后一集了");
@@ -6187,6 +6365,7 @@ async function togglePiP() {
 function destroyPlayer() {
   const v = $("video");
   v.pause();
+  resetNextEpCountdown();
   stopAmbientLoop();
   const ambCanvas = $("ambient-canvas");
   if (ambCanvas) ambCanvas.classList.add("hidden");
@@ -6675,6 +6854,9 @@ $("video").addEventListener("timeupdate", () => {
     const showCapsule = !visualState.autoSkipOp && v.currentTime >= 0.5 && v.currentTime <= 15;
     capsule.classList.toggle("hidden", !showCapsule);
   }
+
+  // 片尾自动下一集浮动倒计时卡片检测
+  checkNextEpCountdown(v.currentTime, v.duration);
 });
 $("video").addEventListener("volumechange", () => {
   localStorage.setItem("ani_vol", String($("video").volume));
@@ -6787,6 +6969,14 @@ $("video").addEventListener("pause", () => {
 $("player-fs").onclick = toggleFullscreen;
 $("player-next-ep").onclick = () => playNextEpisode();
 
+$("next-ep-play-btn")?.addEventListener("click", () => {
+  resetNextEpCountdown();
+  playNextEpisode();
+});
+$("next-ep-cancel-btn")?.addEventListener("click", () => {
+  dismissNextEpCountdown();
+});
+
 const epDrawerBtn = $("player-ep-drawer-btn");
 if (epDrawerBtn) epDrawerBtn.onclick = () => toggleEpDrawer();
 const epDrawerClose = $("ep-drawer-close");
@@ -6867,6 +7057,13 @@ function syncDanmakuMenuUI() {
     const isMerged = DanmakuOverlay.isMergeDuplicate();
     mergeBtn.classList.toggle("active", isMerged);
     mergeBtn.textContent = `合并重复弹幕: ${isMerged ? "开" : "关"}`;
+  }
+
+  const avoidSubBtn = $("dm-avoid-sub-toggle");
+  if (avoidSubBtn) {
+    const isAvoid = DanmakuOverlay.isAvoidSubtitle();
+    avoidSubBtn.classList.toggle("active", isAvoid);
+    avoidSubBtn.textContent = `🛡️ 防挡字幕: ${isAvoid ? "开" : "关"}`;
   }
 }
 
@@ -6979,6 +7176,13 @@ $("dm-merge-dup-toggle")?.addEventListener("click", () => {
   DanmakuOverlay.setMergeDuplicate(next);
   syncDanmakuMenuUI();
   showPlayerOsd(next ? "已开启重复弹幕合并 (x2/x5高能徽章)" : "已关闭重复弹幕合并");
+});
+
+$("dm-avoid-sub-toggle")?.addEventListener("click", () => {
+  const next = !DanmakuOverlay.isAvoidSubtitle();
+  DanmakuOverlay.setAvoidSubtitle(next);
+  syncDanmakuMenuUI();
+  showPlayerOsd(next ? "已开启防挡字幕保护区" : "已关闭防挡字幕");
 });
 
 // ---------- 弹幕屏蔽词与高级过滤器模态框交互 ----------
@@ -7437,6 +7641,10 @@ const subState = {
   cues: [],
   offsetSec: 0.0,
   size: localStorage.getItem("ani_sub_size") || "md",
+  fontSizePx: parseInt(localStorage.getItem("ani_sub_size_px") || "21", 10),
+  bottomMarginPx: parseInt(localStorage.getItem("ani_sub_bottom_px") || "36", 10),
+  fontWeight: localStorage.getItem("ani_sub_weight") || "600",
+  strokeType: localStorage.getItem("ani_sub_stroke") || "normal",
   color: localStorage.getItem("ani_sub_color") || "white",
   bg: localStorage.getItem("ani_sub_bg") || "dim",
   position: localStorage.getItem("ani_sub_pos") || "bottom",
@@ -7925,14 +8133,38 @@ function adjustSubOffset(delta) {
 }
 
 function applySubtitleStyles() {
-  const sizes = { sm: "17px", md: "21px", lg: "26px" };
-  document.documentElement.style.setProperty("--sub-font-size", sizes[subState.size] || "21px");
+  const fontPx = subState.fontSizePx || 21;
+  const bottomPx = subState.bottomMarginPx || 36;
+  const weight = subState.fontWeight || "600";
+  const stroke = subState.strokeType || "normal";
+
+  document.documentElement.style.setProperty("--sub-font-size", `${fontPx}px`);
+  document.documentElement.style.setProperty("--sub-bottom-margin", `${bottomPx}px`);
+  document.documentElement.style.setProperty("--sub-font-weight", weight);
   document.documentElement.style.setProperty("--sub-color", SUB_COLORS[subState.color] || "#ffffff");
   document.documentElement.style.setProperty("--sub-bg", SUB_BGS[subState.bg] || "rgba(10, 13, 20, 0.78)");
-  document.documentElement.style.setProperty("--sub-shadow", SUB_SHADOWS[subState.bg] || "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)");
 
-  document.querySelectorAll(".sub-size-opt").forEach((btn) => {
-    btn.classList.toggle("active", btn.getAttribute("data-size") === subState.size);
+  let shadow = SUB_SHADOWS[subState.bg] || "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)";
+  if (stroke === "thick") {
+    shadow = "0 0 3px #000, 0 0 6px #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000";
+  }
+  document.documentElement.style.setProperty("--sub-shadow", shadow);
+
+  const sizeSlider = $("sub-size-slider");
+  const sizeVal = $("sub-size-val");
+  if (sizeSlider) sizeSlider.value = fontPx;
+  if (sizeVal) sizeVal.textContent = `${fontPx}px`;
+
+  const btmSlider = $("sub-bottom-slider");
+  const btmVal = $("sub-bottom-val");
+  if (btmSlider) btmSlider.value = bottomPx;
+  if (btmVal) btmVal.textContent = `${bottomPx}px`;
+
+  document.querySelectorAll(".sub-weight-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-weight") === String(weight));
+  });
+  document.querySelectorAll(".sub-stroke-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-stroke") === stroke);
   });
   document.querySelectorAll(".sub-color-opt").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-color") === subState.color);
@@ -8029,6 +8261,46 @@ const subDelayPlus = $("sub-delay-plus");
 if (subDelayPlus) subDelayPlus.onclick = () => adjustSubOffset(0.5);
 const subDelayReset = $("sub-delay-reset");
 if (subDelayReset) subDelayReset.onclick = () => resetSubOffset();
+
+const subSizeSlider = $("sub-size-slider");
+if (subSizeSlider) {
+  subSizeSlider.oninput = (e) => {
+    const val = parseInt(e.target.value, 10);
+    subState.fontSizePx = val;
+    localStorage.setItem("ani_sub_size_px", String(val));
+    applySubtitleStyles();
+  };
+}
+
+const subBottomSlider = $("sub-bottom-slider");
+if (subBottomSlider) {
+  subBottomSlider.oninput = (e) => {
+    const val = parseInt(e.target.value, 10);
+    subState.bottomMarginPx = val;
+    localStorage.setItem("ani_sub_bottom_px", String(val));
+    applySubtitleStyles();
+  };
+}
+
+document.querySelectorAll(".sub-weight-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const w = btn.getAttribute("data-weight") || "600";
+    subState.fontWeight = w;
+    localStorage.setItem("ani_sub_weight", w);
+    applySubtitleStyles();
+    showPlayerOsd(`字幕粗细: ${w === "800" ? "特粗" : "常规"}`);
+  };
+});
+
+document.querySelectorAll(".sub-stroke-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const s = btn.getAttribute("data-stroke") || "normal";
+    subState.strokeType = s;
+    localStorage.setItem("ani_sub_stroke", s);
+    applySubtitleStyles();
+    showPlayerOsd(`字幕描边: ${s === "thick" ? "加厚黑边" : "标准"}`);
+  };
+});
 
 document.querySelectorAll(".sub-size-opt").forEach((btn) => {
   btn.onclick = () => setSubSize(btn.getAttribute("data-size"));
@@ -8838,6 +9110,9 @@ function initDanmakuSender() {
 
     DanmakuOverlay.addEvent(evt);
     saveUserDanmaku(evt);
+    if (typeof syncplayState !== "undefined" && syncplayState.channel) {
+      sendSyncplayChat(text);
+    }
     if (typeof danmakuTimeline !== "undefined" && danmakuTimeline) {
       danmakuTimeline.push(evt);
       if (v && v.duration > 0) {
