@@ -326,7 +326,7 @@ function renderCollectionsList() {
         const wantType = Number(status.replace("type_", ""));
         const itemType = Number(item.collection_type || 3);
         if (itemType !== wantType) return false;
-      } else if (status === "pending") {
+      } else if (status === "has_unwatched" || status === "pending") {
         const update = state.collectionUpdates?.[subjectId];
         if (!update || !update.has_unwatched) return false;
       } else if (status === "caught_up") {
@@ -470,6 +470,19 @@ async function loadCollections() {
     sec.classList.remove("hidden");
     renderCollectionsList();
     updateTodayBroadcastBanner();
+
+    if (!state.collectionUpdates && !state._fetchingUpdates) {
+      state._fetchingUpdates = true;
+      invoke("check_collection_updates")
+        .then((updates) => {
+          state.collectionUpdates = updates || {};
+          state._fetchingUpdates = false;
+          renderCollectionsList();
+        })
+        .catch(() => {
+          state._fetchingUpdates = false;
+        });
+    }
   } catch {
     sec.classList.add("hidden");
     updateTodayBroadcastBanner();
@@ -675,9 +688,10 @@ function subjectCard(s, isTodayAiring = false) {
   let updateBadge = "";
   if (updateInfo) {
     if (updateInfo.has_unwatched) {
-      updateBadge = `<div class="card-update-badge unwatched" title="更新至第 ${updateInfo.latest_ep} 集，尚有未看剧集">待看 · 第 ${updateInfo.latest_ep} 集</div>`;
+      const unwatchedCount = updateInfo.total_episodes > updateInfo.watched_count ? (updateInfo.total_episodes - updateInfo.watched_count) : 1;
+      updateBadge = `<div class="card-update-badge unwatched pulse-glow" title="已更新至第 ${updateInfo.latest_ep} 话 · 尚有 ${unwatchedCount} 话待看"><span class="badge-pulse-dot"></span>NEW 第 ${updateInfo.latest_ep} 话 · 待看 ${unwatchedCount} 话</div>`;
     } else {
-      updateBadge = `<div class="card-update-badge caught-up" title="已全部观看完成">已追平 · 共 ${updateInfo.latest_ep} 集 ✓</div>`;
+      updateBadge = `<div class="card-update-badge caught-up" title="已全部观看完成">已追平 · 共 ${updateInfo.latest_ep} 话 ✓</div>`;
     }
   }
   let scoreBadge = "";
@@ -5149,6 +5163,9 @@ async function openStatsModal() {
     // 绘制近 7 天活跃趋势图
     renderStatsActivitySvg(stats.last_7_days_activity || []);
 
+    // 绘制近 90 天追番打卡贡献热力图与连击统计
+    renderStatsHeatmap(stats.activity_heatmap || []);
+
     // Top 5 榜单
     const topList = $("stats-top-list");
     if (topList) {
@@ -5245,6 +5262,130 @@ function renderStatsActivitySvg(activityList) {
   });
 
   svg.innerHTML = elements;
+}
+
+function renderStatsHeatmap(heatmapList) {
+  const grid = $("stats-heatmap-grid");
+  const tooltip = $("heatmap-tooltip");
+  if (!grid) return;
+  grid.innerHTML = "";
+
+  const actMap = new Map();
+  for (const item of (heatmapList || [])) {
+    if (item && item.date) {
+      actMap.set(item.date, {
+        seconds: Number(item.watch_seconds) || 0,
+        count: Number(item.episode_count) || 0,
+      });
+    }
+  }
+
+  const now = new Date();
+  const endDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOffset = 6 - endDay.getDay(); // 0(Sun)..6(Sat)
+  endDay.setDate(endDay.getDate() + endOffset);
+
+  // 13 周前 (13 * 7 = 91 天)
+  const startDay = new Date(endDay);
+  startDay.setDate(startDay.getDate() - (13 * 7 - 1));
+
+  let totalActiveDays = 0;
+  let maxStreak = 0;
+  let tempStreak = 0;
+
+  const dayCells = [];
+  const cur = new Date(startDay);
+
+  while (cur <= endDay) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, "0");
+    const d = String(cur.getDate()).padStart(2, "0");
+    const dateStr = `${y}-${m}-${d}`;
+    const isFuture = cur > now;
+
+    const info = actMap.get(dateStr);
+    const secs = (!isFuture && info) ? info.seconds : 0;
+    const eps = (!isFuture && info) ? info.count : 0;
+    const mins = Math.round(secs / 60);
+
+    if (!isFuture) {
+      if (mins > 0) {
+        totalActiveDays++;
+        tempStreak++;
+        if (tempStreak > maxStreak) maxStreak = tempStreak;
+      } else {
+        tempStreak = 0;
+      }
+    }
+
+    let level = 0;
+    if (mins >= 120) level = 4;
+    else if (mins >= 60) level = 3;
+    else if (mins >= 30) level = 2;
+    else if (mins > 0) level = 1;
+
+    dayCells.push({
+      dateStr,
+      mins,
+      eps,
+      level,
+      isFuture,
+    });
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  // 计算当前连续打卡天数 (Current Streak)
+  let currentStreak = 0;
+  const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const checkTodayStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+  const todayWatched = (actMap.get(checkTodayStr)?.seconds || 0) >= 60;
+
+  if (!todayWatched) {
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+
+  while (true) {
+    const ds = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+    const data = actMap.get(ds);
+    if (data && data.seconds >= 60) {
+      currentStreak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  // 渲染连击与打卡统计徽章
+  if ($("streak-current-badge")) $("streak-current-badge").innerHTML = `🔥 当前连击: <b>${currentStreak}</b> 天`;
+  if ($("streak-max-badge")) $("streak-max-badge").innerHTML = `🏆 最长连击: <b>${maxStreak}</b> 天`;
+  if ($("streak-total-badge")) $("streak-total-badge").innerHTML = `📅 打卡天数: <b>${totalActiveDays}</b> 天`;
+
+  // 渲染 91 个格子
+  dayCells.forEach((c) => {
+    const cell = document.createElement("div");
+    cell.className = `heatmap-cell level-${c.level}${c.isFuture ? " is-future" : ""}`;
+    cell.setAttribute("data-date", c.dateStr);
+
+    if (!c.isFuture && tooltip) {
+      cell.onmouseenter = () => {
+        const text = c.mins > 0
+          ? `<b>${c.dateStr}</b><br/>观影时长: <b>${c.mins}</b> 分钟 (${(c.mins / 60).toFixed(1)}h)<br/>观看剧集: <b>${c.eps}</b> 话`
+          : `<b>${c.dateStr}</b><br/>无观影打卡记录`;
+        tooltip.innerHTML = text;
+        tooltip.classList.remove("hidden");
+        const rect = cell.getBoundingClientRect();
+        tooltip.style.left = `${rect.left + rect.width / 2}px`;
+        tooltip.style.top = `${rect.top - 8}px`;
+        tooltip.style.transform = "translate(-50%, -100%)";
+      };
+      cell.onmouseleave = () => {
+        tooltip.classList.add("hidden");
+      };
+    }
+
+    grid.appendChild(cell);
+  });
 }
 
 const statsHeaderBtn = $("stats-btn");
@@ -6029,14 +6170,66 @@ function cycleAspectRatio() {
   applyVisualEffects(true);
 }
 
-function skipOp(seconds = 90) {
+function getSubjectCustomOpSkip(subjectId) {
+  if (!subjectId) return null;
+  const val = localStorage.getItem(`ani_op_skip_${subjectId}`);
+  if (val !== null && !isNaN(Number(val))) {
+    return Number(val);
+  }
+  return null;
+}
+
+function setSubjectCustomOpSkip(subjectId, seconds) {
+  if (!subjectId) return;
+  localStorage.setItem(`ani_op_skip_${subjectId}`, String(seconds));
+}
+
+function clearSubjectCustomOpSkip(subjectId) {
+  if (!subjectId) return;
+  localStorage.removeItem(`ani_op_skip_${subjectId}`);
+}
+
+function updateCustomOpSkipUI() {
+  const hint = $("custom-op-hint");
+  const clearBtn = $("btn-clear-custom-op");
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  if (!hint) return;
+
+  const custom = getSubjectCustomOpSkip(subjectId);
+  if (custom !== null) {
+    hint.textContent = `${fmtTime(custom)} (${Math.round(custom)}s)`;
+    hint.classList.add("has-value");
+    if (clearBtn) clearBtn.classList.remove("hidden");
+  } else {
+    hint.textContent = "未设置";
+    hint.classList.remove("has-value");
+    if (clearBtn) clearBtn.classList.add("hidden");
+  }
+}
+
+function skipOp(seconds = null) {
   const v = $("video");
   if (!v) return;
   const dur = v.duration && isFinite(v.duration) ? v.duration : Infinity;
-  const target = Math.min(dur, v.currentTime + seconds);
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  const customPoint = getSubjectCustomOpSkip(subjectId);
+
+  let target = 0;
+  let msg = "";
+
+  if (seconds === null && customPoint !== null && v.currentTime < customPoint) {
+    // 优先跳转至本番剧专属片头跳过点
+    target = Math.min(dur, customPoint);
+    msg = `⏭ 已跳至专属片头点 (${fmtTime(target)})`;
+  } else {
+    const skipSec = (seconds !== null && !isNaN(seconds)) ? seconds : (customPoint !== null && v.currentTime < customPoint ? customPoint - v.currentTime : getOpSkipSeconds());
+    target = Math.min(dur, v.currentTime + skipSec);
+    msg = `⏭ 已跳过片头 (+${Math.round(skipSec)}s) · ${fmtTime(target)}`;
+  }
+
   v.currentTime = target;
-  showPlayerOsd(`⏭ 已跳过片头 (+${seconds}s) · ${fmtTime(target)}`);
-  toast(`已跳过片头 ${seconds} 秒`, true);
+  showPlayerOsd(msg);
+  toast(msg, true);
   const capsule = $("player-skip-capsule");
   if (capsule) capsule.classList.add("hidden");
 }
@@ -6435,6 +6628,7 @@ function showPlayer(url, title, extra = {}) {
   currentLocalPath = extra?.localPath || null;
   if (extra?.localPath) btFallbackPath = extra.localPath;
   updateLoopBtn();
+  updateCustomOpSkipUI();
   $("player-title").textContent = title || "在线播放";
   showView("player");
   updatePlayerNextBtn();
@@ -6830,7 +7024,7 @@ $("video").addEventListener("timeupdate", () => {
   // 自动跳过片头（连播时仅在开播 0.5s~5s 自动触发一次）
   if (visualState.autoSkipOp && !opAutoSkipped && v.currentTime >= 0.5 && v.currentTime < 5) {
     opAutoSkipped = true;
-    skipOp(getOpSkipSeconds());
+    skipOp();
   }
 
   // 自动跳过片尾（若开启，在离结尾还有 autoSkipEd 秒时自动跳过并连播）
@@ -8504,6 +8698,9 @@ if (visualBtn && visualMenu) {
   visualBtn.onclick = (e) => {
     e.stopPropagation();
     visualMenu.classList.toggle("hidden");
+    if (!visualMenu.classList.contains("hidden")) {
+      updateCustomOpSkipUI();
+    }
     applyVisualEffects();
   };
   document.addEventListener("click", (e) => {
@@ -8631,7 +8828,7 @@ function getEdSkipSeconds() {
 const btnSkipOp = $("btn-skip-op");
 if (btnSkipOp) {
   btnSkipOp.textContent = `+${getOpSkipSeconds()}s 跳过`;
-  btnSkipOp.onclick = () => skipOp(getOpSkipSeconds());
+  btnSkipOp.onclick = () => skipOp();
 }
 
 document.querySelectorAll(".visual-op-len-opt").forEach((btn) => {
@@ -8645,6 +8842,45 @@ document.querySelectorAll(".visual-op-len-opt").forEach((btn) => {
     showPlayerOsd(`片头跳过时长已设为 ${len} 秒`);
   };
 });
+
+// 番剧专属片头跳过点按钮绑定
+const btnSetCustomOp = $("btn-set-custom-op");
+if (btnSetCustomOp) {
+  btnSetCustomOp.onclick = () => {
+    const v = $("video");
+    const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+    if (!v) {
+      toast("播放器未就绪");
+      return;
+    }
+    if (!subjectId) {
+      toast("未获取到当前番剧信息");
+      return;
+    }
+    const curTime = Math.round(v.currentTime);
+    if (curTime < 5) {
+      toast("当前时间过短，请播放或拖拽至片头结束点再标记 📌");
+      return;
+    }
+    setSubjectCustomOpSkip(subjectId, curTime);
+    updateCustomOpSkipUI();
+    const sTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "当前番剧";
+    showPlayerOsd(`📌 已将 ${fmtTime(curTime)} 设为《${sTitle}》专属片头跳过点`);
+    toast(`已保存《${sTitle}》专属片头跳过点: ${fmtTime(curTime)}`, true);
+  };
+}
+
+const btnClearCustomOp = $("btn-clear-custom-op");
+if (btnClearCustomOp) {
+  btnClearCustomOp.onclick = () => {
+    const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+    if (!subjectId) return;
+    clearSubjectCustomOpSkip(subjectId);
+    updateCustomOpSkipUI();
+    showPlayerOsd("已清除专属片头跳过点");
+    toast("已清除专属片头跳过点，恢复全局默认时长", true);
+  };
+}
 
 document.querySelectorAll(".visual-ed-len-opt").forEach((btn) => {
   const len = parseInt(btn.getAttribute("data-len"), 10);
@@ -8689,7 +8925,7 @@ if (btnAbClear) btnAbClear.onclick = () => clearAbLoop();
 
 const skipCapsule = $("player-skip-capsule");
 if (skipCapsule) {
-  skipCapsule.onclick = () => skipOp(getOpSkipSeconds());
+  skipCapsule.onclick = () => skipOp();
 }
 
 const screenshotBtn = $("player-screenshot-btn");
@@ -8889,7 +9125,7 @@ document.addEventListener("keydown", (e) => {
       break;
     }
     case "w": case "W": cycleAspectRatio(); break;
-    case "s": case "S": skipOp(90); break;
+    case "s": case "S": skipOp(); break;
     case "c": case "C": captureVideoFrame(); break;
     case "p": case "P": togglePiP(); break;
     case "d": case "D": {

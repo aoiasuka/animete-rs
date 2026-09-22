@@ -144,6 +144,7 @@
               <input type="text" id="collection-filter-input" class="collection-filter-input" placeholder="筛选追番…" />
               <div class="collection-status-tabs" id="collection-status-tabs">
                 <button class="ghost small col-tab active" data-status="all">全部</button>
+                <button class="ghost small col-tab" data-status="has_unwatched" title="有已更新但尚未观看新集的追番条目">🔥 有更新待看</button>
                 <button class="ghost small col-tab" data-status="today_air" title="今日正有新集放送的追番条目">今日更新 🔥</button>
                 <button class="ghost small col-tab" data-status="type_3">在看 📺</button>
                 <button class="ghost small col-tab" data-status="type_1">想看 💡</button>
@@ -1042,6 +1043,14 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">专属片头点</span>
+              <div class="visual-btn-group" style="flex: 1; justify-content: flex-end; align-items: center; gap: 6px;">
+                <span id="custom-op-hint" class="custom-op-hint" title="当前番剧专属跳过点">未设置</span>
+                <button id="btn-set-custom-op" class="ghost small visual-action-btn" title="将当前播放器进度记录为此番剧的片头跳过点">📌 设为跳过点</button>
+                <button id="btn-clear-custom-op" class="ghost small visual-action-btn hidden" title="清除专属片头跳过点">✕</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">跳过片尾</span>
               <div class="visual-btn-group">
                 <button id="btn-auto-skip-ed" class="ghost small visual-action-btn" title="剧集结尾自动跳过片尾 ED 并连播下一集">跳过片尾: 关</button>
@@ -1577,11 +1586,41 @@
         </div>
 
         <div class="stats-section">
+          <div class="stats-section-head">
+            <div class="stats-section-title">近 90 天追番打卡贡献热力图 🟩</div>
+            <div class="heatmap-streak-stats" id="heatmap-streak-stats">
+              <span class="streak-badge streak-cur" id="streak-current-badge">🔥 当前连击: <b>0</b> 天</span>
+              <span class="streak-badge streak-max" id="streak-max-badge">🏆 最长连击: <b>0</b> 天</span>
+              <span class="streak-badge streak-tot" id="streak-total-badge">📅 打卡天数: <b>0</b> 天</span>
+            </div>
+          </div>
+          <div id="stats-heatmap-wrap" class="stats-heatmap-wrap">
+            <div class="stats-heatmap-container">
+              <div class="heatmap-day-labels">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+              </div>
+              <div id="stats-heatmap-grid" class="stats-heatmap-grid"></div>
+            </div>
+            <div class="heatmap-legend">
+              <span class="legend-label">少</span>
+              <span class="heatmap-cell level-0" title="0 分钟"></span>
+              <span class="heatmap-cell level-1" title="1-29 分钟"></span>
+              <span class="heatmap-cell level-2" title="30-59 分钟"></span>
+              <span class="heatmap-cell level-3" title="60-119 分钟"></span>
+              <span class="heatmap-cell level-4" title="≥120 分钟"></span>
+              <span class="legend-label">多</span>
+            </div>
+          </div>
+          <div id="heatmap-tooltip" class="heatmap-tooltip hidden"></div>
+        </div>
+
+        <div class="stats-section">
           <div class="stats-section-title">观看时长 Top 5 番剧榜单</div>
           <div id="stats-top-list" class="stats-top-list"><div class="meta">暂无数据</div></div>
         </div>
       </div>
     </div>
+  </div>
   <!-- 弹幕屏蔽词与规则过滤器模态框 -->
   <div id="dm-filter-modal" class="modal-backdrop hidden">
     <div class="modal-card dm-filter-modal-card">

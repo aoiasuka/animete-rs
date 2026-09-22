@@ -1075,6 +1075,40 @@ main {
   box-shadow: 0 2px 10px rgba(239, 68, 68, 0.45);
 }
 
+.card-update-badge.unwatched.pulse-glow {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
+  box-shadow: 0 2px 12px rgba(139, 92, 246, 0.55);
+  animation: badge-pulse 2.4s infinite ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@keyframes badge-pulse {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 2px 14px rgba(236, 72, 153, 0.7);
+    transform: scale(1.02);
+  }
+}
+
+.badge-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffffff;
+  display: inline-block;
+  animation: dot-blink 1.4s infinite alternate;
+}
+
+@keyframes dot-blink {
+  from { opacity: 0.35; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.15); }
+}
+
 .card-update-badge.caught-up {
   background: rgba(16, 185, 129, 0.88) !important;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
@@ -5094,6 +5128,196 @@ body.window-drag-over::after {
   padding: 2px 8px;
   background: rgba(139, 92, 246, 0.12);
   border-radius: var(--radius-pill);
+}
+
+/* ---------- 90 天追番贡献热力图与连击打卡 ---------- */
+.stats-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.heatmap-streak-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.streak-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2.5px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.streak-badge b {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.streak-badge.streak-cur {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+.streak-badge.streak-cur b {
+  color: #fbbf24;
+}
+
+.streak-badge.streak-max {
+  border-color: rgba(168, 85, 247, 0.35);
+  background: rgba(168, 85, 247, 0.08);
+}
+.streak-badge.streak-max b {
+  color: #c084fc;
+}
+
+.streak-badge.streak-tot {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+.streak-badge.streak-tot b {
+  color: #4ade80;
+}
+
+.stats-heatmap-wrap {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+.stats-heatmap-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.heatmap-day-labels {
+  display: grid;
+  grid-template-rows: repeat(7, 13px);
+  gap: 4px;
+  align-items: center;
+  font-size: 9.5px;
+  color: var(--text-dim);
+  text-align: right;
+  width: 14px;
+  user-select: none;
+}
+
+.stats-heatmap-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 13px);
+  grid-auto-columns: 13px;
+  gap: 4px;
+}
+
+.heatmap-cell {
+  width: 13px;
+  height: 13px;
+  border-radius: 2.5px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.3);
+  filter: brightness(1.25);
+  z-index: 2;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+.heatmap-cell.is-future {
+  opacity: 0.15;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* 观影时长颜色梯级 (0m, 1-29m, 30-59m, 60-119m, >=120m) */
+.heatmap-cell.level-0 {
+  background: rgba(255, 255, 255, 0.05);
+}
+.heatmap-cell.level-1 {
+  background: #0e5a36;
+}
+.heatmap-cell.level-2 {
+  background: #006d32;
+}
+.heatmap-cell.level-3 {
+  background: #26a641;
+}
+.heatmap-cell.level-4 {
+  background: #39d353;
+  box-shadow: 0 0 5px rgba(57, 211, 83, 0.5);
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.heatmap-legend .legend-label {
+  font-size: 10px;
+  margin: 0 2px;
+  color: var(--text-dim);
+}
+
+.heatmap-tooltip {
+  position: fixed;
+  pointer-events: none;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-main);
+  z-index: 10005;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+
+/* 播放器专属片头跳过点提示与样式 */
+.custom-op-hint {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+}
+
+.custom-op-hint.has-value {
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.35);
+  font-weight: 600;
 }
 
 /* ---------- 制作人员 STAFF 展台 ---------- */

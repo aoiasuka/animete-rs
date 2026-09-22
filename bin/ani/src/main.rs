@@ -115,6 +115,7 @@ fn main() {
             commands::get_bangumi_subject_collection,
             commands::set_bangumi_subject_collection,
             commands::get_playback_statistics,
+            commands::check_collection_updates,
             commands::create_syncplay_room,
             commands::stop_syncplay_room,
             commands::get_syncplay_room_info,

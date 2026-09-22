@@ -432,12 +432,37 @@ impl PlaybackRepo {
             )
             .collect();
 
+        // 最近 90 天每日观影活跃热力数据 (毫秒)
+        let ninety_days_ago_ms = chrono::Utc::now().timestamp_millis() - 90 * 86400 * 1000;
+        let heatmap_rows = sqlx::query_as::<_, (String, Option<f64>, i64)>(
+            "SELECT strftime('%Y-%m-%d', updated_at / 1000, 'unixepoch', 'localtime') as day,
+                    SUM(position_seconds),
+                    COUNT(*)
+             FROM playback_history
+             WHERE updated_at >= ?1
+             GROUP BY day
+             ORDER BY day ASC",
+        )
+        .bind(ninety_days_ago_ms)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let activity_heatmap = heatmap_rows
+            .into_iter()
+            .map(|(date, secs, count)| DailyActivity {
+                date,
+                watch_seconds: secs.unwrap_or(0.0),
+                episode_count: count,
+            })
+            .collect();
+
         Ok(PlaybackStatistics {
             total_watch_seconds,
             total_episodes_finished,
             total_subjects_collected,
             collection_type_counts,
             last_7_days_activity,
+            activity_heatmap,
             top_subjects,
         })
     }
@@ -468,6 +493,8 @@ pub struct PlaybackStatistics {
     pub total_subjects_collected: i64,
     pub collection_type_counts: std::collections::HashMap<u8, i64>,
     pub last_7_days_activity: Vec<DailyActivity>,
+    #[serde(default)]
+    pub activity_heatmap: Vec<DailyActivity>,
     pub top_subjects: Vec<TopWatchedSubject>,
 }
 
@@ -1426,5 +1453,6 @@ mod tests {
         assert_eq!(stats.top_subjects[0].subject_name, "鬼灭之刃");
         assert_eq!(stats.top_subjects[0].total_seconds, 2000.0);
         assert!(!stats.last_7_days_activity.is_empty());
+        assert!(!stats.activity_heatmap.is_empty());
     }
 }
