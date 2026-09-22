@@ -6693,6 +6693,334 @@ body.window-drag-over::after {
   justify-content: flex-end;
 }
 
+/* 详情页「🎨 分享卡片」按钮 */
+.share-card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: rgba(236, 72, 153, 0.45) !important;
+  color: #f472b6 !important;
+  background: rgba(236, 72, 153, 0.1) !important;
+  transition: all 0.2s ease;
+}
+
+.share-card-btn:hover {
+  background: rgba(236, 72, 153, 0.2) !important;
+  border-color: #ec4899 !important;
+  box-shadow: 0 0 14px rgba(236, 72, 153, 0.35) !important;
+  transform: translateY(-1px);
+}
+
+/* 追番打卡海报生成台 Modal */
+.share-card-modal-card {
+  width: 860px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(18, 22, 34, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+}
+
+.share-card-modal-body {
+  display: flex;
+  gap: 24px;
+  padding: 18px 24px;
+  overflow-y: auto;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .share-card-modal-body {
+    flex-direction: column;
+  }
+}
+
+.share-card-preview-area {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+.share-card-canvas {
+  width: 330px;
+  height: auto;
+  max-height: 66vh;
+  border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+  display: block;
+}
+
+.share-card-control-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.share-card-opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.share-card-opt-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.share-card-theme-group {
+  display: flex;
+  gap: 6px;
+}
+
+.share-theme-btn.active {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.share-card-info-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+}
+
+.share-card-info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.share-info-icon {
+  font-size: 15px;
+}
+
+.share-card-tips {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.share-card-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* 本地动漫媒体库：番剧归类视图与检索 */
+.local-view-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.local-view-tab {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.local-view-tab.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.local-media-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.local-media-search-input {
+  flex: 1;
+  padding: 7px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  color: #f1f5f9;
+  font-size: 13px;
+  outline: none;
+}
+
+.local-media-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+}
+
+.local-series-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.local-series-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.local-series-card:hover {
+  border-color: rgba(139, 92, 246, 0.35);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.local-series-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.local-series-title-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.local-series-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.7), rgba(56, 189, 248, 0.7));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.local-series-title-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.local-series-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.local-series-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin-top: 3px;
+}
+
+.local-series-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(139, 92, 246, 0.15);
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.local-series-badge.done {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.local-series-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.local-series-ep-grid {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.local-series-ep-grid.hidden {
+  display: none;
+}
+
+.local-ep-chip {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.local-ep-chip:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.local-ep-chip.watched {
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+/* 双字幕与重复弹幕菜单组件 */
+.sub-dual-config-rows.hidden {
+  display: none;
+}
+
+.danmaku-menu-row .dm-action-btn.active {
+  background: rgba(139, 92, 246, 0.25) !important;
+  border-color: var(--accent) !important;
+  color: #e2e8f0 !important;
+}
+
+
 
 
 

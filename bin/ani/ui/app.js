@@ -1829,6 +1829,9 @@ async function loadFullSubjectDetail(subjectId, seq) {
 
   const renderDetail = (detail) => {
     if (!detail) return;
+    if (state.subject) {
+      Object.assign(state.subject, detail);
+    }
     // 徽标栏：黄金评分、排名、媒介、总集数
     if (badgesEl) {
       const parts = [];
@@ -4304,6 +4307,8 @@ const DanmakuOverlay = (() => {
   let hideTop = localStorage.getItem("ani_dm_hide_top") === "true";
   let hideBottom = localStorage.getItem("ani_dm_hide_bottom") === "true";
   let hideColor = localStorage.getItem("ani_dm_hide_color") === "true";
+  let mergeDuplicate = localStorage.getItem("ani_dm_merge_dup") !== "false";
+  let cachedRawEvents = [];
   let sessionBlockedCount = 0;
 
   function shouldFilter(e) {
@@ -4389,7 +4394,7 @@ const DanmakuOverlay = (() => {
       ? takeLane(scrollLanes, now, scrollMs / 1000)
       : takeLane(staticLanes, now, staticMs / 1000);
     if (lane === -1) return; // 轨道满则丢弃（高峰期自动限流）
-    items.push({ text: e.text, color, mode: e.mode, lane, born: now });
+    items.push({ text: e.text, color, mode: e.mode, lane, born: now, count: e.count || 1 });
   }
 
   function frame() {
@@ -4415,7 +4420,18 @@ const DanmakuOverlay = (() => {
     const next = [];
     for (const it of items) {
       const age = (now - it.born) * 1000;
-      const w = ctx.measureText(it.text).width;
+      const hasCount = it.count && it.count > 1;
+      const badgeFontPx = Math.max(12, Math.round(fontPx * 0.72));
+      let badgeW = 0;
+      let badgeText = "";
+      if (hasCount) {
+        badgeText = `x${it.count}`;
+        ctx.font = `bold ${badgeFontPx}px "Segoe UI", sans-serif`;
+        badgeW = ctx.measureText(badgeText).width + 12;
+      }
+      ctx.font = `600 ${fontPx}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+      const tw = ctx.measureText(it.text).width;
+      const w = tw + (hasCount ? badgeW + 6 : 0);
       let alpha = 1, x = 0, y = 0;
       if (it.mode === "scroll") {
         x = W - (age / scrollMs) * (W + w);
@@ -4431,6 +4447,43 @@ const DanmakuOverlay = (() => {
       ctx.strokeText(it.text, x, y);
       ctx.fillStyle = "#" + (it.color || 0xffffff).toString(16).padStart(6, "0");
       ctx.fillText(it.text, x, y);
+
+      // 若有高能倍数，绘制霓虹徽章胶囊
+      if (hasCount) {
+        const bx = x + tw + 6;
+        const by = y + (fontPx - badgeFontPx) / 2 - 1;
+        const bh = badgeFontPx + 4;
+        const r = 4;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by);
+        ctx.lineTo(bx + badgeW - r, by);
+        ctx.arcTo(bx + badgeW, by, bx + badgeW, by + bh, r);
+        ctx.lineTo(bx + badgeW, by + bh - r);
+        ctx.arcTo(bx + badgeW, by + bh, bx, by + bh, r);
+        ctx.lineTo(bx + r, by + bh);
+        ctx.arcTo(bx, by + bh, bx, by, r);
+        ctx.lineTo(bx, by + r);
+        ctx.arcTo(bx, by, bx + badgeW, by, r);
+        ctx.closePath();
+
+        if (it.count < 5) {
+          ctx.fillStyle = "rgba(6, 182, 212, 0.9)"; // 青翠
+        } else if (it.count < 10) {
+          ctx.fillStyle = "rgba(245, 158, 11, 0.95)"; // 琥珀金
+        } else {
+          ctx.fillStyle = "rgba(236, 72, 153, 0.95)"; // 洋红焰火
+        }
+        ctx.fill();
+
+        ctx.font = `bold ${badgeFontPx}px "Segoe UI", sans-serif`;
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.fillText(badgeText, bx + badgeW / 2, by + bh / 2);
+        ctx.restore();
+      }
+
       next.push(it);
     }
     ctx.restore();
@@ -4447,8 +4500,9 @@ const DanmakuOverlay = (() => {
   return {
     /** 载入弹幕（升序数组），并按当前开关决定是否显示 */
     load(rawEvents) {
+      cachedRawEvents = rawEvents || [];
       // 外部传进来的原始弹幕数组，标准化后按 time_ms 升序排好
-      events = (rawEvents || [])
+      let normalized = (rawEvents || [])
         .map((e) => ({
           time_ms: Math.round(e.time_ms || 0),
           text: String(e.text || "").trim(),
@@ -4457,6 +4511,33 @@ const DanmakuOverlay = (() => {
         }))
         .filter((e) => e.text.length > 0 && e.time_ms >= 0)
         .sort((a, b) => a.time_ms - b.time_ms);
+
+      if (mergeDuplicate) {
+        // 合并 ±3500ms 内相同内容的重复弹幕
+        const merged = [];
+        const simplify = (str) => str.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+        for (let i = 0; i < normalized.length; i++) {
+          const item = normalized[i];
+          const simp = simplify(item.text);
+          let found = null;
+          for (let j = merged.length - 1; j >= 0; j--) {
+            if (item.time_ms - merged[j].time_ms > 3500) break;
+            if (merged[j].mode === item.mode && simplify(merged[j].text) === simp) {
+              found = merged[j];
+              break;
+            }
+          }
+          if (found) {
+            found.count = (found.count || 1) + 1;
+          } else {
+            item.count = 1;
+            merged.push(item);
+          }
+        }
+        events = merged;
+      } else {
+        events = normalized;
+      }
       cursor = 0;
       items = [];
       lastT = vid() ? vid().currentTime : 0;
@@ -4590,6 +4671,16 @@ const DanmakuOverlay = (() => {
     /** 获取当前所有弹幕事件 */
     getEvents() {
       return events;
+    },
+    isMergeDuplicate() {
+      return mergeDuplicate;
+    },
+    setMergeDuplicate(val) {
+      mergeDuplicate = !!val;
+      localStorage.setItem("ani_dm_merge_dup", String(mergeDuplicate));
+      if (cachedRawEvents && cachedRawEvents.length) {
+        this.load(cachedRawEvents);
+      }
     },
     enabled: false,
     resize,
@@ -5506,6 +5597,7 @@ const visualState = {
   brightness: parseInt(localStorage.getItem("ani_visual_brightness") || "100", 10),
   contrast: parseInt(localStorage.getItem("ani_visual_contrast") || "100", 10),
   saturation: parseInt(localStorage.getItem("ani_visual_saturation") || "100", 10),
+  sharpness: parseInt(localStorage.getItem("ani_visual_sharpness") || "0", 10),
   autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
   autoSkipEd: parseInt(localStorage.getItem("ani_auto_skip_ed") || "0", 10),
   abLoop: { a: null, b: null, active: false },
@@ -5608,6 +5700,10 @@ function applyVisualEffects(notify = false) {
   if (visualState.saturation !== 100) {
     adjustments.push(`saturate(${(visualState.saturation / 100).toFixed(2)})`);
   }
+  if (visualState.sharpness > 0) {
+    const sharpFactor = visualState.sharpness / 100;
+    adjustments.push(`contrast(${(1 + sharpFactor * 0.12).toFixed(2)})`);
+  }
   const combinedFilter = [baseFilter, ...adjustments].filter(Boolean).join(" ") || "none";
   v.style.setProperty("--video-filter", combinedFilter);
 
@@ -5632,6 +5728,13 @@ function applyVisualEffects(notify = false) {
   }
   const satVal = $("visual-sat-val");
   if (satVal) satVal.textContent = `${visualState.saturation}%`;
+
+  const sharpSlider = $("visual-sharp-slider");
+  if (sharpSlider && document.activeElement !== sharpSlider) {
+    sharpSlider.value = visualState.sharpness;
+  }
+  const sharpVal = $("visual-sharp-val");
+  if (sharpVal) sharpVal.textContent = `${visualState.sharpness}%`;
 
   // 同步 UI 状态
   document.querySelectorAll(".visual-aspect-opt").forEach((btn) => {
@@ -6758,6 +6861,13 @@ function syncDanmakuMenuUI() {
 
   const badge = $("dm-blocklist-count-badge");
   if (badge) badge.textContent = DanmakuOverlay.getBlockedKeywords().length;
+
+  const mergeBtn = $("dm-merge-dup-toggle");
+  if (mergeBtn) {
+    const isMerged = DanmakuOverlay.isMergeDuplicate();
+    mergeBtn.classList.toggle("active", isMerged);
+    mergeBtn.textContent = `合并重复弹幕: ${isMerged ? "开" : "关"}`;
+  }
 }
 
 function setDanmakuOpacity(op, notify = true) {
@@ -6862,6 +6972,13 @@ $("dm-filter-color")?.addEventListener("click", () => {
   DanmakuOverlay.setFilterToggle("hideColor", !cur);
   syncDanmakuMenuUI();
   showPlayerOsd(!cur ? "已屏蔽彩色弹幕（全部强制白色）" : "已恢复彩色弹幕");
+});
+
+$("dm-merge-dup-toggle")?.addEventListener("click", () => {
+  const next = !DanmakuOverlay.isMergeDuplicate();
+  DanmakuOverlay.setMergeDuplicate(next);
+  syncDanmakuMenuUI();
+  showPlayerOsd(next ? "已开启重复弹幕合并 (x2/x5高能徽章)" : "已关闭重复弹幕合并");
 });
 
 // ---------- 弹幕屏蔽词与高级过滤器模态框交互 ----------
@@ -7325,6 +7442,17 @@ const subState = {
   position: localStorage.getItem("ani_sub_pos") || "bottom",
   trackEl: null,
   blobUrl: null,
+
+  // 双字幕同屏配置
+  dualEnabled: localStorage.getItem("ani_sub_dual_enabled") === "true",
+  dualLoaded: false,
+  dualFilename: "",
+  dualRawVtt: "",
+  dualCues: [],
+  dualOffsetSec: 0.0,
+  dualPosition: localStorage.getItem("ani_sub_dual_pos") || "above", // "above" or "top"
+  dualTrackEl: null,
+  dualBlobUrl: null,
 };
 
 const SUB_COLORS = {
@@ -7477,7 +7605,7 @@ function buildShiftedVtt(cues, offsetSec, position = subState.position) {
     const ms = Math.floor((sec % 1) * 1000);
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
   };
-  const lineSetting = position === "top" ? " line:10%" : " line:90%";
+  const lineSetting = position === "top" ? " line:10%" : (position === "above" ? " line:78%" : " line:90%");
   for (const cue of cues) {
     const s = cue.start + offsetSec;
     const e = cue.end + offsetSec;
@@ -7503,7 +7631,7 @@ function applySubtitleTrack(vttContent) {
   subState.blobUrl = URL.createObjectURL(blob);
   const track = document.createElement("track");
   track.kind = "subtitles";
-  track.label = subState.filename || "外挂字幕";
+  track.label = subState.filename || "外挂主字幕";
   track.srclang = "zh";
   track.src = subState.blobUrl;
   track.default = true;
@@ -7517,13 +7645,43 @@ function applySubtitleTrack(vttContent) {
   }
 }
 
+function applyDualSubtitleTrack(vttContent) {
+  const v = $("video");
+  if (!v) return;
+  if (subState.dualBlobUrl) {
+    URL.revokeObjectURL(subState.dualBlobUrl);
+    subState.dualBlobUrl = null;
+  }
+  if (subState.dualTrackEl) {
+    subState.dualTrackEl.remove();
+    subState.dualTrackEl = null;
+  }
+  const blob = new Blob([vttContent], { type: "text/vtt;charset=utf-8" });
+  subState.dualBlobUrl = URL.createObjectURL(blob);
+  const track = document.createElement("track");
+  track.kind = "subtitles";
+  track.label = subState.dualFilename || "外挂副字幕";
+  track.srclang = "ja";
+  track.src = subState.dualBlobUrl;
+  track.default = true;
+  v.appendChild(track);
+  subState.dualTrackEl = track;
+
+  if (v.textTracks && v.textTracks.length > 0) {
+    for (let i = 0; i < v.textTracks.length; i++) {
+      v.textTracks[i].mode = "showing";
+    }
+  }
+}
+
 function updateSubUI() {
   const btn = $("player-sub-btn");
   const clearBtn = $("sub-clear-btn");
   const valEl = $("sub-delay-val");
   if (btn) {
-    btn.textContent = subState.loaded ? "字幕 开" : "字幕 关";
-    btn.classList.toggle("active", subState.loaded);
+    const isAnyLoaded = subState.loaded || subState.dualLoaded;
+    btn.textContent = isAnyLoaded ? "字幕 开" : "字幕 关";
+    btn.classList.toggle("active", isAnyLoaded);
   }
   if (clearBtn) {
     clearBtn.classList.toggle("hidden", !subState.loaded);
@@ -7532,6 +7690,36 @@ function updateSubUI() {
     const sign = subState.offsetSec > 0 ? "+" : "";
     valEl.textContent = `${sign}${subState.offsetSec.toFixed(1)}s`;
   }
+  updateDualSubUI();
+}
+
+function updateDualSubUI() {
+  const toggleBtn = $("sub-dual-toggle");
+  const loadBtn = $("sub-dual-load-btn");
+  const clearBtn = $("sub-dual-clear-btn");
+  const configRows = $("sub-dual-config-rows");
+  const delayVal = $("sub-dual-delay-val");
+
+  if (toggleBtn) {
+    toggleBtn.textContent = `双字幕: ${subState.dualEnabled ? "开" : "关"}`;
+    toggleBtn.classList.toggle("active", subState.dualEnabled);
+  }
+  if (loadBtn) {
+    loadBtn.classList.toggle("hidden", !subState.dualEnabled);
+  }
+  if (clearBtn) {
+    clearBtn.classList.toggle("hidden", !subState.dualEnabled || !subState.dualLoaded);
+  }
+  if (configRows) {
+    configRows.classList.toggle("hidden", !subState.dualEnabled || !subState.dualLoaded);
+  }
+  if (delayVal) {
+    const sign = subState.dualOffsetSec > 0 ? "+" : "";
+    delayVal.textContent = `${sign}${subState.dualOffsetSec.toFixed(1)}s`;
+  }
+  document.querySelectorAll(".sub-dual-pos-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-pos") === subState.dualPosition);
+  });
 }
 
 function loadSubtitleFromText(rawText, filename) {
@@ -7555,10 +7743,70 @@ function loadSubtitleFromText(rawText, filename) {
   showPlayerOsd("已加载字幕: " + subState.filename);
 }
 
+function loadDualSubtitleFromText(rawText, filename) {
+  let content = rawText;
+  const n = (filename || "").toLowerCase();
+  if (n.endsWith(".srt")) {
+    content = srtToVtt(content);
+  } else if (n.endsWith(".ass") || n.endsWith(".ssa") || content.includes("[Events]")) {
+    content = assToVtt(content);
+  }
+  subState.dualCues = parseVttCues(content);
+  subState.dualRawVtt = content;
+  subState.dualFilename = filename || "外挂副字幕";
+  subState.dualLoaded = true;
+  subState.dualOffsetSec = 0.0;
+  const pos = subState.dualPosition === "top" ? "top" : "above";
+  const shifted = buildShiftedVtt(subState.dualCues, 0.0, pos);
+  applyDualSubtitleTrack(shifted);
+  updateSubUI();
+  toast("已加载副字幕：" + subState.dualFilename, true);
+  showPlayerOsd("已加载副字幕: " + subState.dualFilename);
+}
+
+function unloadDualSubtitle(silent = false) {
+  if (subState.dualBlobUrl) {
+    URL.revokeObjectURL(subState.dualBlobUrl);
+    subState.dualBlobUrl = null;
+  }
+  if (subState.dualTrackEl) {
+    subState.dualTrackEl.remove();
+    subState.dualTrackEl = null;
+  }
+  subState.dualLoaded = false;
+  subState.dualFilename = "";
+  subState.dualCues = [];
+  subState.dualOffsetSec = 0.0;
+  updateSubUI();
+  if (!silent) {
+    toast("已卸载副字幕", true);
+    showPlayerOsd("已关闭副字幕");
+  }
+}
+
+function adjustDualSubOffset(delta) {
+  if (!subState.dualLoaded || subState.dualCues.length === 0) return;
+  subState.dualOffsetSec = Math.round((subState.dualOffsetSec + delta) * 10) / 10;
+  const pos = subState.dualPosition === "top" ? "top" : "above";
+  const shifted = buildShiftedVtt(subState.dualCues, subState.dualOffsetSec, pos);
+  applyDualSubtitleTrack(shifted);
+  updateDualSubUI();
+  const sign = subState.dualOffsetSec > 0 ? "+" : "";
+  showPlayerOsd(`副字幕延迟: ${sign}${subState.dualOffsetSec.toFixed(1)}s`);
+}
+
 function loadSubtitleFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     loadSubtitleFromText(e.target.result, file.name);
+  };
+  reader.readAsText(file, "utf-8");
+}
+
+function loadDualSubtitleFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    loadDualSubtitleFromText(e.target.result, file.name);
   };
   reader.readAsText(file, "utf-8");
 }
@@ -7795,6 +8043,68 @@ document.querySelectorAll(".sub-pos-opt").forEach((btn) => {
   btn.onclick = () => setSubPosition(btn.getAttribute("data-pos"));
 });
 
+const subDualToggle = $("sub-dual-toggle");
+if (subDualToggle) {
+  subDualToggle.onclick = () => {
+    subState.dualEnabled = !subState.dualEnabled;
+    localStorage.setItem("ani_sub_dual_enabled", String(subState.dualEnabled));
+    updateDualSubUI();
+    if (!subState.dualEnabled && subState.dualTrackEl) {
+      unloadDualSubtitle();
+    }
+    showPlayerOsd(subState.dualEnabled ? "已开启双字幕模式" : "已关闭双字幕模式");
+  };
+}
+
+const subDualLoadBtn = $("sub-dual-load-btn");
+const subDualFileInput = $("sub-dual-file-input");
+if (subDualLoadBtn && subDualFileInput) {
+  subDualLoadBtn.onclick = () => subDualFileInput.click();
+  subDualFileInput.onchange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadDualSubtitleFile(file);
+      subMenu?.classList.add("hidden");
+    }
+    subDualFileInput.value = "";
+  };
+}
+
+const subDualClearBtn = $("sub-dual-clear-btn");
+if (subDualClearBtn) {
+  subDualClearBtn.onclick = () => unloadDualSubtitle();
+}
+
+document.querySelectorAll(".sub-dual-pos-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const pos = btn.getAttribute("data-pos") || "above";
+    subState.dualPosition = pos;
+    localStorage.setItem("ani_sub_dual_pos", pos);
+    updateDualSubUI();
+    if (subState.dualLoaded && subState.dualCues.length > 0) {
+      const shifted = buildShiftedVtt(subState.dualCues, subState.dualOffsetSec, pos);
+      applyDualSubtitleTrack(shifted);
+    }
+    showPlayerOsd(`副字幕位置: ${pos === "top" ? "画面顶部" : "主字幕上方"}`);
+  };
+});
+
+const subDualDelayMinus = $("sub-dual-delay-minus");
+if (subDualDelayMinus) subDualDelayMinus.onclick = () => adjustDualSubOffset(-0.5);
+const subDualDelayPlus = $("sub-dual-delay-plus");
+if (subDualDelayPlus) subDualDelayPlus.onclick = () => adjustDualSubOffset(0.5);
+const subDualDelayReset = $("sub-dual-delay-reset");
+if (subDualDelayReset) subDualDelayReset.onclick = () => {
+  subState.dualOffsetSec = 0.0;
+  if (subState.dualLoaded && subState.dualCues.length > 0) {
+    const pos = subState.dualPosition === "top" ? "top" : "above";
+    const shifted = buildShiftedVtt(subState.dualCues, 0.0, pos);
+    applyDualSubtitleTrack(shifted);
+  }
+  updateDualSubUI();
+  showPlayerOsd("副字幕延迟已重置为 0.0s");
+};
+
 applySubtitleStyles();
 
 // 播放器区域支持直接拖拽挂载字幕文件
@@ -8013,17 +8323,28 @@ if (visualSatSlider) {
   };
 }
 
+const visualSharpSlider = $("visual-sharp-slider");
+if (visualSharpSlider) {
+  visualSharpSlider.oninput = (e) => {
+    visualState.sharpness = parseInt(e.target.value, 10) || 0;
+    localStorage.setItem("ani_visual_sharpness", String(visualState.sharpness));
+    applyVisualEffects();
+  };
+}
+
 const btnResetVisualSliders = $("btn-reset-visual-sliders");
 if (btnResetVisualSliders) {
   btnResetVisualSliders.onclick = () => {
     visualState.brightness = 100;
     visualState.contrast = 100;
     visualState.saturation = 100;
+    visualState.sharpness = 0;
     localStorage.setItem("ani_visual_brightness", "100");
     localStorage.setItem("ani_visual_contrast", "100");
     localStorage.setItem("ani_visual_saturation", "100");
+    localStorage.setItem("ani_visual_sharpness", "0");
     applyVisualEffects();
-    showPlayerOsd("调色滑块已重置 (100%)");
+    showPlayerOsd("画质滑块已重置为默认值");
   };
 }
 
@@ -9471,8 +9792,12 @@ async function handleSyncplayGotoMedia() {
 }
 
 // ==========================================================================
-// 本地视频与下载管理系统 (Local Media Scanner & Player)
+// 本地视频与下载管理系统 (Local Anime Media Library & Player)
 // ==========================================================================
+
+let localScannedItems = [];
+let localMediaViewMode = "series"; // "series" | "files"
+let localMediaSearchFilter = "";
 
 async function openLocalMediaModal() {
   const modal = $("local-media-modal");
@@ -9482,51 +9807,174 @@ async function openLocalMediaModal() {
 }
 
 async function scanAndRenderLocalMedia() {
-  const listEl = $("local-media-list");
+  const seriesListEl = $("local-series-list");
+  const filesListEl = $("local-media-list");
   const emptyEl = $("local-media-empty");
   const dirPathEl = $("local-media-dir-path");
-  if (!listEl) return;
+  if (!seriesListEl || !filesListEl) return;
 
-  listEl.innerHTML = `<div class="meta" style="grid-column: 1/-1; padding: 20px; text-align: center;">正在扫描本地视频目录…</div>`;
+  seriesListEl.innerHTML = `<div class="meta" style="grid-column: 1/-1; padding: 24px; text-align: center;">正在扫描本地视频目录…</div>`;
+  filesListEl.innerHTML = "";
 
   try {
     const items = await invoke("scan_local_videos", { dirPath: null });
+    localScannedItems = items || [];
     if (dirPathEl) dirPathEl.textContent = "已扫描本地下载目录";
 
-    if (!items || !items.length) {
-      listEl.innerHTML = "";
-      if (emptyEl) emptyEl.classList.remove("hidden");
-      return;
+    renderLocalMediaContent();
+  } catch (err) {
+    seriesListEl.innerHTML = `<div class="meta" style="color:#ef4444;grid-column:1/-1;padding:20px;">扫描失败: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+function renderLocalMediaContent() {
+  const seriesListEl = $("local-series-list");
+  const filesListEl = $("local-media-list");
+  const emptyEl = $("local-media-empty");
+  const countBadge = $("local-media-count-badge");
+  if (!seriesListEl || !filesListEl) return;
+
+  let filtered = localScannedItems;
+  if (localMediaSearchFilter.trim()) {
+    const q = localMediaSearchFilter.trim().toLowerCase();
+    filtered = localScannedItems.filter((it) =>
+      (it.clean_title || "").toLowerCase().includes(q) ||
+      (it.filename || "").toLowerCase().includes(q)
+    );
+  }
+
+  if (countBadge) {
+    countBadge.textContent = `共 ${filtered.length} 个本地视频`;
+  }
+
+  if (!filtered.length) {
+    seriesListEl.innerHTML = "";
+    filesListEl.innerHTML = "";
+    if (emptyEl) {
+      emptyEl.classList.remove("hidden");
+      emptyEl.textContent = localMediaSearchFilter.trim() ? "未检索到匹配的本地视频" : "未在目标目录找到视频文件（支持 .mp4, .mkv, .webm, .avi）";
     }
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add("hidden");
 
-    if (emptyEl) emptyEl.classList.add("hidden");
-    listEl.innerHTML = items.map((item) => {
-      const sizeMb = (item.size_bytes / (1024 * 1024)).toFixed(1);
-      const epLabel = item.episode_num != null ? `第 ${item.episode_num} 话` : item.extension.toUpperCase();
-      const dateStr = item.modified_secs ? new Date(item.modified_secs * 1000).toLocaleDateString() : "";
+  // 控制视图容器显隐
+  if (localMediaViewMode === "series") {
+    seriesListEl.classList.remove("hidden");
+    filesListEl.classList.add("hidden");
+  } else {
+    seriesListEl.classList.add("hidden");
+    filesListEl.classList.remove("hidden");
+  }
 
+  // 1. 渲染平铺文件视图
+  filesListEl.innerHTML = filtered.map((item) => {
+    const sizeMb = (item.size_bytes / (1024 * 1024)).toFixed(1);
+    const epLabel = item.episode_num != null ? `第 ${item.episode_num} 话` : item.extension.toUpperCase();
+    const dateStr = item.modified_secs ? new Date(item.modified_secs * 1000).toLocaleDateString() : "";
+
+    return `
+      <div class="local-media-card">
+        <div class="local-media-header">
+          <span class="local-media-badge">${escapeHtml(epLabel)}</span>
+          <div class="local-media-title" title="${escapeHtml(item.filename)}">${escapeHtml(item.clean_title || item.filename)}</div>
+        </div>
+        <div class="local-media-meta">
+          <span>📦 ${sizeMb} MB</span>
+          <span>📅 ${dateStr}</span>
+          <span>🎞️ ${item.extension.toUpperCase()}</span>
+        </div>
+        <div class="local-media-actions">
+          <button class="ghost small local-search-btn" data-title="${escapeAttr(item.clean_title || '')}" title="在 Bangumi 搜索该番剧">🔍 搜番剧</button>
+          <button class="primary small local-play-btn" data-path="${escapeAttr(item.path)}" data-title="${escapeAttr(item.clean_title || item.filename)}" data-ep="${item.episode_num ?? ''}">▶ 立即播放</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // 2. 渲染番剧归类聚合视图
+  const seriesMap = new Map();
+  for (const item of filtered) {
+    const key = item.clean_title || item.filename;
+    if (!seriesMap.has(key)) {
+      seriesMap.set(key, {
+        title: key,
+        episodes: [],
+        totalBytes: 0,
+        maxModified: 0,
+      });
+    }
+    const s = seriesMap.get(key);
+    s.episodes.push(item);
+    s.totalBytes += (item.size_bytes || 0);
+    if ((item.modified_secs || 0) > s.maxModified) {
+      s.maxModified = item.modified_secs;
+    }
+  }
+
+  const seriesList = Array.from(seriesMap.values());
+  seriesList.sort((a, b) => b.maxModified - a.maxModified);
+
+  seriesListEl.innerHTML = seriesList.map((series, idx) => {
+    const totalMb = series.totalBytes / (1024 * 1024);
+    const sizeStr = totalMb > 1024 ? `${(totalMb / 1024).toFixed(2)} GB` : `${totalMb.toFixed(1)} MB`;
+    series.episodes.sort((a, b) => (a.episode_num ?? 9999) - (b.episode_num ?? 9999));
+    const firstEp = series.episodes[0];
+    const initialChar = (series.title[0] || "A").toUpperCase();
+
+    const epChipsHtml = series.episodes.map((ep) => {
+      const epLabel = ep.episode_num != null ? `第 ${ep.episode_num} 话` : ep.extension.toUpperCase();
       return `
-        <div class="local-media-card">
-          <div class="local-media-header">
-            <span class="local-media-badge">${escapeHtml(epLabel)}</span>
-            <div class="local-media-title" title="${escapeHtml(item.filename)}">${escapeHtml(item.clean_title || item.filename)}</div>
-          </div>
-          <div class="local-media-meta">
-            <span>📦 ${sizeMb} MB</span>
-            <span>📅 ${dateStr}</span>
-            <span>🎞️ ${item.extension.toUpperCase()}</span>
-          </div>
-          <div class="local-media-actions">
-            <button class="ghost small local-search-btn" data-title="${escapeHtml(item.clean_title)}" title="在 Bangumi 搜索该番剧">🔍 搜番剧</button>
-            <button class="primary small local-play-btn" data-path="${escapeHtml(item.path)}" data-title="${escapeHtml(item.clean_title)}" data-ep="${item.episode_num ?? ''}">▶ 立即播放</button>
-          </div>
+        <div class="local-ep-chip local-play-btn" data-path="${escapeAttr(ep.path)}" data-title="${escapeAttr(series.title)}" data-ep="${ep.episode_num ?? ''}" title="${escapeAttr(ep.filename)}">
+          <span>${escapeHtml(epLabel)}</span>
+          <span style="font-size:10px;opacity:0.8">▶</span>
         </div>
       `;
     }).join("");
 
-    // 绑定播放与搜索按钮
-    listEl.querySelectorAll(".local-play-btn").forEach((btn) => {
-      btn.onclick = async () => {
+    return `
+      <div class="local-series-card" data-idx="${idx}">
+        <div class="local-series-header">
+          <div class="local-series-title-box">
+            <div class="local-series-avatar">${escapeHtml(initialChar)}</div>
+            <div class="local-series-title-info">
+              <div class="local-series-title" title="${escapeAttr(series.title)}">${escapeHtml(series.title)}</div>
+              <div class="local-series-stats">
+                <span class="local-series-badge">共 ${series.episodes.length} 话已入库</span>
+                <span>📦 ${sizeStr}</span>
+              </div>
+            </div>
+          </div>
+          <div class="local-series-actions">
+            <button class="ghost small local-search-btn" data-title="${escapeAttr(series.title)}" title="在 Bangumi 搜索该番剧">🔍 搜番剧</button>
+            <button class="ghost small local-series-toggle-btn" data-idx="${idx}">选集 ▾</button>
+            <button class="primary small local-play-btn" data-path="${escapeAttr(firstEp.path)}" data-title="${escapeAttr(series.title)}" data-ep="${firstEp.episode_num ?? ''}">▶ 续播</button>
+          </div>
+        </div>
+        <div id="local-series-grid-${idx}" class="local-series-ep-grid hidden">
+          ${epChipsHtml}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // 绑定选集折叠交互
+  seriesListEl.querySelectorAll(".local-series-toggle-btn").forEach((btn) => {
+    btn.onclick = () => {
+      const idx = btn.getAttribute("data-idx");
+      const grid = $(`local-series-grid-${idx}`);
+      if (grid) {
+        const isHidden = grid.classList.toggle("hidden");
+        btn.textContent = isHidden ? "选集 ▾" : "收起 ▴";
+      }
+    };
+  });
+
+  // 绑定播放与搜索按钮
+  const bindLocalActions = (container) => {
+    container.querySelectorAll(".local-play-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
         const p = btn.getAttribute("data-path");
         const title = btn.getAttribute("data-title");
         const ep = btn.getAttribute("data-ep");
@@ -9534,8 +9982,9 @@ async function scanAndRenderLocalMedia() {
       };
     });
 
-    listEl.querySelectorAll(".local-search-btn").forEach((btn) => {
-      btn.onclick = () => {
+    container.querySelectorAll(".local-search-btn").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
         const title = btn.getAttribute("data-title");
         if (title) {
           $("local-media-modal")?.classList.add("hidden");
@@ -9547,9 +9996,10 @@ async function scanAndRenderLocalMedia() {
         }
       };
     });
-  } catch (err) {
-    listEl.innerHTML = `<div class="meta" style="color:#ef4444;grid-column:1/-1;padding:20px;">扫描失败: ${escapeHtml(String(err))}</div>`;
-  }
+  };
+
+  bindLocalActions(seriesListEl);
+  bindLocalActions(filesListEl);
 }
 
 async function playLocalScannedVideo(filePath, cleanTitle, episodeNum) {
@@ -9591,8 +10041,7 @@ async function playLocalScannedVideo(filePath, cleanTitle, episodeNum) {
             episodeId: match.episode_id,
           });
           if (comments && comments.length) {
-            danmakuTimeline = comments;
-            initDanmakuCanvas();
+            DanmakuOverlay.load(comments);
             toast(`已自动匹配并加载 ${comments.length} 条弹弹play 弹幕！`, true);
           }
         }
@@ -9601,6 +10050,367 @@ async function playLocalScannedVideo(filePath, cleanTitle, episodeNum) {
   } catch (err) {
     toast(`播放本地文件失败: ${err}`);
   }
+}
+
+// ==========================================================================
+// 追番打卡海报生成台 (Retina 2x Anime Share Card Generator)
+// ==========================================================================
+
+let shareCardTheme = "dark";
+
+async function openShareCardModal() {
+  const modal = $("share-card-modal");
+  if (!modal || !state.subject) {
+    toast("请先进入番剧详情页再生成打卡海报");
+    return;
+  }
+  modal.classList.remove("hidden");
+
+  const s = state.subject;
+  const statusEl = $("share-card-status-text");
+  const ratingEl = $("share-card-rating-text");
+  const dateEl = $("share-card-date-text");
+
+  const epCount = state.episodes?.length || 0;
+  const watchedCount = state.watchedEps ? state.watchedEps.size : 0;
+  const statusText = watchedCount > 0 ? (watchedCount >= epCount && epCount > 0 ? `✨ 已看完 · ${watchedCount}/${epCount} 话 (100%)` : `🌸 在看 · 进度 ${watchedCount}/${epCount} 话`) : `📌 想看 · 共 ${epCount} 话`;
+  if (statusEl) statusEl.textContent = statusText;
+
+  const scoreVal = s.rating?.score ? `★ ${s.rating.score.toFixed(1)}` : (s.score ? `★ ${s.score.toFixed(1)}` : "暂无评分");
+  const rankVal = s.rating?.rank ? `Rank #${s.rating.rank}` : "";
+  if (ratingEl) ratingEl.textContent = `Bangumi 评分 ${scoreVal} ${rankVal}`;
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+  if (dateEl) dateEl.textContent = `${dateStr} 观影打卡`;
+
+  await renderShareCardCanvas(shareCardTheme);
+}
+
+async function renderShareCardCanvas(theme = "dark") {
+  const canvas = $("share-card-canvas");
+  if (!canvas || !state.subject) return;
+
+  const s = state.subject;
+  const displayTitle = s.display_title || s.name_cn || s.name || "动画";
+  const originalTitle = s.original_title || s.name || "";
+  const epCount = state.episodes?.length || 0;
+  const watchedCount = state.watchedEps ? state.watchedEps.size : 0;
+  const scoreVal = s.rating?.score ? s.rating.score.toFixed(1) : (s.score ? s.score.toFixed(1) : "");
+  const rankVal = s.rating?.rank ? `#${s.rating.rank}` : "";
+  const synopsis = s.summary || s.short_summary || "";
+
+  // 逻辑分辨率 720 x 1080，Retina 2x 物理像素 1440 x 2160
+  const W = 720, H = 1080;
+  const scale = 2;
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.save();
+  ctx.scale(scale, scale);
+
+  const isDark = theme === "dark";
+  const cardBg = isDark ? "rgba(30, 41, 59, 0.72)" : "rgba(255, 255, 255, 0.9)";
+  const textColor = isDark ? "#f8fafc" : "#0f172a";
+  const subTextColor = isDark ? "#94a3b8" : "#64748b";
+  const accentColor = "#8b5cf6";
+
+  // 1. 底板渐变
+  const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+  if (isDark) {
+    bgGrad.addColorStop(0, "#0b0f19");
+    bgGrad.addColorStop(0.5, "#131a2a");
+    bgGrad.addColorStop(1, "#070a12");
+  } else {
+    bgGrad.addColorStop(0, "#f1f5f9");
+    bgGrad.addColorStop(0.5, "#ffffff");
+    bgGrad.addColorStop(1, "#e2e8f0");
+  }
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // 2. 弥散光晕 (Ambient Glows)
+  const glow1 = ctx.createRadialGradient(180, 160, 20, 180, 160, 320);
+  glow1.addColorStop(0, isDark ? "rgba(139, 92, 246, 0.35)" : "rgba(139, 92, 246, 0.18)");
+  glow1.addColorStop(1, "transparent");
+  ctx.fillStyle = glow1;
+  ctx.beginPath();
+  ctx.arc(180, 160, 320, 0, Math.PI * 2);
+  ctx.fill();
+
+  const glow2 = ctx.createRadialGradient(W - 120, 400, 30, W - 120, 400, 280);
+  glow2.addColorStop(0, isDark ? "rgba(236, 72, 153, 0.28)" : "rgba(236, 72, 153, 0.15)");
+  glow2.addColorStop(1, "transparent");
+  ctx.fillStyle = glow2;
+  ctx.beginPath();
+  ctx.arc(W - 120, 400, 280, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 3. 主卡片容器边框与磨砂背景
+  const cardX = 36, cardY = 36, cardW = W - 72, cardH = H - 72;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 20);
+  ctx.fillStyle = cardBg;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)";
+  ctx.stroke();
+  ctx.restore();
+
+  // 4. 尝试加载封面图片
+  let coverImg = null;
+  if (s.cover_url) {
+    try {
+      coverImg = await new Promise((res) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => res(img);
+        img.onerror = () => res(null);
+        img.src = s.cover_url;
+      });
+    } catch (_) {}
+  }
+
+  const posterX = 64, posterY = 64, posterW = 190, posterH = 266;
+  if (coverImg) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    ctx.beginPath();
+    ctx.roundRect(posterX, posterY, posterW, posterH, 12);
+    ctx.clip();
+    ctx.drawImage(coverImg, posterX, posterY, posterW, posterH);
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.fillStyle = "rgba(139, 92, 246, 0.2)";
+    ctx.beginPath();
+    ctx.roundRect(posterX, posterY, posterW, posterH, 12);
+    ctx.fill();
+    ctx.font = "bold 48px sans-serif";
+    ctx.fillStyle = accentColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Ani", posterX + posterW / 2, posterY + posterH / 2);
+    ctx.restore();
+  }
+
+  // 5. 标题与元数据
+  const textX = posterX + posterW + 24;
+  let textY = posterY + 16;
+  ctx.font = "bold 26px sans-serif";
+  ctx.fillStyle = textColor;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+
+  const maxTitleW = cardW - (posterW + 64);
+  let titleLine1 = displayTitle;
+  let titleLine2 = "";
+  if (ctx.measureText(displayTitle).width > maxTitleW) {
+    for (let c = 1; c <= displayTitle.length; c++) {
+      if (ctx.measureText(displayTitle.slice(0, c)).width > maxTitleW) {
+        titleLine1 = displayTitle.slice(0, c - 1);
+        titleLine2 = displayTitle.slice(c - 1);
+        break;
+      }
+    }
+  }
+  ctx.fillText(titleLine1, textX, textY);
+  textY += 34;
+  if (titleLine2) {
+    const t2 = titleLine2.length > 18 ? titleLine2.slice(0, 17) + "…" : titleLine2;
+    ctx.fillText(t2, textX, textY);
+    textY += 34;
+  }
+
+  if (originalTitle && originalTitle !== displayTitle) {
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = subTextColor;
+    const origSub = originalTitle.length > 25 ? originalTitle.slice(0, 24) + "…" : originalTitle;
+    ctx.fillText(origSub, textX, textY);
+    textY += 24;
+  }
+
+  if (s.air_date) {
+    ctx.font = "13px monospace";
+    ctx.fillStyle = subTextColor;
+    ctx.fillText(`放送时间：${s.air_date}`, textX, textY);
+    textY += 24;
+  }
+
+  // 评分徽标
+  textY += 6;
+  if (scoreVal) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(textX, textY, 110, 32, 6);
+    ctx.fillStyle = "rgba(245, 158, 11, 0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillStyle = "#f59e0b";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`★ ${scoreVal} 分`, textX + 12, textY + 16);
+    ctx.restore();
+  }
+  if (rankVal) {
+    ctx.save();
+    const rankX = textX + (scoreVal ? 122 : 0);
+    ctx.beginPath();
+    ctx.roundRect(rankX, textY, 96, 32, 6);
+    ctx.fillStyle = "rgba(139, 92, 246, 0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(139, 92, 246, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = "bold 14px monospace";
+    ctx.fillStyle = "#a78bfa";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`Rank ${rankVal}`, rankX + 10, textY + 16);
+    ctx.restore();
+  }
+
+  // 6. 观影打卡足迹横幅
+  const footY = posterY + posterH + 32;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(posterX, footY, cardW - 56, 120, 14);
+  ctx.fillStyle = isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)";
+  ctx.fill();
+  ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.font = "bold 17px sans-serif";
+  ctx.fillStyle = "#10b981";
+  ctx.textBaseline = "top";
+  const isDone = watchedCount >= epCount && epCount > 0;
+  const statusLabel = watchedCount > 0 ? (isDone ? "✨ 追番圆满完结 · 100% 达成" : `🌸 正在追更 · 打卡 ${watchedCount} / ${epCount} 话`) : `📌 已添加至待看清单 (共 ${epCount} 话)`;
+  ctx.fillText(statusLabel, posterX + 20, footY + 18);
+
+  // 进度条
+  const barX = posterX + 20;
+  const barY = footY + 54;
+  const barW = cardW - 96;
+  const barH = 10;
+  ctx.beginPath();
+  ctx.roundRect(barX, barY, barW, barH, 5);
+  ctx.fillStyle = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)";
+  ctx.fill();
+
+  const pct = epCount > 0 ? Math.min(1, watchedCount / epCount) : (watchedCount > 0 ? 1 : 0);
+  if (pct > 0) {
+    const progGrad = ctx.createLinearGradient(barX, barY, barX + barW * pct, barY);
+    progGrad.addColorStop(0, "#8b5cf6");
+    progGrad.addColorStop(1, "#38bdf8");
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, Math.max(8, barW * pct), barH, 5);
+    ctx.fillStyle = progGrad;
+    ctx.fill();
+  }
+
+  ctx.font = "13px monospace";
+  ctx.fillStyle = subTextColor;
+  ctx.fillText(`已观看打卡进度：${Math.round(pct * 100)}%`, barX, barY + 22);
+  ctx.restore();
+
+  // 7. 剧情故事段落
+  let synY = footY + 144;
+  ctx.font = "bold 15px sans-serif";
+  ctx.fillStyle = isDark ? "#c4b5fd" : "#7c3aed";
+  ctx.fillText("“ 故事物语 · STORY ”", posterX, synY);
+  synY += 28;
+
+  if (synopsis) {
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = isDark ? "#cbd5e1" : "#475569";
+    const cleanSyn = synopsis.replace(/\r?\n+/g, " ").trim();
+    const maxLineW = cardW - 56;
+    let curLine = "";
+    let lineCount = 0;
+    for (let i = 0; i < cleanSyn.length; i++) {
+      const testLine = curLine + cleanSyn[i];
+      if (ctx.measureText(testLine).width > maxLineW) {
+        ctx.fillText(curLine, posterX, synY);
+        synY += 24;
+        curLine = cleanSyn[i];
+        lineCount++;
+        if (lineCount >= 4) {
+          curLine = curLine + "……";
+          break;
+        }
+      } else {
+        curLine = testLine;
+      }
+    }
+    if (curLine && lineCount < 4) {
+      ctx.fillText(curLine, posterX, synY);
+      synY += 24;
+    }
+  }
+
+  // 8. 底部 Logo 印章与时间戳
+  const btmY = cardY + cardH - 52;
+  ctx.font = "bold 16px sans-serif";
+  ctx.fillStyle = accentColor;
+  ctx.fillText("Ani (Animeko)", posterX, btmY);
+
+  ctx.font = "12px sans-serif";
+  ctx.fillStyle = subTextColor;
+  ctx.fillText("追番客户端 · 观影记忆", posterX + 130, btmY + 3);
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+  ctx.font = "13px monospace";
+  ctx.textAlign = "right";
+  ctx.fillStyle = subTextColor;
+  ctx.fillText(`${dateStr} 观影打卡`, cardX + cardW - 28, btmY + 2);
+
+  ctx.restore();
+}
+
+async function copyShareCardImage() {
+  const canvas = $("share-card-canvas");
+  if (!canvas) return;
+  try {
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        toast("导出海报图像失败");
+        return;
+      }
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob })
+        ]);
+        toast("海报已成功复制到剪贴板！可直接在 QQ/微信 中 Ctrl+V 发送给好友", true);
+      } catch (e) {
+        toast("写入剪贴板受阻，正在为您下载海报图片…");
+        saveShareCardImage();
+      }
+    }, "image/png");
+  } catch (err) {
+    toast("复制海报失败：" + err);
+  }
+}
+
+function saveShareCardImage() {
+  const canvas = $("share-card-canvas");
+  if (!canvas) return;
+  const s = state.subject;
+  const name = (s?.display_title || s?.name_cn || s?.name || "anime").replace(/[/\\:*?"<>|]/g, "_");
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = `${name}_追番打卡海报.png`;
+  a.click();
+  toast("追番打卡海报已下载保存！", true);
 }
 
 // --------------------------------------------------------------------------
@@ -9661,4 +10471,47 @@ if (joinAutoSyncCheck) {
     syncplayState.autoSync = joinAutoSyncCheck.checked;
   };
 }
+
+// 本地媒体视图切换 Tab
+$("local-view-series-tab")?.addEventListener("click", () => {
+  localMediaViewMode = "series";
+  $("local-view-series-tab")?.classList.add("active");
+  $("local-view-files-tab")?.classList.remove("active");
+  renderLocalMediaContent();
+});
+$("local-view-files-tab")?.addEventListener("click", () => {
+  localMediaViewMode = "files";
+  $("local-view-files-tab")?.classList.add("active");
+  $("local-view-series-tab")?.classList.remove("active");
+  renderLocalMediaContent();
+});
+
+// 本地媒体搜索框实时过滤
+$("local-media-search-input")?.addEventListener("input", (e) => {
+  localMediaSearchFilter = e.target.value || "";
+  renderLocalMediaContent();
+});
+
+// 追番打卡海报生成台事件绑定
+$("subject-share-card-btn")?.addEventListener("click", () => {
+  openShareCardModal();
+});
+$("share-card-modal-close")?.addEventListener("click", () => {
+  $("share-card-modal")?.classList.add("hidden");
+});
+$("share-theme-dark-btn")?.addEventListener("click", () => {
+  shareCardTheme = "dark";
+  $("share-theme-dark-btn")?.classList.add("active");
+  $("share-theme-light-btn")?.classList.remove("active");
+  renderShareCardCanvas("dark");
+});
+$("share-theme-light-btn")?.addEventListener("click", () => {
+  shareCardTheme = "light";
+  $("share-theme-light-btn")?.classList.add("active");
+  $("share-theme-dark-btn")?.classList.remove("active");
+  renderShareCardCanvas("light");
+});
+$("share-card-copy-btn")?.addEventListener("click", copyShareCardImage);
+$("share-card-save-btn")?.addEventListener("click", saveShareCardImage);
+
 

@@ -260,6 +260,10 @@
                 <span class="collect-icon">♥</span>
                 <span class="collect-text">追番</span>
               </button>
+              <button id="subject-share-card-btn" class="ghost small share-card-btn" title="生成并分享精美追番打卡海报卡片">
+                <span class="share-icon">🎨</span>
+                <span class="share-text">分享卡片</span>
+              </button>
               <span id="subject-user-rating-badge" class="subject-user-rating-badge hidden" title="我的评分与短评"></span>
             </div>
           </div>
@@ -775,6 +779,11 @@
             <input type="file" id="dm-file-input" accept=".xml,.json" class="hidden" />
             <div class="sub-menu-sep"></div>
             <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">高能折叠</span>
+              <button id="dm-merge-dup-toggle" class="ghost small dm-action-btn active" title="在密集刷屏时自动合并相同弹幕，并显示 x2/x5/x10+ 高能徽章">合并重复弹幕: 开</button>
+            </div>
+            <div class="sub-menu-sep"></div>
+            <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">不透明度</span>
               <div class="dm-btn-group">
                 <button class="ghost small dm-opacity-opt" data-opacity="1.0">100%</button>
@@ -891,6 +900,34 @@
                 <button class="ghost small sub-pos-opt" data-pos="top">顶部</button>
               </div>
             </div>
+            <div class="sub-menu-sep"></div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">双语双字幕</span>
+              <div class="sub-btn-group">
+                <button id="sub-dual-toggle" class="ghost small sub-action-btn" title="开启主副双字幕同屏对照渲染">双字幕: 关</button>
+                <button id="sub-dual-load-btn" class="ghost small hidden" title="选择副字幕文件 (.srt/.vtt/.ass)">📂 载入副字幕</button>
+                <button id="sub-dual-clear-btn" class="ghost small hidden" title="清除副字幕">✕ 卸载副字幕</button>
+                <input type="file" id="sub-dual-file-input" accept=".srt,.vtt,.ass,.ssa" class="hidden" />
+              </div>
+            </div>
+            <div id="sub-dual-config-rows" class="sub-dual-config-rows hidden">
+              <div class="sub-menu-row">
+                <span class="sub-menu-label">副字幕位置</span>
+                <div class="sub-btn-group">
+                  <button class="ghost small sub-dual-pos-opt active" data-pos="above">主字幕上方</button>
+                  <button class="ghost small sub-dual-pos-opt" data-pos="top">画面顶部</button>
+                </div>
+              </div>
+              <div class="sub-menu-row">
+                <span class="sub-menu-label">副字幕微调</span>
+                <div class="sub-sync-btns">
+                  <button id="sub-dual-delay-minus" class="ghost small" title="副字幕提前 0.5s">-0.5s</button>
+                  <span id="sub-dual-delay-val" class="meta mono">0.0s</span>
+                  <button id="sub-dual-delay-plus" class="ghost small" title="副字幕延后 0.5s">+0.5s</button>
+                  <button id="sub-dual-delay-reset" class="ghost small" title="重置副字幕偏移">重置</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="player-visual-wrap">
@@ -951,8 +988,13 @@
                 <input type="range" id="visual-sat-slider" class="visual-slider" min="0" max="200" value="100" />
                 <span id="visual-sat-val" class="visual-slider-val mono">100%</span>
               </div>
+              <div class="visual-slider-row">
+                <span class="visual-slider-label">清晰锐度</span>
+                <input type="range" id="visual-sharp-slider" class="visual-slider" min="0" max="100" value="0" />
+                <span id="visual-sharp-val" class="visual-slider-val mono">0%</span>
+              </div>
               <div class="visual-slider-actions">
-                <button id="btn-reset-visual-sliders" class="ghost small" title="将亮度、对比度、饱和度一键恢复为 100%">重置调色</button>
+                <button id="btn-reset-visual-sliders" class="ghost small" title="将亮度、对比度、饱和度与锐度一键恢复默认">重置调色</button>
               </div>
             </div>
             <div class="visual-menu-sep"></div>
@@ -1706,8 +1748,8 @@
     <div class="modal-card local-media-modal-card">
       <div class="modal-head">
         <div class="modal-title-wrap">
-          <div class="modal-title">📂 本地视频与下载目录</div>
-          <div class="modal-sub">智能扫描本地已下载的动画视频，自动剥离杂质标题并关联全网弹幕</div>
+          <div class="modal-title">📂 本地动漫媒体库与下载扫描</div>
+          <div class="modal-sub">智能扫描本地已下载的动画视频，按番剧自动归并聚合、呈现追番进度并关联全网弹幕</div>
         </div>
         <button id="local-media-modal-close" class="ghost small">✕</button>
       </div>
@@ -1718,11 +1760,68 @@
             <code id="local-media-dir-path" class="local-dir-path">默认下载目录</code>
           </div>
           <div class="local-media-actions">
+            <div class="local-view-tabs">
+              <button id="local-view-series-tab" class="local-view-tab active">📁 番剧归类</button>
+              <button id="local-view-files-tab" class="local-view-tab">🎬 全部文件</button>
+            </div>
             <button id="local-media-rescan-btn" class="primary small" title="刷新扫描视频文件">🔄 重新扫描</button>
           </div>
         </div>
+        <div class="local-media-search-row">
+          <input id="local-media-search-input" type="search" placeholder="在本地已扫描文件中即时检索番剧或剧集…" class="local-media-search-input" />
+          <span id="local-media-count-badge" class="meta mono"></span>
+        </div>
         <div id="local-media-empty" class="empty-tip hidden">未在目标目录找到视频文件（支持 .mp4, .mkv, .webm, .avi）</div>
-        <div id="local-media-list" class="local-media-grid"></div>
+        <div id="local-series-list" class="local-series-grid"></div>
+        <div id="local-media-list" class="local-media-grid hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 追番打卡海报生成台 Modal -->
+  <div id="share-card-modal" class="modal-backdrop hidden">
+    <div class="modal-card share-card-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">🎨 追番打卡海报生成台</div>
+          <div class="modal-sub">基于 2x Retina 离屏渲染合成高清打卡海报，记录追番足迹并分享给漫友</div>
+        </div>
+        <button id="share-card-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body share-card-modal-body">
+        <div class="share-card-preview-area">
+          <canvas id="share-card-canvas" class="share-card-canvas"></canvas>
+        </div>
+        <div class="share-card-control-panel">
+          <div class="share-card-opt-row">
+            <span class="share-card-opt-label">海报风格</span>
+            <div class="share-card-theme-group">
+              <button class="ghost small share-theme-btn active" data-theme="dark" id="share-theme-dark-btn">深邃极夜</button>
+              <button class="ghost small share-theme-btn" data-theme="light" id="share-theme-light-btn">晨曦雅白</button>
+            </div>
+          </div>
+          <div class="share-card-info-box">
+            <div class="share-card-info-item">
+              <span class="share-info-icon">🌸</span>
+              <span id="share-card-status-text" class="share-info-val">在看 · 第 12 话</span>
+            </div>
+            <div class="share-card-info-item">
+              <span class="share-info-icon">⭐</span>
+              <span id="share-card-rating-text" class="share-info-val">Bangumi 评分 ★ 8.8</span>
+            </div>
+            <div class="share-card-info-item">
+              <span class="share-info-icon">📅</span>
+              <span id="share-card-date-text" class="share-info-val">2026.09.22 打卡</span>
+            </div>
+          </div>
+          <div class="share-card-tips meta">
+            💡 包含封面海报、评分排名、个人观看进度与专属印章，生成 2x Retina 超清画质。
+          </div>
+          <div class="share-card-btn-group">
+            <button id="share-card-copy-btn" class="primary">📋 复制海报到剪贴板</button>
+            <button id="share-card-save-btn" class="ghost">💾 保存为高清 PNG</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
