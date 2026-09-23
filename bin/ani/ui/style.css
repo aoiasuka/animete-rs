@@ -2597,6 +2597,148 @@ body.window-drag-over::after {
   margin-left: 6px;
 }
 
+/* 逐帧步进控制组 */
+.player-frame-step-group {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.player-frame-step-group button {
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+}
+
+.player-frame-step-group button:first-child {
+  border-right: 1px solid var(--line-subtle) !important;
+}
+
+/* 播放倍速交互调谐悬浮菜单 */
+.player-rate-wrap {
+  position: relative;
+}
+
+.rate-menu-popup {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 250px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 12px;
+  z-index: 1000;
+  animation: visualMenuIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.rate-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.rate-menu-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rate-menu-badge {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: monospace;
+  background: var(--accent-gradient);
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+}
+
+.rate-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.rate-preset-btn {
+  padding: 5px 0 !important;
+  font-size: 11px !important;
+  text-align: center;
+  border-radius: 6px !important;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.rate-preset-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.rate-preset-btn.active {
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.rate-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.rate-slider-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rate-slider-val {
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rate-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.rate-menu-sep {
+  height: 1px;
+  background: var(--line-subtle);
+  margin: 10px 0 8px;
+}
+
+.rate-pitch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+}
+
+.rate-pitch-toggle input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* 极简画中画伴播模式 (Mini Companion Mode) */
 body.mini-companion-mode header,
 body.mini-companion-mode #nav-history-btn,
@@ -3832,6 +3974,48 @@ body.mini-companion-mode .player-controls:hover {
   background: var(--accent);
   color: #ffffff;
   font-weight: 600;
+}
+
+.ep-drawer-search-wrap {
+  position: relative;
+  padding: 8px 14px 4px;
+  flex-shrink: 0;
+}
+
+.ep-drawer-search {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 28px 6px 10px;
+  font-size: 12px;
+  color: var(--text-main);
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.ep-drawer-search:focus {
+  border-color: var(--accent);
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.ep-drawer-search-clear {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-40%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px;
+  line-height: 1;
+}
+
+.ep-drawer-search-clear:hover {
+  color: var(--text-main);
 }
 
 .ep-drawer-list {

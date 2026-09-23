@@ -1192,6 +1192,14 @@
                 <button class="ghost small visual-sleep-opt" data-sleep="90" title="90 分钟后自动暂停">90分</button>
               </div>
             </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">逐帧步进帧率 (Frame Stepping)</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-fps-opt active" data-fps="24" title="动漫原生作画标准 24fps (每帧 ≈ 41.7ms)">24 fps (动漫)</button>
+                <button class="ghost small visual-fps-opt" data-fps="30" title="电视广播标准 30fps (每帧 ≈ 33.3ms)">30 fps</button>
+                <button class="ghost small visual-fps-opt" data-fps="60" title="高刷流畅 60fps (每帧 ≈ 16.7ms)">60 fps</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="player-screenshot-group">
@@ -1213,6 +1221,10 @@
             </label>
           </div>
         </div>
+        <div class="player-frame-step-group">
+          <button id="player-frame-prev" class="ghost small" title="上一帧 (快捷键 ,)">⏮ 帧</button>
+          <button id="player-frame-next" class="ghost small" title="下一帧 (快捷键 .)">帧 ⏭</button>
+        </div>
         <div class="player-audio-track-wrap">
           <button id="player-audio-track-btn" class="ghost small" title="切换声轨 / 多音轨">音轨 🎧</button>
           <div id="audio-track-menu" class="audio-track-menu hidden">
@@ -1225,7 +1237,39 @@
         <button id="player-mini-btn" class="ghost small" title="极简桌面画中画伴播模式 (快捷键 Shift+M)">伴播 🗖</button>
         <button id="player-pip" class="ghost small" title="画中画悬浮小窗 (快捷键 P)">画中画 🗗</button>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
-        <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
+        <div class="player-rate-wrap">
+          <button id="player-rate" class="ghost small" title="播放倍速与无极变速 (快捷键 < >)">倍速 1.0x</button>
+          <div id="player-rate-menu" class="rate-menu-popup hidden">
+            <div class="rate-menu-header">
+              <span class="rate-menu-title">播放倍速调谐</span>
+              <span id="rate-menu-badge" class="rate-menu-badge">1.0x</span>
+            </div>
+            <div class="rate-presets-grid">
+              <button class="ghost small rate-preset-btn" data-rate="0.5">0.5x</button>
+              <button class="ghost small rate-preset-btn" data-rate="0.75">0.75x</button>
+              <button class="ghost small rate-preset-btn active" data-rate="1.0">1.0x</button>
+              <button class="ghost small rate-preset-btn" data-rate="1.25">1.25x</button>
+              <button class="ghost small rate-preset-btn" data-rate="1.5">1.5x</button>
+              <button class="ghost small rate-preset-btn" data-rate="1.75">1.75x</button>
+              <button class="ghost small rate-preset-btn" data-rate="2.0">2.0x</button>
+              <button class="ghost small rate-preset-btn" data-rate="2.5">2.5x</button>
+              <button class="ghost small rate-preset-btn" data-rate="3.0">3.0x</button>
+              <button class="ghost small rate-preset-btn" data-rate="4.0">4.0x</button>
+            </div>
+            <div class="rate-slider-row">
+              <div class="rate-slider-label-row">
+                <span>无级变速精调</span>
+                <span id="rate-slider-val" class="rate-slider-val">1.00x</span>
+              </div>
+              <input type="range" id="rate-slider" min="0.2" max="4.0" step="0.05" value="1.0" class="rate-slider" />
+            </div>
+            <div class="rate-menu-sep"></div>
+            <label class="rate-pitch-toggle" title="开启后变速播放自动保持原声声调，关闭后加速变尖、减速变沉">
+              <input type="checkbox" id="rate-preserve-pitch" checked />
+              <span>原声音调补偿 (Preserve Pitch)</span>
+            </label>
+          </div>
+        </div>
         <button id="player-stats-btn" class="ghost small" title="播放统计信息 (I)">ℹ 统计</button>
         <button id="player-shortcuts-btn" class="ghost small" title="查看键盘快捷键速查指南 (快捷键 ?)">快捷键 ⌨</button>
         <button id="player-syncplay-btn" class="ghost small" title="与好友一起看协同抽屉 (快捷键 Y)">一起看 👥<span id="player-syncplay-dot" class="syncplay-dot hidden"></span></button>
@@ -1392,6 +1436,10 @@
             <button class="ep-drawer-tab" data-kind="main">正片</button>
             <button class="ep-drawer-tab" data-kind="sp">SP/特别</button>
             <button class="ep-drawer-tab" data-kind="bookmarks">💎 名场面 (<span id="ep-drawer-bm-count">0</span>)</button>
+          </div>
+          <div class="ep-drawer-search-wrap">
+            <input type="text" id="ep-drawer-search" class="ep-drawer-search" placeholder="🔍 快速搜索集数 / 标题 (如 12、特别篇)..." />
+            <button id="ep-drawer-search-clear" class="ep-drawer-search-clear hidden" title="清空搜索">✕</button>
           </div>
           <div id="ep-drawer-list" class="ep-drawer-list"></div>
           <div id="ep-drawer-bookmarks-wrap" class="ep-drawer-bookmarks-wrap hidden">
@@ -1604,7 +1652,8 @@
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><div class="kbds"><kbd>U</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>M</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">播放中无缝换源 (自动继承进度)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>S</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
-          <div class="sg-item"><span class="sg-desc">倍速切换 / 微调 (±0.1x 平滑调节)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">倍速悬浮面板 / 微调 (±0.1x 平滑调节)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">高精度逐帧步进 (前/后 1 帧或 5 帧赏析)</span><div class="kbds"><kbd>,</kbd> <kbd>.</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>,</kbd> <kbd>.</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">长按画面 / 长按快进键极速快进 (2.0x ⚡)</span><span class="sg-highlight">长按鼠标左键 或 长按 <kbd>→</kbd></span></div>
           <div class="sg-item"><span class="sg-desc">鼠标滚轮调音 / 进度微调</span><span class="sg-highlight">滚轮调音量 · <kbd>Shift</kbd>+滚轮调进度 · <kbd>Ctrl</kbd>+滚轮倍速</span></div>
           <div class="sg-item"><span class="sg-desc">音画同步 (音频提前 50ms / 延后 50ms)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>[</kbd> <kbd>]</kbd></div></div>

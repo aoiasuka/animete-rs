@@ -5327,7 +5327,7 @@ let lastSavedSec = -10;
 let btFallbackPath = null;
 let btErrorListener = null;
 let currentLocalPath = null;
-const RATES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+const RATES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
 
 const LOOP_MODES = ["sequential", "repeat-one", "repeat-all", "once"];
 let currentLoopMode = localStorage.getItem("ani_loop_mode") || "sequential";
@@ -6535,6 +6535,7 @@ function restoreDanmakuOffset() {
 // ---------- 播放器快速选集抽屉 (Player Episode Drawer) ----------
 
 let epDrawerKind = "all";
+let epDrawerSearchQuery = "";
 
 function toggleEpDrawer(show) {
   const drawer = $("player-ep-drawer");
@@ -6582,13 +6583,23 @@ function renderEpDrawer() {
     filtered = episodes.filter((e) => e.kind !== "main");
   }
   // 按集数排序
-  const sorted = [...filtered].sort((a, b) => a.ep - b.ep);
+  let sorted = [...filtered].sort((a, b) => a.ep - b.ep);
+
+  if (epDrawerSearchQuery.trim()) {
+    const q = epDrawerSearchQuery.trim().toLowerCase();
+    sorted = sorted.filter((e) => {
+      const numStr = String(e.ep);
+      const title = (e.display_title || "").toLowerCase();
+      const kind = (e.kind || "").toLowerCase();
+      return numStr.includes(q) || title.includes(q) || kind.includes(q);
+    });
+  }
 
   if (countEl) countEl.textContent = `(${sorted.length}/${episodes.length})`;
 
   listEl.innerHTML = "";
   if (!sorted.length) {
-    listEl.innerHTML = `<div class="ep-drawer-empty">该分类下暂无剧集</div>`;
+    listEl.innerHTML = `<div class="ep-drawer-empty">${epDrawerSearchQuery.trim() ? "未搜索到匹配剧集" : "该分类下暂无剧集"}</div>`;
     return;
   }
 
@@ -6624,11 +6635,11 @@ function renderEpDrawer() {
     listEl.appendChild(item);
   });
 
-  // 自动滚动到当前播放集的位置
+  // 自动滚动到当前播放集的位置并平滑居中
   const activeEl = listEl.querySelector(".ep-drawer-item.playing");
   if (activeEl) {
     setTimeout(() => {
-      activeEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      activeEl.scrollIntoView({ block: "center", behavior: "smooth" });
     }, 50);
   }
 }
@@ -7581,6 +7592,8 @@ function destroyPlayer() {
   if (visualMenu) visualMenu.classList.add("hidden");
   const audioMenu = $("audio-track-menu");
   if (audioMenu) audioMenu.classList.add("hidden");
+  const rateMenu = $("player-rate-menu");
+  if (rateMenu) rateMenu.classList.add("hidden");
   const skipCapsule = $("player-skip-capsule");
   if (skipCapsule) skipCapsule.classList.add("hidden");
   if (document.pictureInPictureElement) {
@@ -7734,12 +7747,13 @@ function showPlayer(url, title, extra = {}) {
   const savedVol = parseFloat(localStorage.getItem("ani_vol"));
   if (!isNaN(savedVol)) v.volume = Math.min(1, Math.max(0, savedVol));
   const savedRate = parseFloat(localStorage.getItem("ani_rate"));
-  if (!isNaN(savedRate) && RATES.includes(savedRate)) {
+  if (!isNaN(savedRate) && savedRate >= 0.2 && savedRate <= 5.0) {
     v.playbackRate = savedRate;
-    $("player-rate").textContent = `倍速 ${savedRate}x`;
   } else {
-    $("player-rate").textContent = "倍速 1.0x";
+    v.playbackRate = 1.0;
   }
+  syncPlaybackRateUI(v.playbackRate);
+  setPreservePitch(ratePreservePitch);
   v.play().catch(() => {});
   updateMediaSession();
 
@@ -7809,7 +7823,7 @@ function stopFastForward() {
   const v = $("video");
   if (v) {
     v.playbackRate = fastForwardSavedRate;
-    $("player-rate").textContent = `倍速 ${fastForwardSavedRate}x`;
+    syncPlaybackRateUI(fastForwardSavedRate);
   }
   const pill = $("player-fast-forward-pill");
   if (pill) pill.classList.add("hidden");
@@ -7888,11 +7902,8 @@ if (playerStageEl) {
     } else if (e.ctrlKey) {
       // Ctrl+滚轮：微调倍速 (±0.25x)
       const delta = e.deltaY < 0 ? 0.25 : -0.25;
-      const nextRate = Math.max(0.5, Math.min(3.0, Math.round((v.playbackRate + delta) * 100) / 100));
-      v.playbackRate = nextRate;
-      $("player-rate").textContent = `倍速 ${nextRate}x`;
-      showPlayerOsd(`倍速: ${nextRate}x`);
-      localStorage.setItem("ani_rate", String(nextRate));
+      const nextRate = Math.max(0.5, Math.min(4.0, Math.round((v.playbackRate + delta) * 100) / 100));
+      setPlaybackRate(nextRate, true);
     } else {
       // 默认滚轮：平滑微调音量 (±5%)
       v.muted = false;
@@ -8341,6 +8352,26 @@ document.querySelectorAll(".ep-drawer-tab").forEach((tab) => {
     renderEpDrawer();
   };
 });
+
+const epSearchInput = $("ep-drawer-search");
+const epSearchClear = $("ep-drawer-search-clear");
+if (epSearchInput) {
+  epSearchInput.addEventListener("input", (e) => {
+    epDrawerSearchQuery = e.target.value;
+    if (epSearchClear) {
+      epSearchClear.classList.toggle("hidden", !epDrawerSearchQuery);
+    }
+    renderEpDrawer();
+  });
+}
+if (epSearchClear) {
+  epSearchClear.addEventListener("click", () => {
+    epDrawerSearchQuery = "";
+    if (epSearchInput) epSearchInput.value = "";
+    epSearchClear.classList.add("hidden");
+    renderEpDrawer();
+  });
+}
 
 // ---------- 弹幕开关、不透明度循环与联动 ----------
 
@@ -10556,7 +10587,19 @@ document.addEventListener("keydown", (e) => {
   if ($("view-player").classList.contains("hidden")) return;
   const tag = e.target?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.ctrlKey) {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      stepVideoFrame(-1);
+      return;
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      stepVideoFrame(1);
+      return;
+    }
+    return;
+  }
+  if (e.altKey || e.metaKey) return;
   const v = $("video");
   const isDigit = /^[0-9]$/.test(e.key);
   const keys = [
@@ -10633,40 +10676,36 @@ document.addEventListener("keydown", (e) => {
       v.muted = !v.muted;
       showPlayerOsd(v.muted ? "🔇 静音" : `🔊 音量: ${Math.round(v.volume * 100)}%`);
       break;
-    case "<": case ",": {
+    case "<": {
       if (e.shiftKey) {
         const cur = Math.round(v.playbackRate * 10) / 10;
         const next = Math.max(0.2, Math.round((cur - 0.1) * 10) / 10);
-        v.playbackRate = next;
-        $("player-rate").textContent = `倍速 ${next.toFixed(1)}x`;
-        showPlayerOsd(`⚡ 播放倍速: ${next.toFixed(1)}x`);
-        localStorage.setItem("ani_rate", String(next));
+        setPlaybackRate(next, true);
       } else {
         const curIdx = RATES.indexOf(v.playbackRate);
         const prevIdx = (curIdx - 1 + RATES.length) % RATES.length;
-        v.playbackRate = RATES[prevIdx];
-        $("player-rate").textContent = `倍速 ${RATES[prevIdx]}x`;
-        showPlayerOsd(`⚡ 播放倍速: ${RATES[prevIdx]}x`);
-        localStorage.setItem("ani_rate", String(RATES[prevIdx]));
+        setPlaybackRate(RATES[prevIdx], true);
       }
       break;
     }
-    case ">": case ".": {
+    case ">": {
       if (e.shiftKey) {
         const cur = Math.round(v.playbackRate * 10) / 10;
         const next = Math.min(4.0, Math.round((cur + 0.1) * 10) / 10);
-        v.playbackRate = next;
-        $("player-rate").textContent = `倍速 ${next.toFixed(1)}x`;
-        showPlayerOsd(`⚡ 播放倍速: ${next.toFixed(1)}x`);
-        localStorage.setItem("ani_rate", String(next));
+        setPlaybackRate(next, true);
       } else {
         const curIdx = RATES.indexOf(v.playbackRate);
         const nextIdx = (curIdx + 1) % RATES.length;
-        v.playbackRate = RATES[nextIdx];
-        $("player-rate").textContent = `倍速 ${RATES[nextIdx]}x`;
-        showPlayerOsd(`⚡ 播放倍速: ${RATES[nextIdx]}x`);
-        localStorage.setItem("ani_rate", String(RATES[nextIdx]));
+        setPlaybackRate(RATES[nextIdx], true);
       }
+      break;
+    }
+    case ",": {
+      stepVideoFrame(e.shiftKey ? -5 : -1);
+      break;
+    }
+    case ".": {
+      stepVideoFrame(e.shiftKey ? 5 : 1);
       break;
     }
     case "w": case "W": cycleAspectRatio(); break;
@@ -10795,15 +10834,146 @@ $("video").addEventListener("ended", () => {
   }
 });
 
-// 倍速切换
-$("player-rate").onclick = () => {
+// ---------- 播放倍速交互调谐与无极变速系统 ----------
+let ratePreservePitch = localStorage.getItem("ani_rate_preserve_pitch") !== "false";
+
+function setPreservePitch(enabled, notify = false) {
+  ratePreservePitch = !!enabled;
+  localStorage.setItem("ani_rate_preserve_pitch", String(ratePreservePitch));
   const v = $("video");
-  const idx = (RATES.indexOf(v.playbackRate) + 1) % RATES.length;
-  v.playbackRate = RATES[idx];
-  $("player-rate").textContent = `倍速 ${RATES[idx]}x`;
-  showPlayerOsd(`倍速: ${RATES[idx]}x`);
-  localStorage.setItem("ani_rate", String(RATES[idx]));
-};
+  if (v) {
+    v.preservesPitch = ratePreservePitch;
+    if ("mozPreservesPitch" in v) v.mozPreservesPitch = ratePreservePitch;
+    if ("webkitPreservesPitch" in v) v.webkitPreservesPitch = ratePreservePitch;
+  }
+  const toggle = $("rate-preserve-pitch");
+  if (toggle) toggle.checked = ratePreservePitch;
+  if (notify) {
+    const msg = ratePreservePitch ? "原声音调补偿: 已开启 (原声音调保持)" : "原声音调补偿: 已关闭 (自然变调)";
+    showPlayerOsd(msg);
+  }
+}
+
+function setPlaybackRate(rate, notify = true) {
+  const v = $("video");
+  const r = Math.max(0.2, Math.min(5.0, Math.round(parseFloat(rate) * 100) / 100));
+  if (v) {
+    v.playbackRate = r;
+    v.preservesPitch = ratePreservePitch;
+    if ("mozPreservesPitch" in v) v.mozPreservesPitch = ratePreservePitch;
+    if ("webkitPreservesPitch" in v) v.webkitPreservesPitch = ratePreservePitch;
+  }
+  localStorage.setItem("ani_rate", String(r));
+  syncPlaybackRateUI(r);
+  if (notify) {
+    showPlayerOsd(`⚡ 播放倍速: ${r.toFixed(r % 1 === 0 ? 1 : 2)}x`);
+  }
+}
+
+function syncPlaybackRateUI(rate) {
+  const v = $("video");
+  const cur = rate != null ? rate : (v ? v.playbackRate : 1.0);
+  const text = `倍速 ${cur.toFixed(cur % 1 === 0 ? 1 : 2)}x`;
+  const rateBtn = $("player-rate");
+  if (rateBtn) rateBtn.textContent = text;
+  const badge = $("rate-menu-badge");
+  if (badge) badge.textContent = `${cur.toFixed(2)}x`;
+  const sliderVal = $("rate-slider-val");
+  if (sliderVal) sliderVal.textContent = `${cur.toFixed(2)}x`;
+  const slider = $("rate-slider");
+  if (slider && Math.abs(parseFloat(slider.value) - cur) > 0.02) {
+    slider.value = String(cur);
+  }
+  document.querySelectorAll(".rate-preset-btn").forEach((btn) => {
+    btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.rate) - cur) < 0.04);
+  });
+}
+
+const rateBtn = $("player-rate");
+const rateMenu = $("player-rate-menu");
+if (rateBtn && rateMenu) {
+  rateBtn.onclick = (e) => {
+    e.stopPropagation();
+    syncPlaybackRateUI();
+    rateMenu.classList.toggle("hidden");
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".player-rate-wrap")) {
+      rateMenu.classList.add("hidden");
+    }
+  });
+}
+
+document.querySelectorAll(".rate-preset-btn").forEach((btn) => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const r = parseFloat(btn.dataset.rate);
+    setPlaybackRate(r, true);
+    rateMenu?.classList.add("hidden");
+  };
+});
+
+const rateSlider = $("rate-slider");
+if (rateSlider) {
+  rateSlider.oninput = (e) => {
+    const val = parseFloat(e.target.value);
+    setPlaybackRate(val, false);
+    const sliderVal = $("rate-slider-val");
+    if (sliderVal) sliderVal.textContent = `${val.toFixed(2)}x`;
+  };
+  rateSlider.onchange = (e) => {
+    const val = parseFloat(e.target.value);
+    setPlaybackRate(val, true);
+  };
+}
+
+const ratePitchToggle = $("rate-preserve-pitch");
+if (ratePitchToggle) {
+  ratePitchToggle.checked = ratePreservePitch;
+  ratePitchToggle.onchange = (e) => setPreservePitch(e.target.checked, true);
+}
+
+// ---------- 高精度逐帧步进与作画赏析系统 (Frame-by-Frame Stepping) ----------
+let frameStepFps = parseInt(localStorage.getItem("ani_frame_fps") || "24", 10);
+
+function setFrameStepFps(fps, notify = true) {
+  frameStepFps = parseInt(fps, 10) || 24;
+  localStorage.setItem("ani_frame_fps", String(frameStepFps));
+  document.querySelectorAll(".visual-fps-opt").forEach((btn) => {
+    btn.classList.toggle("active", parseInt(btn.dataset.fps, 10) === frameStepFps);
+  });
+  if (notify) {
+    showPlayerOsd(`逐帧步进基准: ${frameStepFps} fps (每帧 ${(1000 / frameStepFps).toFixed(1)}ms)`);
+  }
+}
+
+function stepVideoFrame(frames = 1) {
+  const v = $("video");
+  if (!v || !v.duration || !isFinite(v.duration)) return;
+  if (!v.paused) {
+    v.pause();
+  }
+  const frameDuration = 1 / frameStepFps;
+  const target = Math.max(0, Math.min(v.duration, v.currentTime + frames * frameDuration));
+  v.currentTime = target;
+
+  const sign = frames > 0 ? "+" : "";
+  const m = Math.floor(target / 60);
+  const s = Math.floor(target % 60);
+  const ms = Math.floor((target % 1) * 1000);
+  const timeStr = `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+  showPlayerOsd(`🎞️ 逐帧微调: ${sign}${frames} 帧 · ${timeStr} (${frameStepFps}fps)`);
+}
+
+const framePrevBtn = $("player-frame-prev");
+if (framePrevBtn) framePrevBtn.onclick = () => stepVideoFrame(-1);
+const frameNextBtn = $("player-frame-next");
+if (frameNextBtn) frameNextBtn.onclick = () => stepVideoFrame(1);
+
+document.querySelectorAll(".visual-fps-opt").forEach((btn) => {
+  btn.classList.toggle("active", parseInt(btn.dataset.fps, 10) === frameStepFps);
+  btn.onclick = () => setFrameStepFps(btn.dataset.fps, true);
+});
 
 function toggleHelpModal(show) {
   const modal = $("help-modal");
@@ -11263,6 +11433,11 @@ document.addEventListener("keydown", (e) => {
       const audioMenu = $("audio-track-menu");
       if (audioMenu && !audioMenu.classList.contains("hidden")) {
         audioMenu.classList.add("hidden");
+        return;
+      }
+      const rateMenu = $("player-rate-menu");
+      if (rateMenu && !rateMenu.classList.contains("hidden")) {
+        rateMenu.classList.add("hidden");
         return;
       }
       const drawer = $("player-ep-drawer");
