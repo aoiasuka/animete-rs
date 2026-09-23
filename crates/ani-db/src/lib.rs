@@ -73,6 +73,10 @@ static MIGRATIONS: &[(&str, &str)] = &[
         "0006_collection_details",
         include_str!("../migrations/0006_collection_details.sql"),
     ),
+    (
+        "0007_scene_bookmarks",
+        include_str!("../migrations/0007_scene_bookmarks.sql"),
+    ),
 ];
 
 pub async fn open(path: &std::path::Path) -> anyhow::Result<SqlitePool> {
@@ -1098,6 +1102,143 @@ impl UserDataRepo {
     }
 }
 
+// ---------- 名场面高能打点与书签仓库 ----------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow, PartialEq)]
+pub struct SceneBookmark {
+    pub id: i64,
+    pub subject_id: Option<i64>,
+    pub episode_id: Option<i64>,
+    pub video_path: Option<String>,
+    pub title: String,
+    pub position_seconds: f64,
+    pub created_at: i64,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NewSceneBookmark {
+    pub subject_id: Option<i64>,
+    pub episode_id: Option<i64>,
+    pub video_path: Option<String>,
+    pub title: String,
+    pub position_seconds: f64,
+    pub note: Option<String>,
+}
+
+pub struct SceneBookmarkRepo {
+    pool: SqlitePool,
+}
+
+impl SceneBookmarkRepo {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn add(&self, item: &NewSceneBookmark) -> anyhow::Result<SceneBookmark> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let note = item.note.clone().unwrap_or_default();
+        let id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO scene_bookmark (subject_id, episode_id, video_path, title, position_seconds, created_at, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             RETURNING id",
+        )
+        .bind(item.subject_id)
+        .bind(item.episode_id)
+        .bind(&item.video_path)
+        .bind(&item.title)
+        .bind(item.position_seconds)
+        .bind(now)
+        .bind(&note)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(SceneBookmark {
+            id,
+            subject_id: item.subject_id,
+            episode_id: item.episode_id,
+            video_path: item.video_path.clone(),
+            title: item.title.clone(),
+            position_seconds: item.position_seconds,
+            created_at: now,
+            note,
+        })
+    }
+
+    pub async fn list(
+        &self,
+        subject_id: Option<i64>,
+        episode_id: Option<i64>,
+        video_path: Option<&str>,
+    ) -> anyhow::Result<Vec<SceneBookmark>> {
+        if let (Some(s_id), Some(e_id)) = (subject_id, episode_id) {
+            let rows = sqlx::query_as::<_, SceneBookmark>(
+                "SELECT id, subject_id, episode_id, video_path, title, position_seconds, created_at, note
+                 FROM scene_bookmark
+                 WHERE subject_id = ?1 AND episode_id = ?2
+                 ORDER BY position_seconds ASC",
+            )
+            .bind(s_id)
+            .bind(e_id)
+            .fetch_all(&self.pool)
+            .await?;
+            return Ok(rows);
+        }
+
+        if let Some(s_id) = subject_id {
+            let rows = sqlx::query_as::<_, SceneBookmark>(
+                "SELECT id, subject_id, episode_id, video_path, title, position_seconds, created_at, note
+                 FROM scene_bookmark
+                 WHERE subject_id = ?1
+                 ORDER BY position_seconds ASC",
+            )
+            .bind(s_id)
+            .fetch_all(&self.pool)
+            .await?;
+            return Ok(rows);
+        }
+
+        if let Some(v_path) = video_path.filter(|p| !p.trim().is_empty()) {
+            let rows = sqlx::query_as::<_, SceneBookmark>(
+                "SELECT id, subject_id, episode_id, video_path, title, position_seconds, created_at, note
+                 FROM scene_bookmark
+                 WHERE video_path = ?1
+                 ORDER BY position_seconds ASC",
+            )
+            .bind(v_path)
+            .fetch_all(&self.pool)
+            .await?;
+            return Ok(rows);
+        }
+
+        let rows = sqlx::query_as::<_, SceneBookmark>(
+            "SELECT id, subject_id, episode_id, video_path, title, position_seconds, created_at, note
+             FROM scene_bookmark
+             ORDER BY created_at DESC LIMIT 50",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn delete(&self, id: i64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM scene_bookmark WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_title(&self, id: i64, title: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE scene_bookmark SET title = ?1 WHERE id = ?2")
+            .bind(title)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1454,5 +1595,55 @@ mod tests {
         assert_eq!(stats.top_subjects[0].total_seconds, 2000.0);
         assert!(!stats.last_7_days_activity.is_empty());
         assert!(!stats.activity_heatmap.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_scene_bookmark_repo_crud() {
+        let pool = open(&std::path::PathBuf::from(":memory:")).await.unwrap();
+        let repo = SceneBookmarkRepo::new(pool);
+
+        let bm1 = repo
+            .add(&NewSceneBookmark {
+                subject_id: Some(400602),
+                episode_id: Some(1),
+                video_path: Some("file:///frieren_01.mp4".into()),
+                title: "解除限制名场面".into(),
+                position_seconds: 840.5,
+                note: Some("葬送的芙莉莲超燃施法".into()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bm1.title, "解除限制名场面");
+        assert_eq!(bm1.position_seconds, 840.5);
+
+        let bm2 = repo
+            .add(&NewSceneBookmark {
+                subject_id: Some(400602),
+                episode_id: Some(1),
+                video_path: Some("file:///frieren_01.mp4".into()),
+                title: "片头 OP 绝美镜头".into(),
+                position_seconds: 90.0,
+                note: None,
+            })
+            .await
+            .unwrap();
+
+        // 检索：按秒数升序
+        let list = repo.list(Some(400602), Some(1), None).await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, bm2.id); // 90.0 秒在最前
+        assert_eq!(list[1].id, bm1.id); // 840.5 秒在后
+
+        // 更新标题
+        repo.update_title(bm1.id, "芙莉莲封神名场面").await.unwrap();
+        let list = repo.list(Some(400602), Some(1), None).await.unwrap();
+        assert_eq!(list[1].title, "芙莉莲封神名场面");
+
+        // 删除
+        repo.delete(bm2.id).await.unwrap();
+        let list = repo.list(Some(400602), Some(1), None).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, bm1.id);
     }
 }

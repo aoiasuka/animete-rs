@@ -2739,6 +2739,48 @@ pub async fn scan_local_videos(
     crate::syncplay::scan_directory_for_videos(&path).await
 }
 
+// ---------- 名场面高能打点与书签 ----------
+
+#[tauri::command]
+pub async fn add_scene_bookmark(
+    ctx: State<'_, AppContext>,
+    payload: ani_db::NewSceneBookmark,
+) -> Result<ani_db::SceneBookmark, String> {
+    let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
+    repo.add(&payload).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_scene_bookmarks(
+    ctx: State<'_, AppContext>,
+    subject_id: Option<i64>,
+    episode_id: Option<i64>,
+    video_path: Option<String>,
+) -> Result<Vec<ani_db::SceneBookmark>, String> {
+    let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
+    repo.list(subject_id, episode_id, video_path.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_scene_bookmark(
+    ctx: State<'_, AppContext>,
+    id: i64,
+) -> Result<(), String> {
+    let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
+    repo.delete(id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_scene_bookmark_title(
+    ctx: State<'_, AppContext>,
+    id: i64,
+    title: String,
+) -> Result<(), String> {
+    let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
+    repo.update_title(id, &title).await.map_err(|e| e.to_string())
+}
 
 #[cfg(test)]
 mod tests {

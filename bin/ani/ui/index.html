@@ -1114,7 +1114,26 @@
             </div>
           </div>
         </div>
-        <button id="player-screenshot-btn" class="ghost small" title="名场面截帧并复制到剪贴板 (快捷键 C)">截屏 📸</button>
+        <div class="player-screenshot-group">
+          <button id="player-screenshot-btn" class="ghost small" title="名场面截帧并复制到剪贴板 (快捷键 C)">截屏 📸</button>
+          <button id="player-screenshot-opt-btn" class="ghost small screenshot-opt-toggle" title="截图设置（纯净/字幕/弹幕合成）">⚙</button>
+          <div id="player-screenshot-menu" class="screenshot-menu-popup hidden">
+            <div class="screenshot-menu-title">截图合成模式</div>
+            <label class="screenshot-menu-item">
+              <input type="radio" name="ss-mode" value="clean" />
+              <span>纯净视频画面</span>
+            </label>
+            <label class="screenshot-menu-item">
+              <input type="radio" name="ss-mode" value="sub" />
+              <span>包含外挂字幕</span>
+            </label>
+            <label class="screenshot-menu-item">
+              <input type="radio" name="ss-mode" value="all" checked />
+              <span>包含字幕 + 弹幕合成</span>
+            </label>
+          </div>
+        </div>
+        <button id="player-bookmark-btn" class="ghost small" title="添加高能打点书签 (快捷键 M)">打点 💎</button>
         <button id="player-pip" class="ghost small" title="画中画悬浮小窗 (快捷键 P)">画中画 🗗</button>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
@@ -1220,6 +1239,7 @@
           <div class="heatmap-track" id="heatmap-track">
             <canvas id="danmaku-heatmap-canvas" class="danmaku-heatmap-canvas"></canvas>
             <div id="heatmap-playhead" class="heatmap-playhead"></div>
+            <div id="player-bookmarks-layer" class="player-bookmarks-layer"></div>
             <div id="heatmap-hover-line" class="heatmap-hover-line hidden"></div>
             <div id="heatmap-hover-tip" class="heatmap-hover-tip hidden"></div>
           </div>
@@ -1231,10 +1251,30 @@
           </div>
           <div id="stats-osd-grid" class="stats-osd-grid"></div>
         </div>
+        <!-- 截屏悬浮微缩预览卡片 -->
+        <div id="player-screenshot-toast" class="player-screenshot-toast hidden">
+          <div class="ss-toast-thumb-wrap">
+            <img id="ss-toast-img" class="ss-toast-img" alt="截图" />
+            <div class="ss-toast-meta">
+              <span id="ss-toast-res" class="ss-toast-res">1080P</span>
+              <span id="ss-toast-time" class="ss-toast-time">00:00</span>
+            </div>
+          </div>
+          <div class="ss-toast-content">
+            <div class="ss-toast-title">名场面截图已就绪 📸</div>
+            <div class="ss-toast-sub" id="ss-toast-sub">已复制到系统剪贴板，可直接粘贴</div>
+            <div class="ss-toast-actions">
+              <button id="ss-toast-copy-btn" class="primary small">复制图像</button>
+              <button id="ss-toast-save-btn" class="ghost small">下载 PNG</button>
+              <button id="ss-toast-close-btn" class="ghost small">✕</button>
+            </div>
+          </div>
+        </div>
+
         <div id="player-ep-drawer" class="player-ep-drawer hidden">
           <div class="ep-drawer-head">
             <div class="ep-drawer-title">
-              <span>快速选集</span>
+              <span>快速选集与打点</span>
               <span id="ep-drawer-count" class="meta"></span>
             </div>
             <button id="ep-drawer-close" class="ghost small" title="关闭 (Esc / E)">✕</button>
@@ -1243,8 +1283,16 @@
             <button class="ep-drawer-tab active" data-kind="all">全部</button>
             <button class="ep-drawer-tab" data-kind="main">正片</button>
             <button class="ep-drawer-tab" data-kind="sp">SP/特别</button>
+            <button class="ep-drawer-tab" data-kind="bookmarks">💎 名场面 (<span id="ep-drawer-bm-count">0</span>)</button>
           </div>
           <div id="ep-drawer-list" class="ep-drawer-list"></div>
+          <div id="ep-drawer-bookmarks-wrap" class="ep-drawer-bookmarks-wrap hidden">
+            <div class="ep-drawer-bm-header">
+              <span>本条目高能名场面书签</span>
+              <button id="ep-drawer-export-bm" class="ghost small" title="导出名场面 Markdown 笔记">导出笔记 📋</button>
+            </div>
+            <div id="ep-drawer-bm-list" class="ep-drawer-bm-list"></div>
+          </div>
         </div>
       </div>
       <div class="player-danmaku-bar">
@@ -1269,6 +1317,31 @@
             <span class="color-opt" data-color="#1e90ff" style="background:#1e90ff" title="天蓝"></span>
             <span class="color-opt" data-color="#a55eea" style="background:#a55eea" title="电光紫"></span>
             <span class="color-opt" data-color="#ff78cb" style="background:#ff78cb" title="梦幻粉"></span>
+          </div>
+        </div>
+        <div class="dm-delay-capsule-wrap">
+          <button id="dm-delay-capsule-btn" class="ghost small dm-delay-capsule-btn" title="弹幕时间轴微调校准 (快捷键 -/+)：点击展开校准面板">
+            <span class="dm-delay-icon">⏱️</span>
+            <span id="dm-delay-pill-text">0.0s</span>
+          </button>
+          <div id="dm-delay-popup" class="dm-delay-popup hidden">
+            <div class="dm-delay-popup-title">弹幕时间轴微调校准</div>
+            <div class="dm-delay-display">
+              <span class="dm-delay-label">当前偏移</span>
+              <span id="dm-delay-popup-val" class="dm-delay-num">0.0s</span>
+            </div>
+            <div class="dm-delay-btns">
+              <button class="ghost small dm-delay-step" data-step="-1.0">-1.0s</button>
+              <button class="ghost small dm-delay-step" data-step="-0.5">-0.5s</button>
+              <button class="ghost small dm-delay-step" data-step="-0.1">-0.1s</button>
+              <button class="ghost small dm-delay-step" data-step="0.1">+0.1s</button>
+              <button class="ghost small dm-delay-step" data-step="0.5">+0.5s</button>
+              <button class="ghost small dm-delay-step" data-step="1.0">+1.0s</button>
+            </div>
+            <div class="dm-delay-footer">
+              <button id="dm-delay-reset-btn" class="ghost small">重置对齐</button>
+              <span class="meta">已自动记忆</span>
+            </div>
           </div>
         </div>
         <input id="dm-send-input" class="dm-send-input" type="text" placeholder="发一条友善的弹幕见证高能时刻 (快捷键 Enter 发送)…" />
@@ -1418,13 +1491,14 @@
           <div class="sg-item"><span class="sg-desc">聚焦弹幕发射输入框</span><kbd>Enter</kbd></div>
           <div class="sg-item"><span class="sg-desc">快退 10 秒 / 快进 10 秒</span><div class="kbds"><kbd>←</kbd> <kbd>→</kbd> <span class="meta">或</span> <kbd>J</kbd> <kbd>L</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">音量调整 (+10% / -10%)</span><div class="kbds"><kbd>↑</kbd> <kbd>↓</kbd></div></div>
-          <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><kbd>M</kbd></div>
+          <div class="sg-item"><span class="sg-desc">标记名场面打点书签</span><kbd>M</kbd></div>
+          <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><div class="kbds"><kbd>U</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>M</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
-          <div class="sg-item"><span class="sg-desc">降低 / 提高播放倍速 (0.5x ~ 3.0x)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">倍速切换 / 微调 (±0.1x 平滑调节)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">长按画面 / 长按快进键极速快进 (2.0x ⚡)</span><span class="sg-highlight">长按鼠标左键 或 长按 <kbd>→</kbd></span></div>
           <div class="sg-item"><span class="sg-desc">鼠标滚轮调音 / 进度微调</span><span class="sg-highlight">滚轮调音量 · <kbd>Shift</kbd>+滚轮调进度 · <kbd>Ctrl</kbd>+滚轮倍速</span></div>
           <div class="sg-item"><span class="sg-desc">音画同步 (音频提前 50ms / 延后 50ms)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>[</kbd> <kbd>]</kbd></div></div>
-          <div class="sg-item"><span class="sg-desc">名场面截帧保存并复制到剪贴板</span><kbd>C</kbd></div>
+          <div class="sg-item"><span class="sg-desc">名场面截帧（含字幕与弹幕合成预览）</span><kbd>C</kbd></div>
           <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">睡眠定时器 (关/播完本集/30/60/90分)</span><span>控制栏「画面 📺」</span></div>
@@ -1435,7 +1509,7 @@
           <div class="sg-item"><span class="sg-desc">播放上一集 / 下一集</span><div class="kbds"><kbd>B</kbd> <kbd>N</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">切换播放循环模式 (顺序 / 🔂单集 / 🔁列表 / ⏹即止)</span><kbd>R</kbd></div>
           <div class="sg-item"><span class="sg-desc">切换到外部播放器播放 (mpv / 系统默认)</span><kbd>O</kbd></div>
-          <div class="sg-item"><span class="sg-desc">滑出 / 收起选集抽屉</span><kbd>E</kbd></div>
+          <div class="sg-item"><span class="sg-desc">滑出 / 收起选集与名场面抽屉</span><kbd>E</kbd></div>
           <div class="sg-item"><span class="sg-desc">显示 / 隐藏播放统计信息</span><kbd>I</kbd></div>
           <div class="sg-item"><span class="sg-desc">系统媒体控制 (SMTC)</span><span>键盘媒体键 / 锁屏控制</span></div>
           <div class="sg-item"><span class="sg-desc">双击视频区域</span><span>全屏切换</span></div>
@@ -1444,7 +1518,7 @@
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">呼出 / 隐藏弹幕高级调谐面板</span><kbd>D</kbd></div>
           <div class="sg-item"><span class="sg-desc">加载本地弹幕 (.xml / .json)</span><span>拖拽至播放器 或 控制栏「弹幕」</span></div>
-          <div class="sg-item"><span class="sg-desc">弹幕提前 0.5 秒 / 延后 0.5 秒</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">弹幕时间轴微调 (自动记忆当前条目)</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd> <span class="meta">或控制栏「⏱️ 胶囊」</span></div></div>
           <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
         </div>
         <div class="shortcut-group">
@@ -1472,6 +1546,24 @@
       <div class="modal-body" style="max-height: 65vh; overflow-y: auto; padding: 12px 16px;">
         <div id="mikan-loading" class="empty">正在获取个人订阅更新…</div>
         <div id="mikan-list" class="mikan-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 名场面高能打点输入弹窗 -->
+  <div id="bookmark-modal" class="modal-backdrop hidden">
+    <div class="modal-card bookmark-modal-card">
+      <div class="modal-head">
+        <div class="modal-title">💎 标记名场面打点</div>
+        <button id="bookmark-modal-close" class="ghost small" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="modal-body bookmark-modal-body">
+        <div class="bm-modal-time">打点时间码：<b id="bookmark-modal-time-text">00:00</b></div>
+        <input id="bookmark-title-input" class="bm-input" type="text" placeholder="输入名场面备注（如：芙莉莲破防神回 / 帅气变身）…" maxlength="50" autocomplete="off" />
+        <div class="bm-modal-actions">
+          <button id="bookmark-save-btn" class="primary small">保存打点 (Enter)</button>
+          <button id="bookmark-cancel-btn" class="ghost small">取消 (Esc)</button>
+        </div>
       </div>
     </div>
   </div>

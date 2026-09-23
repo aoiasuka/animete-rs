@@ -7470,6 +7470,428 @@ body.window-drag-over::after {
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
 }
 
+/* ---------- 截图选项下拉与悬浮微缩卡片 ---------- */
+.player-screenshot-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.screenshot-opt-toggle {
+  padding: 3px 6px !important;
+  font-size: 11px !important;
+  opacity: 0.7;
+  border-left: none !important;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+.screenshot-opt-toggle:hover {
+  opacity: 1;
+}
+
+.screenshot-menu-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+  z-index: 1000;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenshot-menu-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.screenshot-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+.screenshot-menu-item input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* 截图悬浮微缩预览卡片 */
+.player-screenshot-toast {
+  position: absolute;
+  right: 20px;
+  bottom: 24px;
+  z-index: 999;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(99, 102, 241, 0.25);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  max-width: 360px;
+  animation: ss-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+@keyframes ss-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ss-toast-thumb-wrap {
+  position: relative;
+  width: 96px;
+  height: 54px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+  background: #000;
+}
+
+.ss-toast-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ss-toast-meta {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-family: var(--font-mono, monospace);
+  color: #e2e8f0;
+  display: flex;
+  gap: 3px;
+}
+
+.ss-toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ss-toast-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.ss-toast-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* ---------- 进度条打点书签与抽屉名场面打点 ---------- */
+.player-bookmarks-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.player-bm-pin {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  user-select: none;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s ease;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.8));
+}
+
+.player-bm-pin:hover {
+  transform: translate(-50%, -50%) scale(1.45);
+  filter: drop-shadow(0 0 8px #60a5fa);
+  z-index: 20;
+}
+
+.player-bm-pin-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.player-bm-pin:hover .player-bm-pin-tooltip {
+  opacity: 1;
+}
+
+/* 抽屉中的名场面打点 */
+.ep-drawer-bookmarks-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 12px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.ep-drawer-bm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ep-drawer-bm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ep-drawer-bm-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  gap: 10px;
+  transition: all 0.15s ease;
+}
+
+.ep-drawer-bm-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.ep-drawer-bm-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+  flex: 1;
+}
+
+.ep-drawer-bm-time {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.ep-drawer-bm-title {
+  font-size: 12px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-drawer-bm-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ep-drawer-bm-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 40px 10px;
+}
+
+/* 打点输入模态框 */
+.bookmark-modal-card {
+  width: 380px;
+}
+
+.bookmark-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bm-modal-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.bm-modal-time b {
+  font-family: var(--font-mono, monospace);
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.bm-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+
+.bm-input:focus {
+  border-color: var(--accent);
+}
+
+.bm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- 弹幕时间轴微调胶囊 ---------- */
+.dm-delay-capsule-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dm-delay-capsule-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px !important;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px !important;
+  border-radius: var(--radius-pill) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text-muted) !important;
+  transition: all 0.15s ease;
+}
+
+.dm-delay-capsule-btn:hover {
+  background: rgba(56, 189, 248, 0.1) !important;
+  border-color: rgba(56, 189, 248, 0.35) !important;
+  color: var(--text-main) !important;
+}
+
+.dm-delay-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dm-delay-popup-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  text-align: center;
+}
+
+.dm-delay-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.dm-delay-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dm-delay-btns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.dm-delay-step {
+  padding: 4px 6px !important;
+  font-size: 11px !important;
+  font-family: var(--font-mono, monospace);
+}
+
+.dm-delay-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
 
 
 

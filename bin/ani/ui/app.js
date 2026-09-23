@@ -4682,16 +4682,48 @@ const DanmakuOverlay = (() => {
       timeOffsetSec = Math.round((timeOffsetSec + deltaSec) * 10) / 10;
       this.seekTo(vid().currentTime);
       const sign = timeOffsetSec > 0 ? "+" : "";
+      const signText = `${sign}${timeOffsetSec.toFixed(1)}s`;
       const delayEl = $("dm-delay-val");
-      if (delayEl) delayEl.textContent = `${sign}${timeOffsetSec.toFixed(1)}s`;
-      showPlayerOsd(`弹幕时间微调：${sign}${timeOffsetSec.toFixed(1)}s`);
+      if (delayEl) delayEl.textContent = signText;
+      const pillText = $("dm-delay-pill-text");
+      if (pillText) pillText.textContent = signText;
+      const popupVal = $("dm-delay-popup-val");
+      if (popupVal) popupVal.textContent = signText;
+      showPlayerOsd(`弹幕时间微调：${signText}`);
+      try {
+        if (typeof getDanmakuStorageKey === "function") {
+          localStorage.setItem(getDanmakuStorageKey(), timeOffsetSec.toFixed(1));
+        }
+      } catch (err) {}
     },
     resetOffset() {
       timeOffsetSec = 0.0;
       this.seekTo(vid().currentTime);
       const delayEl = $("dm-delay-val");
       if (delayEl) delayEl.textContent = "0.0s";
+      const pillText = $("dm-delay-pill-text");
+      if (pillText) pillText.textContent = "0.0s";
+      const popupVal = $("dm-delay-popup-val");
+      if (popupVal) popupVal.textContent = "0.0s";
       showPlayerOsd("弹幕时间已重置为 0.0s");
+      try {
+        if (typeof getDanmakuStorageKey === "function") {
+          localStorage.setItem(getDanmakuStorageKey(), "0.0");
+        }
+      } catch (err) {}
+    },
+    setOffset(val, showOsd = false) {
+      timeOffsetSec = Math.round(val * 10) / 10;
+      this.seekTo(vid().currentTime);
+      const sign = timeOffsetSec > 0 ? "+" : "";
+      const signText = `${sign}${timeOffsetSec.toFixed(1)}s`;
+      const delayEl = $("dm-delay-val");
+      if (delayEl) delayEl.textContent = signText;
+      const pillText = $("dm-delay-pill-text");
+      if (pillText) pillText.textContent = signText;
+      const popupVal = $("dm-delay-popup-val");
+      if (popupVal) popupVal.textContent = signText;
+      if (showOsd) showPlayerOsd(`弹幕时间微调：${signText}`);
     },
     setOpacity(val) {
       opacity = val;
@@ -5711,6 +5743,254 @@ function updateMediaSession() {
   } catch (_) {}
 }
 
+// ---------- 名场面高能打点书签系统 (Scene Bookmarks) ----------
+let currentBookmarks = [];
+let pendingBookmarkTime = 0;
+
+function getCurrentBookmarkScope() {
+  const subjectId = state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id ?? null;
+  let episodeId = null;
+  if (state.currentEp != null && state.episodes) {
+    const epObj = state.episodes.find((e) => Math.abs(e.ep - state.currentEp) < 0.01);
+    if (epObj) episodeId = epObj.id?.id ?? epObj.id;
+  }
+  const videoPath = state.mediaUrl || null;
+  return { subjectId, episodeId, videoPath };
+}
+
+async function loadSceneBookmarks() {
+  const { subjectId, episodeId, videoPath } = getCurrentBookmarkScope();
+  try {
+    const list = await invoke("list_scene_bookmarks", {
+      subjectId: subjectId ? Number(subjectId) : null,
+      episodeId: episodeId ? Number(episodeId) : null,
+      videoPath: videoPath ? String(videoPath) : null,
+    });
+    currentBookmarks = list || [];
+    renderSceneBookmarks();
+  } catch (e) {
+    console.warn("loadSceneBookmarks failed:", e);
+  }
+}
+
+function renderSceneBookmarks() {
+  // 1. 进度条打点层
+  const layer = $("player-bookmarks-layer");
+  const v = $("video");
+  const duration = v && v.duration && isFinite(v.duration) ? v.duration : 0;
+  if (layer) {
+    layer.innerHTML = "";
+    if (duration > 0) {
+      currentBookmarks.forEach((bm) => {
+        const pct = Math.max(0, Math.min(100, (bm.position_seconds / duration) * 100));
+        const pin = document.createElement("div");
+        pin.className = "player-bm-pin";
+        pin.style.left = `${pct}%`;
+        const m = Math.floor(bm.position_seconds / 60);
+        const s = Math.floor(bm.position_seconds % 60);
+        const timeStr = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        pin.innerHTML = `💎<div class="player-bm-pin-tooltip">[${timeStr}] ${escapeHtml(bm.title)}</div>`;
+        pin.onclick = (e) => {
+          e.stopPropagation();
+          if (v) {
+            v.currentTime = bm.position_seconds;
+            v.play().catch(() => {});
+            showPlayerOsd(`💎 跳转名场面: [${timeStr}] ${bm.title}`);
+          }
+        };
+        layer.appendChild(pin);
+      });
+    }
+  }
+
+  // 2. 抽屉内的打点清单
+  const countEl = $("ep-drawer-bm-count");
+  if (countEl) countEl.textContent = String(currentBookmarks.length);
+  const listEl = $("ep-drawer-bm-list");
+  if (listEl) {
+    if (!currentBookmarks.length) {
+      listEl.innerHTML = `<div class="ep-drawer-bm-empty">当前条目暂无名场面打点<br/><span class="meta">观影时按键盘快捷键 M 即可打点记录</span></div>`;
+    } else {
+      listEl.innerHTML = currentBookmarks
+        .map((bm) => {
+          const m = Math.floor(bm.position_seconds / 60);
+          const s = Math.floor(bm.position_seconds % 60);
+          const timeStr = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+          return `
+            <div class="ep-drawer-bm-item" data-id="${bm.id}">
+              <div class="ep-drawer-bm-left" title="点击跳转至此名场面">
+                <span class="ep-drawer-bm-time">${timeStr}</span>
+                <span class="ep-drawer-bm-title">${escapeHtml(bm.title)}</span>
+              </div>
+              <div class="ep-drawer-bm-actions">
+                <button class="ghost small bm-rename-btn" title="重命名打点" data-id="${bm.id}" data-title="${escapeAttr(bm.title)}">✏️</button>
+                <button class="ghost small bm-delete-btn danger" title="删除打点" data-id="${bm.id}">🗑️</button>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      listEl.querySelectorAll(".ep-drawer-bm-left").forEach((btn) => {
+        btn.onclick = () => {
+          const item = btn.closest(".ep-drawer-bm-item");
+          const id = parseInt(item.dataset.id, 10);
+          const bm = currentBookmarks.find((b) => b.id === id);
+          if (bm && v) {
+            v.currentTime = bm.position_seconds;
+            v.play().catch(() => {});
+            showPlayerOsd(`💎 跳转名场面: ${bm.title}`);
+          }
+        };
+      });
+
+      listEl.querySelectorAll(".bm-rename-btn").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const id = parseInt(btn.dataset.id, 10);
+          const oldTitle = btn.dataset.title || "";
+          const newTitle = prompt("修改名场面打点备注：", oldTitle);
+          if (newTitle && newTitle.trim() && newTitle.trim() !== oldTitle) {
+            try {
+              await invoke("update_scene_bookmark_title", { id, title: newTitle.trim() });
+              await loadSceneBookmarks();
+              toast("已更新打点备注", true);
+            } catch (err) {
+              toast("更新打点失败: " + err);
+            }
+          }
+        };
+      });
+
+      listEl.querySelectorAll(".bm-delete-btn").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const id = parseInt(btn.dataset.id, 10);
+          if (confirm("确定要删除此名场面打点吗？")) {
+            try {
+              await invoke("delete_scene_bookmark", { id });
+              await loadSceneBookmarks();
+              toast("已删除打点", true);
+            } catch (err) {
+              toast("删除打点失败: " + err);
+            }
+          }
+        };
+      });
+    }
+  }
+}
+
+function openBookmarkModal() {
+  const v = $("video");
+  if (!v || isNaN(v.duration) || v.duration <= 0) {
+    toast("暂无正在播放的视频");
+    return;
+  }
+  pendingBookmarkTime = v.currentTime;
+  const m = Math.floor(pendingBookmarkTime / 60);
+  const s = Math.floor(pendingBookmarkTime % 60);
+  const timeStr = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+
+  const timeEl = $("bookmark-modal-time-text");
+  if (timeEl) timeEl.textContent = timeStr;
+
+  const input = $("bookmark-title-input");
+  if (input) {
+    const epText = state.currentEp != null ? `第${state.currentEp}集 ` : "";
+    input.value = `${epText}名场面 (${timeStr})`;
+  }
+
+  const modal = $("bookmark-modal");
+  if (modal) {
+    modal.classList.remove("hidden");
+    if (input) {
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 50);
+    }
+  }
+}
+
+async function saveBookmarkFromModal() {
+  const input = $("bookmark-title-input");
+  const title = (input && input.value ? input.value : "名场面打点").trim();
+  const { subjectId, episodeId, videoPath } = getCurrentBookmarkScope();
+
+  try {
+    await invoke("add_scene_bookmark", {
+      payload: {
+        subject_id: subjectId ? Number(subjectId) : null,
+        episode_id: episodeId ? Number(episodeId) : null,
+        video_path: videoPath ? String(videoPath) : null,
+        title,
+        position_seconds: pendingBookmarkTime,
+        note: null,
+      },
+    });
+    const modal = $("bookmark-modal");
+    if (modal) modal.classList.add("hidden");
+    await loadSceneBookmarks();
+    showPlayerOsd(`💎 已成功添加名场面打点: ${title}`);
+    toast(`已记录名场面打点：${title}`, true);
+  } catch (e) {
+    toast("添加打点失败：" + e);
+  }
+}
+
+function exportBookmarksMarkdown() {
+  if (!currentBookmarks.length) {
+    toast("当前暂无打点可供导出");
+    return;
+  }
+  const sTitle = state.subject?.name_cn || state.subject?.name || "动画";
+  let md = `# 🎬 《${sTitle}》名场面观影笔记与打点清单\n\n`;
+  md += `> 导出时间：${new Date().toLocaleString()} | 记录总数：${currentBookmarks.length} 处高能时刻\n\n`;
+  md += `| 时间码 | 名场面与台词备注 | 剧集 |\n`;
+  md += `| :--- | :--- | :--- |\n`;
+
+  currentBookmarks.forEach((bm) => {
+    const m = Math.floor(bm.position_seconds / 60);
+    const s = Math.floor(bm.position_seconds % 60);
+    const timeStr = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    const epStr = bm.episode_id ? `EP ${bm.episode_id}` : (state.currentEp ? `第 ${state.currentEp} 集` : "正片");
+    md += `| **${timeStr}** | ${bm.title.replace(/\|/g, "/")} | ${epStr} |\n`;
+  });
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(md).then(() => {
+      toast("已复制名场面 Markdown 笔记到剪贴板！📋", true);
+      showPlayerOsd("📋 名场面 Markdown 笔记已复制");
+    }).catch(() => {
+      toast("复制失败，请重试");
+    });
+  }
+}
+
+// 弹幕时间轴微调记忆键与恢复
+function getDanmakuStorageKey() {
+  const subjectId = state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id ?? null;
+  if (subjectId) return `ani_dm_offset_sub_${subjectId}`;
+  if (state.mediaUrl) {
+    return `ani_dm_offset_vid_${encodeURIComponent(String(state.mediaUrl).slice(-64))}`;
+  }
+  return "ani_dm_offset_default";
+}
+
+function restoreDanmakuOffset() {
+  const key = getDanmakuStorageKey();
+  const stored = localStorage.getItem(key);
+  if (stored != null) {
+    const offset = parseFloat(stored);
+    if (!isNaN(offset)) {
+      DanmakuOverlay.setOffset(offset);
+      return;
+    }
+  }
+  DanmakuOverlay.setOffset(0.0);
+}
+
 // ---------- 播放器快速选集抽屉 (Player Episode Drawer) ----------
 
 let epDrawerKind = "all";
@@ -5731,8 +6011,20 @@ function toggleEpDrawer(show) {
 
 function renderEpDrawer() {
   const listEl = $("ep-drawer-list");
+  const bmWrap = $("ep-drawer-bookmarks-wrap");
   const countEl = $("ep-drawer-count");
   if (!listEl) return;
+
+  if (epDrawerKind === "bookmarks") {
+    listEl.classList.add("hidden");
+    if (bmWrap) bmWrap.classList.remove("hidden");
+    if (countEl) countEl.textContent = `(${currentBookmarks.length})`;
+    renderSceneBookmarks();
+    return;
+  }
+
+  listEl.classList.remove("hidden");
+  if (bmWrap) bmWrap.classList.add("hidden");
 
   const episodes = state.episodes || [];
   if (!episodes.length) {
@@ -6442,8 +6734,32 @@ function adjustAudioDelay(stepMs = 50) {
   setAudioDelay(next, true);
 }
 
-// ---------- 名场面无损截帧与系统剪贴板分享 ----------
+// ---------- 名场面无损截帧与字幕弹幕合成及系统分享 ----------
 let isCapturingFrame = false;
+let screenshotMode = localStorage.getItem("ani_ss_mode") || "all"; // "clean", "sub", "all"
+let ssToastTimer = null;
+
+function getCurrentSubtitleTexts(v) {
+  const texts = [];
+  if (v.textTracks && v.textTracks.length) {
+    for (let i = 0; i < v.textTracks.length; i++) {
+      const track = v.textTracks[i];
+      if (track.mode === "showing" && track.activeCues) {
+        for (let j = 0; j < track.activeCues.length; j++) {
+          const cue = track.activeCues[j];
+          if (cue.text) texts.push(cue.text.replace(/<[^>]+>/g, "").trim());
+        }
+      }
+    }
+  }
+  if (!texts.length && typeof subState !== "undefined" && subState.loaded && subState.cues) {
+    const t = v.currentTime - (subState.offsetSec || 0);
+    const active = subState.cues.filter((c) => t >= c.start && t <= c.end);
+    active.forEach((c) => texts.push(c.text.replace(/<[^>]+>/g, "").trim()));
+  }
+  return texts.filter(Boolean);
+}
+
 async function captureVideoFrame() {
   const v = $("video");
   if (!v || isCapturingFrame || !v.videoWidth || !v.videoHeight) {
@@ -6458,7 +6774,7 @@ async function captureVideoFrame() {
     canvas.height = v.videoHeight;
     const ctx = canvas.getContext("2d");
 
-    // 若用户应用了色彩滤镜或镜像/旋转变换，同步应用到导出画面
+    // 1. 视频本体渲染（含色彩滤镜与旋转/镜像）
     if (visualState.filter !== "none") {
       ctx.filter = getComputedStyle(v).filter;
     }
@@ -6471,6 +6787,46 @@ async function captureVideoFrame() {
       ctx.restore();
     } else {
       ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    }
+    ctx.filter = "none";
+
+    // 2. 字幕合成（当模式为 sub 或 all 时）
+    if (screenshotMode === "sub" || screenshotMode === "all") {
+      const subTexts = getCurrentSubtitleTexts(v);
+      if (subTexts.length > 0) {
+        const fullSub = subTexts.join("\n");
+        const lines = fullSub.split("\n").filter((s) => s.trim().length > 0);
+        const subFontSize = Math.max(26, Math.round(canvas.height * 0.046));
+        const lineHeight = subFontSize * 1.35;
+        const bottomMargin = Math.round(canvas.height * 0.065);
+        const startY = canvas.height - bottomMargin - (lines.length - 1) * lineHeight;
+
+        ctx.save();
+        ctx.font = `700 ${subFontSize}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        const strokeWidth = Math.max(4, Math.round(subFontSize * 0.18));
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = "#000000";
+        ctx.fillStyle = (typeof SUB_COLORS !== "undefined" && typeof subState !== "undefined" && SUB_COLORS[subState.color]) || "#ffffff";
+        ctx.shadowColor = "rgba(0,0,0,0.85)";
+        ctx.shadowBlur = 6;
+
+        lines.forEach((line, idx) => {
+          const y = startY + idx * lineHeight;
+          ctx.strokeText(line, canvas.width / 2, y);
+          ctx.fillText(line, canvas.width / 2, y);
+        });
+        ctx.restore();
+      }
+    }
+
+    // 3. 弹幕全屏合成（当模式为 all 时）
+    if (screenshotMode === "all") {
+      const dmCanvas = $("danmaku-canvas");
+      if (dmCanvas && !dmCanvas.classList.contains("hidden")) {
+        ctx.drawImage(dmCanvas, 0, 0, canvas.width, canvas.height);
+      }
     }
 
     // 触发快门白闪动效
@@ -6497,7 +6853,7 @@ async function captureVideoFrame() {
         return;
       }
 
-      // 1. 尝试复制到系统剪贴板（支持在聊天工具直接 Ctrl+V）
+      // 尝试复制到系统剪贴板
       let clipboardCopied = false;
       if (navigator.clipboard && window.ClipboardItem) {
         try {
@@ -6508,21 +6864,62 @@ async function captureVideoFrame() {
         }
       }
 
-      // 2. 触发浏览器/系统原生下载文件保存
-      const a = document.createElement("a");
-      a.download = filename;
-      const blobUrl = URL.createObjectURL(blob);
-      a.href = blobUrl;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-      }, 1000);
+      // 唤起右下角悬浮微缩卡片
+      const toastCard = $("player-screenshot-toast");
+      if (toastCard) {
+        const toastImg = $("ss-toast-img");
+        if (toastImg) toastImg.src = canvas.toDataURL("image/png");
+        const resEl = $("ss-toast-res");
+        if (resEl) resEl.textContent = `${canvas.width}×${canvas.height}`;
+        const timeEl = $("ss-toast-time");
+        if (timeEl) timeEl.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        const subEl = $("ss-toast-sub");
+        if (subEl) {
+          const modeLabel = screenshotMode === "clean" ? "纯净原画" : screenshotMode === "sub" ? "含字幕" : "含字幕+弹幕";
+          subEl.textContent = clipboardCopied
+            ? `已复制到剪贴板 (${modeLabel})`
+            : `截图已生成 (${modeLabel})`;
+        }
+        const copyBtn = $("ss-toast-copy-btn");
+        if (copyBtn) {
+          copyBtn.textContent = clipboardCopied ? "已复制 ✓" : "复制图像";
+          copyBtn.onclick = async () => {
+            if (navigator.clipboard && window.ClipboardItem) {
+              try {
+                await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+                copyBtn.textContent = "已复制 ✓";
+                toast("已再次复制截图到系统剪贴板", true);
+              } catch {}
+            }
+          };
+        }
+        const saveBtn = $("ss-toast-save-btn");
+        if (saveBtn) {
+          saveBtn.onclick = () => {
+            const a = document.createElement("a");
+            a.download = filename;
+            const u = URL.createObjectURL(blob);
+            a.href = u;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(u), 1000);
+            toast("截图已下载保存: " + filename, true);
+          };
+        }
+        const closeBtn = $("ss-toast-close-btn");
+        if (closeBtn) {
+          closeBtn.onclick = () => toastCard.classList.add("hidden");
+        }
+        toastCard.classList.remove("hidden");
+        clearTimeout(ssToastTimer);
+        ssToastTimer = setTimeout(() => {
+          toastCard.classList.add("hidden");
+        }, 5000);
+      }
 
+      const modeDesc = screenshotMode === "clean" ? "纯原画" : screenshotMode === "sub" ? "含台词字幕" : "含字幕+弹幕合成";
       const msg = clipboardCopied
-        ? "📸 名场面截图已保存并复制到剪贴板！"
-        : "📸 名场面截图已保存至本地！";
+        ? `📸 名场面截图已复制到剪贴板！(${modeDesc})`
+        : `📸 名场面截图已就绪！(${modeDesc})`;
       showPlayerOsd(msg);
       toast(`${msg}（${canvas.width}×${canvas.height}）`, true);
       isCapturingFrame = false;
@@ -6649,6 +7046,8 @@ function showPlayer(url, title, extra = {}) {
   if (audioBoostState.level !== 1.0) {
     setAudioBoost(audioBoostState.level);
   }
+  restoreDanmakuOffset();
+  loadSceneBookmarks();
   if (!url) return;
 
   autoDetectAndMountSubtitles(extra?.localPath || btFallbackPath, extra?.subtitles);
@@ -7155,6 +7554,7 @@ $("video").addEventListener("loadedmetadata", () => {
     if (DanmakuOverlay.getEvents().length) {
       renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
     }
+    renderSceneBookmarks();
   }
 });
 $("video").addEventListener("pause", () => {
@@ -8933,6 +9333,81 @@ if (screenshotBtn) {
   screenshotBtn.onclick = () => captureVideoFrame();
 }
 
+const screenshotOptBtn = $("player-screenshot-opt-btn");
+const screenshotMenu = $("player-screenshot-menu");
+if (screenshotOptBtn && screenshotMenu) {
+  screenshotOptBtn.onclick = (e) => {
+    e.stopPropagation();
+    screenshotMenu.classList.toggle("hidden");
+  };
+}
+document.querySelectorAll('input[name="ss-mode"]').forEach((r) => {
+  if (r.value === screenshotMode) r.checked = true;
+  r.onchange = () => {
+    screenshotMode = r.value;
+    localStorage.setItem("ani_ss_mode", screenshotMode);
+    const desc = r.value === "clean" ? "纯净原画" : r.value === "sub" ? "包含字幕" : "包含字幕+弹幕合成";
+    toast(`已设置截图模式：${desc}`, true);
+    screenshotMenu?.classList.add("hidden");
+  };
+});
+
+const bookmarkBtn = $("player-bookmark-btn");
+if (bookmarkBtn) {
+  bookmarkBtn.onclick = () => openBookmarkModal();
+}
+const bmModalClose = $("bookmark-modal-close");
+const bmModalCancel = $("bookmark-cancel-btn");
+const bmModal = $("bookmark-modal");
+if (bmModalClose && bmModal) {
+  bmModalClose.onclick = () => bmModal.classList.add("hidden");
+}
+if (bmModalCancel && bmModal) {
+  bmModalCancel.onclick = () => bmModal.classList.add("hidden");
+}
+const bmSaveBtn = $("bookmark-save-btn");
+if (bmSaveBtn) {
+  bmSaveBtn.onclick = () => saveBookmarkFromModal();
+}
+const bmInput = $("bookmark-title-input");
+if (bmInput) {
+  bmInput.onkeydown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveBookmarkFromModal();
+    } else if (e.key === "Escape") {
+      bmModal?.classList.add("hidden");
+    }
+  };
+}
+const bmExportBtn = $("ep-drawer-export-bm");
+if (bmExportBtn) {
+  bmExportBtn.onclick = () => exportBookmarksMarkdown();
+}
+
+const dmDelayCapsuleBtn = $("dm-delay-capsule-btn");
+const dmDelayPopup = $("dm-delay-popup");
+if (dmDelayCapsuleBtn && dmDelayPopup) {
+  dmDelayCapsuleBtn.onclick = (e) => {
+    e.stopPropagation();
+    dmDelayPopup.classList.toggle("hidden");
+  };
+}
+document.querySelectorAll(".dm-delay-step").forEach((btn) => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const step = parseFloat(btn.dataset.step) || 0;
+    DanmakuOverlay.adjustOffset(step);
+  };
+});
+const dmDelayResetBtn = $("dm-delay-reset-btn");
+if (dmDelayResetBtn) {
+  dmDelayResetBtn.onclick = (e) => {
+    e.stopPropagation();
+    DanmakuOverlay.resetOffset();
+  };
+}
+
 const pipBtn = $("player-pip");
 if (pipBtn) {
   pipBtn.onclick = () => togglePiP();
@@ -9103,25 +9578,51 @@ document.addEventListener("keydown", (e) => {
       }
       break;
     case "m": case "M":
+      if (e.shiftKey) {
+        v.muted = !v.muted;
+        showPlayerOsd(v.muted ? "🔇 静音" : `🔊 音量: ${Math.round(v.volume * 100)}%`);
+      } else {
+        openBookmarkModal();
+      }
+      break;
+    case "u": case "U":
       v.muted = !v.muted;
       showPlayerOsd(v.muted ? "🔇 静音" : `🔊 音量: ${Math.round(v.volume * 100)}%`);
       break;
     case "<": case ",": {
-      const curIdx = RATES.indexOf(v.playbackRate);
-      const prevIdx = (curIdx - 1 + RATES.length) % RATES.length;
-      v.playbackRate = RATES[prevIdx];
-      $("player-rate").textContent = `倍速 ${RATES[prevIdx]}x`;
-      showPlayerOsd(`倍速: ${RATES[prevIdx]}x`);
-      localStorage.setItem("ani_rate", String(RATES[prevIdx]));
+      if (e.shiftKey) {
+        const cur = Math.round(v.playbackRate * 10) / 10;
+        const next = Math.max(0.2, Math.round((cur - 0.1) * 10) / 10);
+        v.playbackRate = next;
+        $("player-rate").textContent = `倍速 ${next.toFixed(1)}x`;
+        showPlayerOsd(`⚡ 播放倍速: ${next.toFixed(1)}x`);
+        localStorage.setItem("ani_rate", String(next));
+      } else {
+        const curIdx = RATES.indexOf(v.playbackRate);
+        const prevIdx = (curIdx - 1 + RATES.length) % RATES.length;
+        v.playbackRate = RATES[prevIdx];
+        $("player-rate").textContent = `倍速 ${RATES[prevIdx]}x`;
+        showPlayerOsd(`⚡ 播放倍速: ${RATES[prevIdx]}x`);
+        localStorage.setItem("ani_rate", String(RATES[prevIdx]));
+      }
       break;
     }
     case ">": case ".": {
-      const curIdx = RATES.indexOf(v.playbackRate);
-      const nextIdx = (curIdx + 1) % RATES.length;
-      v.playbackRate = RATES[nextIdx];
-      $("player-rate").textContent = `倍速 ${RATES[nextIdx]}x`;
-      showPlayerOsd(`倍速: ${RATES[nextIdx]}x`);
-      localStorage.setItem("ani_rate", String(RATES[nextIdx]));
+      if (e.shiftKey) {
+        const cur = Math.round(v.playbackRate * 10) / 10;
+        const next = Math.min(4.0, Math.round((cur + 0.1) * 10) / 10);
+        v.playbackRate = next;
+        $("player-rate").textContent = `倍速 ${next.toFixed(1)}x`;
+        showPlayerOsd(`⚡ 播放倍速: ${next.toFixed(1)}x`);
+        localStorage.setItem("ani_rate", String(next));
+      } else {
+        const curIdx = RATES.indexOf(v.playbackRate);
+        const nextIdx = (curIdx + 1) % RATES.length;
+        v.playbackRate = RATES[nextIdx];
+        $("player-rate").textContent = `倍速 ${RATES[nextIdx]}x`;
+        showPlayerOsd(`⚡ 播放倍速: ${RATES[nextIdx]}x`);
+        localStorage.setItem("ani_rate", String(RATES[nextIdx]));
+      }
       break;
     }
     case "w": case "W": cycleAspectRatio(); break;
@@ -9322,6 +9823,8 @@ function initDanmakuSender() {
   document.addEventListener("click", () => {
     modeMenu?.classList.add("hidden");
     colorMenu?.classList.add("hidden");
+    $("player-screenshot-menu")?.classList.add("hidden");
+    $("dm-delay-popup")?.classList.add("hidden");
   });
 
   function doSend() {
