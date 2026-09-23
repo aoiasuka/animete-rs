@@ -1173,6 +1173,25 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">人声清透增强</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-vocal-opt active" data-vocal="0" title="原声还原，不加中频增益">原声 (0dB)</button>
+                <button class="ghost small visual-vocal-opt" data-vocal="3" title="轻微提亮台词人声 (+3dB)">微亮 (+3dB)</button>
+                <button class="ghost small visual-vocal-opt" data-vocal="6" title="显著清晰对白细节 (+6dB)">清透 (+6dB)</button>
+                <button class="ghost small visual-vocal-opt" data-vocal="9" title="极清人声对白 (+9dB)，压低重低音轰鸣">极清 (+9dB)</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">声道平衡</span>
+              <div class="audio-pan-row">
+                <span class="audio-pan-tag">L</span>
+                <input type="range" id="audio-pan-slider" class="visual-slider" min="-1.0" max="1.0" step="0.05" value="0.0" title="调节左右耳声道平衡" />
+                <span class="audio-pan-tag">R</span>
+                <span id="audio-pan-val" class="meta mono" style="min-width: 44px; text-align: center;">居中</span>
+                <button id="btn-reset-audio-pan" class="ghost small" title="重置声道平衡居中">重置</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">音画同步</span>
               <div class="sub-sync-btns">
                 <button id="audio-delay-minus" class="ghost small" title="提前 50ms (快捷键 Shift+[)">-50ms</button>
@@ -1180,6 +1199,16 @@
                 <button id="audio-delay-plus" class="ghost small" title="延后 50ms (快捷键 Shift+])">+50ms</button>
                 <button id="audio-delay-bt-btn" class="ghost small" title="一键补偿蓝牙耳机常见延迟 (+200ms)">蓝牙 +200ms</button>
                 <button id="audio-delay-reset" class="ghost small" title="重置音频延迟为 0ms">重置</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">连播倒计时</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-autonext-opt" data-delay="0" title="片尾立即秒连下一集">0s (立即)</button>
+                <button class="ghost small visual-autonext-opt" data-delay="3" title="3 秒快速连播">3s</button>
+                <button class="ghost small visual-autonext-opt active" data-delay="5" title="5 秒标准连播倒计时 (默认)">5s (默认)</button>
+                <button class="ghost small visual-autonext-opt" data-delay="10" title="10 秒充裕倒计时">10s</button>
+                <button class="ghost small visual-autonext-opt" data-delay="off" title="播完不自动跳下一集">关闭</button>
               </div>
             </div>
             <div class="visual-menu-row">
@@ -1436,6 +1465,7 @@
             <button class="ep-drawer-tab" data-kind="main">正片</button>
             <button class="ep-drawer-tab" data-kind="sp">SP/特别</button>
             <button class="ep-drawer-tab" data-kind="bookmarks">💎 名场面 (<span id="ep-drawer-bm-count">0</span>)</button>
+            <button class="ep-drawer-tab" data-kind="danmaku">💬 弹幕 (<span id="ep-drawer-dm-count">0</span>)</button>
           </div>
           <div class="ep-drawer-search-wrap">
             <input type="text" id="ep-drawer-search" class="ep-drawer-search" placeholder="🔍 快速搜索集数 / 标题 (如 12、特别篇)..." />
@@ -1448,6 +1478,38 @@
               <button id="ep-drawer-export-bm" class="ghost small" title="导出名场面 Markdown 笔记">导出笔记 📋</button>
             </div>
             <div id="ep-drawer-bm-list" class="ep-drawer-bm-list"></div>
+          </div>
+          <div id="ep-drawer-danmaku-wrap" class="ep-drawer-danmaku-wrap hidden">
+            <div class="ep-drawer-dm-filter-bar">
+              <div class="ep-drawer-dm-search-row">
+                <input type="text" id="ep-drawer-dm-search" class="ep-drawer-dm-search" placeholder="🔍 检索弹幕关键词 / 流行梗..." />
+                <button id="ep-drawer-dm-search-clear" class="ep-drawer-dm-search-clear hidden" title="清空搜索">✕</button>
+              </div>
+              <div class="ep-drawer-dm-chips-row">
+                <button class="ep-dm-chip active" data-filter="all">全部</button>
+                <button class="ep-dm-chip" data-filter="scroll">滚动 ➔</button>
+                <button class="ep-dm-chip" data-filter="top">顶端 ⤓</button>
+                <button class="ep-dm-chip" data-filter="bottom">底端 ⤒</button>
+                <button class="ep-dm-chip" data-filter="color">彩色 🎨</button>
+                <button class="ep-dm-chip" data-filter="hot">🔥 高频梗</button>
+              </div>
+              <div class="ep-drawer-dm-meta-row">
+                <div class="ep-drawer-dm-sort-group">
+                  <button id="ep-dm-sort-time-asc" class="ghost small ep-dm-sort-btn active" title="按时间正序排列">时间 ↑</button>
+                  <button id="ep-dm-sort-time-desc" class="ghost small ep-dm-sort-btn" title="按时间倒序排列">时间 ↓</button>
+                  <button id="ep-dm-sort-hot" class="ghost small ep-dm-sort-btn" title="按弹幕合并热度排列">热度 🔥</button>
+                </div>
+                <div class="ep-drawer-dm-actions-group">
+                  <label class="ep-dm-follow-label" title="开启后随视频播放自动高亮并平滑定位至当前时刻弹幕">
+                    <input type="checkbox" id="ep-dm-follow-check" checked />
+                    <span>📍 随播定位</span>
+                  </label>
+                  <button id="ep-dm-export-btn" class="ghost small" title="导出当前剧集弹幕为 JSON / TXT 文件">导出 💾</button>
+                  <button id="ep-dm-copy-btn" class="ghost small" title="复制当前检索到的弹幕列表到剪贴板">复制 📋</button>
+                </div>
+              </div>
+            </div>
+            <div id="ep-drawer-dm-list" class="ep-drawer-dm-list"></div>
           </div>
         </div>
       </div>

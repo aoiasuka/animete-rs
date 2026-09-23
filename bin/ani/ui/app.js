@@ -5054,6 +5054,12 @@ const DanmakuOverlay = (() => {
       if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
         renderDanmakuHeatmap(events, v.duration);
       }
+      if (typeof updateDanmakuDrawerBadge === "function") {
+        updateDanmakuDrawerBadge();
+      }
+      if (typeof epDrawerKind !== "undefined" && epDrawerKind === "danmaku" && typeof renderDanmakuDrawer === "function") {
+        renderDanmakuDrawer();
+      }
     },
     clear() {
       events = []; cursor = 0; items = []; lastT = 0; sessionBlockedCount = 0;
@@ -5065,6 +5071,12 @@ const DanmakuOverlay = (() => {
       if (wrap) wrap.classList.add("hidden");
       const blockedInfoEl = $("dm-session-blocked-info");
       if (blockedInfoEl) blockedInfoEl.textContent = `本次播放已拦截 0 条弹幕`;
+      if (typeof updateDanmakuDrawerBadge === "function") {
+        updateDanmakuDrawerBadge();
+      }
+      if (typeof epDrawerKind !== "undefined" && epDrawerKind === "danmaku" && typeof renderDanmakuDrawer === "function") {
+        renderDanmakuDrawer();
+      }
     },
     /** seek 后重定位游标并清空已上屏内容 */
     seekTo(sec) {
@@ -6041,22 +6053,53 @@ function resetNextEpCountdown() {
   if (card) card.classList.add("hidden");
 }
 
+function getAutoNextDelay() {
+  const saved = localStorage.getItem("ani_autonext_delay");
+  if (saved === "off") return -1;
+  const num = parseInt(saved || "5", 10);
+  return isNaN(num) ? 5 : num;
+}
+
+function setAutoNextDelay(delayVal, notify = false) {
+  localStorage.setItem("ani_autonext_delay", String(delayVal));
+  document.querySelectorAll(".visual-autonext-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.delay === String(delayVal));
+  });
+  if (notify) {
+    const text = delayVal === "off" || delayVal === -1
+      ? "关闭自动连播"
+      : delayVal === "0" || delayVal === 0
+      ? "0s (立即秒连下一集)"
+      : `${delayVal} 秒连播倒计时`;
+    showPlayerOsd(`连播设置：${text}`);
+    toast(`连播倒计时已设置为：${text}`, true);
+  }
+}
+
 function checkNextEpCountdown(currentTime, duration) {
   if (nextEpCountdownState.triggered || nextEpCountdownState.dismissed) return;
   if (!duration || duration <= 60 || currentTime < 10) return;
-  if (playerLoopMode === "single" || playerLoopMode === "stop") return;
+  if (currentLoopMode === "repeat-one" || currentLoopMode === "once") return;
+
+  const delay = getAutoNextDelay();
+  if (delay === -1) return;
 
   const remainTime = duration - currentTime;
-  if (remainTime <= 15 && remainTime > 2) {
+  const triggerThreshold = delay === 0 ? 1.5 : Math.max(delay + 2, 8);
+  if (remainTime <= triggerThreshold && remainTime > 0.4) {
     const nextEp = getNextEpisode();
     if (!nextEp) return;
 
     nextEpCountdownState.triggered = true;
-    showNextEpCountdownCard(nextEp);
+    if (delay === 0) {
+      playNextEpisode();
+      return;
+    }
+    showNextEpCountdownCard(nextEp, delay);
   }
 }
 
-function showNextEpCountdownCard(nextEp) {
+function showNextEpCountdownCard(nextEp, delay = 5) {
   const card = $("player-next-ep-card");
   const timerEl = $("next-ep-countdown-timer");
   const titleEl = $("next-ep-title");
@@ -6070,14 +6113,14 @@ function showNextEpCountdownCard(nextEp) {
   }
 
   card.classList.remove("hidden");
-  let leftSec = 5;
+  let leftSec = delay;
   if (timerEl) timerEl.textContent = `${leftSec}s`;
   if (fillEl) fillEl.style.width = "100%";
 
   if (nextEpCountdownState.timer) clearInterval(nextEpCountdownState.timer);
 
   const startMs = Date.now();
-  const totalMs = 5000;
+  const totalMs = delay * 1000;
 
   nextEpCountdownState.timer = setInterval(() => {
     const elapsed = Date.now() - startMs;
@@ -6536,6 +6579,53 @@ function restoreDanmakuOffset() {
 
 let epDrawerKind = "all";
 let epDrawerSearchQuery = "";
+let dmDrawerSearch = "";
+let dmDrawerFilter = "all";
+let dmDrawerSort = "time_asc";
+let dmDrawerFollow = true;
+let lastFollowDmTime = 0;
+
+function updateDanmakuDrawerBadge() {
+  const badge = $("ep-drawer-dm-count");
+  if (badge && typeof DanmakuOverlay !== "undefined" && typeof DanmakuOverlay.getEvents === "function") {
+    const events = DanmakuOverlay.getEvents() || [];
+    badge.textContent = events.length > 9999 ? `${(events.length / 1000).toFixed(1)}k` : String(events.length);
+  }
+}
+
+function updateDanmakuDrawerFollow(currentTime) {
+  if (!dmDrawerFollow) return;
+  const drawer = $("player-ep-drawer");
+  if (!drawer || drawer.classList.contains("hidden")) return;
+  const now = Date.now();
+  if (now - lastFollowDmTime < 400) return;
+  lastFollowDmTime = now;
+
+  const listEl = $("ep-drawer-dm-list");
+  if (!listEl) return;
+  const items = listEl.querySelectorAll(".ep-dm-item");
+  if (!items.length) return;
+
+  let closestItem = null;
+  let minDiff = 2.0;
+  items.forEach((item) => {
+    const t = parseFloat(item.dataset.time);
+    const diff = Math.abs(t - currentTime);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestItem = item;
+    }
+  });
+
+  const prevActive = listEl.querySelector(".ep-dm-item.playing-now");
+  if (prevActive !== closestItem) {
+    if (prevActive) prevActive.classList.remove("playing-now");
+    if (closestItem) {
+      closestItem.classList.add("playing-now");
+      closestItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+}
 
 function toggleEpDrawer(show) {
   const drawer = $("player-ep-drawer");
@@ -6551,14 +6641,186 @@ function toggleEpDrawer(show) {
   }
 }
 
-function renderEpDrawer() {
-  const listEl = $("ep-drawer-list");
-  const bmWrap = $("ep-drawer-bookmarks-wrap");
+function renderDanmakuDrawer() {
+  const listEl = $("ep-drawer-dm-list");
   const countEl = $("ep-drawer-count");
   if (!listEl) return;
 
+  const rawEvents = typeof DanmakuOverlay !== "undefined" && typeof DanmakuOverlay.getEvents === "function"
+    ? DanmakuOverlay.getEvents() || []
+    : [];
+
+  updateDanmakuDrawerBadge();
+
+  if (!rawEvents.length) {
+    listEl.innerHTML = `<div class="ep-drawer-dm-empty">当前剧集暂无弹幕数据（或弹幕已清空）</div>`;
+    if (countEl) countEl.textContent = "(0)";
+    return;
+  }
+
+  const blockedWords = typeof DanmakuOverlay !== "undefined" ? DanmakuOverlay.getBlockedKeywords() : [];
+  const hotKeywords = typeof DanmakuOverlay !== "undefined" ? DanmakuOverlay.getHotKeywords() : [];
+  const hotWordsSet = new Set(hotKeywords.map((k) => k.word.toLowerCase()));
+
+  // 1. 模式与条件过滤
+  let filtered = rawEvents.filter((e) => {
+    if (dmDrawerFilter === "scroll") return e.mode === "scroll";
+    if (dmDrawerFilter === "top") return e.mode === "top";
+    if (dmDrawerFilter === "bottom") return e.mode === "bottom";
+    if (dmDrawerFilter === "color") return e.color !== 0xffffff && e.color !== 16777215;
+    if (dmDrawerFilter === "hot") {
+      const txt = (e.text || "").toLowerCase();
+      if ((e.count || 1) >= 2) return true;
+      for (const hw of hotWordsSet) {
+        if (txt.includes(hw)) return true;
+      }
+      return false;
+    }
+    return true;
+  });
+
+  // 2. 关键词模糊检索
+  if (dmDrawerSearch.trim()) {
+    const q = dmDrawerSearch.trim().toLowerCase();
+    filtered = filtered.filter((e) => (e.text || "").toLowerCase().includes(q));
+  }
+
+  if (countEl) countEl.textContent = `(${filtered.length}/${rawEvents.length})`;
+
+  // 3. 排序调度
+  if (dmDrawerSort === "time_asc") {
+    filtered.sort((a, b) => a.time_ms - b.time_ms);
+  } else if (dmDrawerSort === "time_desc") {
+    filtered.sort((a, b) => b.time_ms - a.time_ms);
+  } else if (dmDrawerSort === "hot") {
+    filtered.sort((a, b) => (b.count || 1) - (a.count || 1) || a.time_ms - b.time_ms);
+  }
+
+  listEl.innerHTML = "";
+  if (!filtered.length) {
+    listEl.innerHTML = `<div class="ep-drawer-dm-empty">${dmDrawerSearch.trim() ? "未检索到匹配的弹幕" : "该筛选条件下暂无弹幕"}</div>`;
+    return;
+  }
+
+  // 4. 批量 Fragment 极速构建 DOM
+  const frag = document.createDocumentFragment();
+  const v = $("video");
+  const curTime = v ? v.currentTime : 0;
+  const renderLimit = Math.min(filtered.length, 600);
+
+  for (let i = 0; i < renderLimit; i++) {
+    const e = filtered[i];
+    const sec = (e.time_ms || 0) / 1000;
+    const isPlayingNow = Math.abs(sec - curTime) <= 1.2;
+    const isBlocked = blockedWords.some((k) => e.text.toLowerCase().includes(k.toLowerCase()));
+
+    const item = document.createElement("div");
+    item.className = `ep-dm-item${isPlayingNow ? " playing-now" : ""}${isBlocked ? " is-blocked" : ""}`;
+    item.dataset.time = sec.toFixed(1);
+    item.dataset.text = e.text;
+
+    const modeTag = e.mode === "top" ? "⤓ 顶" : e.mode === "bottom" ? "⤒ 底" : "➔ 滚";
+    const hexColor = "#" + (e.color || 0xffffff).toString(16).padStart(6, "0");
+
+    item.innerHTML = `
+      <button class="ep-dm-time-btn" title="跳转播放至 ${fmtTime(sec)}">${fmtTime(sec)}</button>
+      <span class="ep-dm-mode-tag">${modeTag}</span>
+      <span class="ep-dm-color-dot" style="background:${hexColor};" title="颜色: ${hexColor}"></span>
+      <span class="ep-dm-content" title="${escapeAttr(e.text)}">${escapeHtml(e.text)}</span>
+      ${(e.count || 1) > 1 ? `<span class="ep-dm-count-badge" title="重复 ${e.count} 次">×${e.count}</span>` : ""}
+      <div class="ep-dm-actions">
+        <button class="ep-dm-act-btn seek-btn" title="跳转定位至此秒">⏱️</button>
+        <button class="ep-dm-act-btn copy-btn" title="复制弹幕内容">📋</button>
+        <button class="ep-dm-act-btn shield-btn" title="一键屏蔽此词">🚫</button>
+      </div>
+    `;
+
+    const seekHandler = (ev) => {
+      ev.stopPropagation();
+      const video = $("video");
+      if (video) {
+        video.currentTime = sec;
+        showPlayerOsd(`⏱️ 跳转至弹幕: ${fmtTime(sec)} · ${e.text}`);
+        toast(`已跳转至弹幕时刻：${fmtTime(sec)}`, true);
+      }
+    };
+
+    const timeBtn = item.querySelector(".ep-dm-time-btn");
+    const seekBtn = item.querySelector(".seek-btn");
+    if (timeBtn) timeBtn.onclick = seekHandler;
+    if (seekBtn) seekBtn.onclick = seekHandler;
+
+    const copyBtn = item.querySelector(".copy-btn");
+    if (copyBtn) {
+      copyBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        navigator.clipboard.writeText(e.text).then(() => {
+          toast(`已复制弹幕: "${e.text}"`, true);
+        }).catch(() => {});
+      };
+    }
+
+    const shieldBtn = item.querySelector(".shield-btn");
+    if (shieldBtn) {
+      shieldBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        if (typeof DanmakuOverlay !== "undefined") {
+          DanmakuOverlay.addBlockedKeyword(e.text);
+          showPlayerOsd(`🚫 已屏蔽关键词: "${e.text}"`);
+          toast(`已添加屏蔽词: "${e.text}"`, true);
+          renderDanmakuDrawer();
+        }
+      };
+    }
+
+    frag.appendChild(item);
+  }
+
+  if (filtered.length > renderLimit) {
+    const tip = document.createElement("div");
+    tip.className = "ep-drawer-dm-empty";
+    tip.style.padding = "10px";
+    tip.textContent = `已展示前 ${renderLimit} 条，请通过上方搜索框精准检索`;
+    frag.appendChild(tip);
+  }
+
+  listEl.appendChild(frag);
+
+  if (dmDrawerFollow) {
+    const active = listEl.querySelector(".ep-dm-item.playing-now");
+    if (active) {
+      setTimeout(() => active.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+    }
+  }
+}
+
+function renderEpDrawer() {
+  const drawer = $("player-ep-drawer");
+  const listEl = $("ep-drawer-list");
+  const bmWrap = $("ep-drawer-bookmarks-wrap");
+  const dmWrap = $("ep-drawer-danmaku-wrap");
+  const epSearchWrap = document.querySelector(".ep-drawer-search-wrap");
+  const countEl = $("ep-drawer-count");
+  if (!listEl) return;
+
+  if (drawer) {
+    drawer.classList.toggle("danmaku-mode", epDrawerKind === "danmaku");
+  }
+
+  if (epDrawerKind === "danmaku") {
+    listEl.classList.add("hidden");
+    if (bmWrap) bmWrap.classList.add("hidden");
+    if (epSearchWrap) epSearchWrap.classList.add("hidden");
+    if (dmWrap) dmWrap.classList.remove("hidden");
+    renderDanmakuDrawer();
+    return;
+  }
+
+  if (dmWrap) dmWrap.classList.add("hidden");
+
   if (epDrawerKind === "bookmarks") {
     listEl.classList.add("hidden");
+    if (epSearchWrap) epSearchWrap.classList.add("hidden");
     if (bmWrap) bmWrap.classList.remove("hidden");
     if (countEl) countEl.textContent = `(${currentBookmarks.length})`;
     renderSceneBookmarks();
@@ -6567,6 +6829,7 @@ function renderEpDrawer() {
 
   listEl.classList.remove("hidden");
   if (bmWrap) bmWrap.classList.add("hidden");
+  if (epSearchWrap) epSearchWrap.classList.remove("hidden");
 
   const episodes = state.episodes || [];
   if (!episodes.length) {
@@ -7150,6 +7413,8 @@ const audioBoostState = {
   eqMode: localStorage.getItem("ani_audio_eq") || "flat",
   delayMs: parseFloat(localStorage.getItem("ani_audio_delay")) || 0,
   drcEnabled: localStorage.getItem("ani_audio_drc") === "true",
+  vocalBoost: parseFloat(localStorage.getItem("ani_vocal_boost")) || 0,
+  pan: parseFloat(localStorage.getItem("ani_audio_pan")) || 0.0,
   ctx: null,
   sourceNode: null,
   gainNode: null,
@@ -7157,6 +7422,8 @@ const audioBoostState = {
   lowFilter: null,
   midFilter: null,
   highFilter: null,
+  vocalPresenceFilter: null,
+  pannerNode: null,
   compressorNode: null,
 };
 
@@ -7193,6 +7460,13 @@ function initAudioBoost() {
       audioBoostState.highFilter.type = "highshelf";
       audioBoostState.highFilter.frequency.value = 6000;
 
+      // 专用人声清透峰值滤波器 (2800 Hz, Q = 1.2)
+      audioBoostState.vocalPresenceFilter = audioBoostState.ctx.createBiquadFilter();
+      audioBoostState.vocalPresenceFilter.type = "peaking";
+      audioBoostState.vocalPresenceFilter.frequency.value = 2800;
+      audioBoostState.vocalPresenceFilter.Q.value = 1.2;
+      audioBoostState.vocalPresenceFilter.gain.value = audioBoostState.vocalBoost;
+
       // 动态范围压缩器 (DynamicsCompressorNode)：夜间微弱人声提亮 & 爆炸声平滑压限
       audioBoostState.compressorNode = audioBoostState.ctx.createDynamicsCompressor();
       applyAudioDrc(audioBoostState.drcEnabled);
@@ -7200,16 +7474,29 @@ function initAudioBoost() {
       audioBoostState.gainNode = audioBoostState.ctx.createGain();
       audioBoostState.gainNode.gain.value = audioBoostState.level;
 
+      // 立体声声道平衡节点 (StereoPannerNode)
+      if (typeof audioBoostState.ctx.createStereoPanner === "function") {
+        audioBoostState.pannerNode = audioBoostState.ctx.createStereoPanner();
+        audioBoostState.pannerNode.pan.value = audioBoostState.pan;
+      }
+
       audioBoostState.delayNode = audioBoostState.ctx.createDelay(2.0);
       audioBoostState.delayNode.delayTime.value = Math.max(0, audioBoostState.delayMs / 1000);
 
-      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> compressorNode -> gainNode -> delayNode -> destination
+      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> vocalPresenceFilter -> compressorNode -> gainNode -> [pannerNode] -> delayNode -> destination
       audioBoostState.sourceNode.connect(audioBoostState.lowFilter);
       audioBoostState.lowFilter.connect(audioBoostState.midFilter);
       audioBoostState.midFilter.connect(audioBoostState.highFilter);
-      audioBoostState.highFilter.connect(audioBoostState.compressorNode);
+      audioBoostState.highFilter.connect(audioBoostState.vocalPresenceFilter);
+      audioBoostState.vocalPresenceFilter.connect(audioBoostState.compressorNode);
       audioBoostState.compressorNode.connect(audioBoostState.gainNode);
-      audioBoostState.gainNode.connect(audioBoostState.delayNode);
+
+      if (audioBoostState.pannerNode) {
+        audioBoostState.gainNode.connect(audioBoostState.pannerNode);
+        audioBoostState.pannerNode.connect(audioBoostState.delayNode);
+      } else {
+        audioBoostState.gainNode.connect(audioBoostState.delayNode);
+      }
       audioBoostState.delayNode.connect(audioBoostState.ctx.destination);
 
       applyAudioEq(audioBoostState.eqMode);
@@ -7279,6 +7566,50 @@ function setAudioDrc(enabled, notify = false) {
     const text = audioBoostState.drcEnabled ? "🌙 夜间人声压限 (DRC): 已开启 (对白提升/爆破抑制)" : "🌙 夜间人声压限 (DRC): 已关闭";
     showPlayerOsd(text);
     toast(text, true);
+  }
+}
+
+function setVocalBoost(dbVal, notify = false) {
+  const num = parseFloat(dbVal) || 0;
+  audioBoostState.vocalBoost = num;
+  localStorage.setItem("ani_vocal_boost", String(num));
+  initAudioBoost();
+  if (audioBoostState.vocalPresenceFilter) {
+    audioBoostState.vocalPresenceFilter.gain.value = num;
+  }
+  document.querySelectorAll(".visual-vocal-opt").forEach((btn) => {
+    btn.classList.toggle("active", parseFloat(btn.dataset.vocal) === num);
+  });
+  if (notify) {
+    const text = num === 0 ? "原声 (0dB)" : `+${num}dB`;
+    showPlayerOsd(`🎙️ 人声对白清透增强: ${text}`);
+    toast(`已调整人声清透增强：${text}`, true);
+  }
+}
+
+function setAudioPan(panVal, notify = false) {
+  const num = Math.max(-1.0, Math.min(1.0, parseFloat(panVal) || 0));
+  audioBoostState.pan = num;
+  localStorage.setItem("ani_audio_pan", String(num));
+  initAudioBoost();
+  if (audioBoostState.pannerNode) {
+    audioBoostState.pannerNode.pan.value = num;
+  }
+  const slider = $("audio-pan-slider");
+  if (slider) slider.value = String(num);
+  const valEl = $("audio-pan-val");
+  if (valEl) {
+    if (Math.abs(num) < 0.05) {
+      valEl.textContent = "居中";
+    } else if (num < 0) {
+      valEl.textContent = `L ${Math.round(Math.abs(num) * 100)}%`;
+    } else {
+      valEl.textContent = `R ${Math.round(num * 100)}%`;
+    }
+  }
+  if (notify) {
+    const desc = Math.abs(num) < 0.05 ? "居中" : num < 0 ? `偏左 ${Math.round(Math.abs(num) * 100)}%` : `偏右 ${Math.round(num * 100)}%`;
+    showPlayerOsd(`🎧 声道平衡: ${desc}`);
   }
 }
 
@@ -8067,6 +8398,11 @@ $("video").addEventListener("timeupdate", () => {
 
   // 片尾自动下一集浮动倒计时卡片检测
   checkNextEpCountdown(v.currentTime, v.duration);
+
+  // 选集抽屉「弹幕池」随播放滚动高亮
+  if (epDrawerKind === "danmaku" && typeof updateDanmakuDrawerFollow === "function") {
+    updateDanmakuDrawerFollow(v.currentTime);
+  }
 });
 $("video").addEventListener("volumechange", () => {
   localStorage.setItem("ani_vol", String($("video").volume));
@@ -8371,6 +8707,98 @@ if (epSearchClear) {
     epSearchClear.classList.add("hidden");
     renderEpDrawer();
   });
+}
+
+// 弹幕池抽屉控件绑定
+const dmSearchInput = $("ep-drawer-dm-search");
+const dmSearchClear = $("ep-drawer-dm-search-clear");
+if (dmSearchInput) {
+  dmSearchInput.addEventListener("input", (e) => {
+    dmDrawerSearch = e.target.value;
+    if (dmSearchClear) dmSearchClear.classList.toggle("hidden", !dmDrawerSearch);
+    renderDanmakuDrawer();
+  });
+}
+if (dmSearchClear) {
+  dmSearchClear.onclick = () => {
+    dmDrawerSearch = "";
+    if (dmSearchInput) dmSearchInput.value = "";
+    dmSearchClear.classList.add("hidden");
+    renderDanmakuDrawer();
+  };
+}
+
+document.querySelectorAll(".ep-dm-chip").forEach((chip) => {
+  chip.onclick = () => {
+    document.querySelectorAll(".ep-dm-chip").forEach((c) => c.classList.remove("active"));
+    chip.classList.add("active");
+    dmDrawerFilter = chip.dataset.filter || "all";
+    renderDanmakuDrawer();
+  };
+});
+
+const sortTimeAsc = $("ep-dm-sort-time-asc");
+const sortTimeDesc = $("ep-dm-sort-time-desc");
+const sortHot = $("ep-dm-sort-hot");
+const updateSortBtns = (activeBtn, mode) => {
+  [sortTimeAsc, sortTimeDesc, sortHot].forEach((b) => b?.classList.remove("active"));
+  activeBtn?.classList.add("active");
+  dmDrawerSort = mode;
+  renderDanmakuDrawer();
+};
+if (sortTimeAsc) sortTimeAsc.onclick = () => updateSortBtns(sortTimeAsc, "time_asc");
+if (sortTimeDesc) sortTimeDesc.onclick = () => updateSortBtns(sortTimeDesc, "time_desc");
+if (sortHot) sortHot.onclick = () => updateSortBtns(sortHot, "hot");
+
+const dmFollowCheck = $("ep-dm-follow-check");
+if (dmFollowCheck) {
+  dmFollowCheck.checked = dmDrawerFollow;
+  dmFollowCheck.onchange = (e) => {
+    dmDrawerFollow = !!e.target.checked;
+    if (dmDrawerFollow) {
+      showPlayerOsd("📍 弹幕随播放定位: 已开启");
+    }
+  };
+}
+
+const dmCopyAllBtn = $("ep-dm-copy-btn");
+if (dmCopyAllBtn) {
+  dmCopyAllBtn.onclick = () => {
+    const rawEvents = typeof DanmakuOverlay !== "undefined" && typeof DanmakuOverlay.getEvents === "function"
+      ? DanmakuOverlay.getEvents() || []
+      : [];
+    if (!rawEvents.length) {
+      toast("当前无弹幕可复制", true);
+      return;
+    }
+    const lines = rawEvents.map((e) => `[${fmtTime((e.time_ms || 0) / 1000)}] ${e.text}`);
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      toast(`已复制 ${lines.length} 条弹幕清单到剪贴板`, true);
+      showPlayerOsd(`📋 已复制 ${lines.length} 条弹幕清单`);
+    }).catch(() => {});
+  };
+}
+
+const dmExportBtn = $("ep-dm-export-btn");
+if (dmExportBtn) {
+  dmExportBtn.onclick = () => {
+    const rawEvents = typeof DanmakuOverlay !== "undefined" && typeof DanmakuOverlay.getEvents === "function"
+      ? DanmakuOverlay.getEvents() || []
+      : [];
+    if (!rawEvents.length) {
+      toast("当前无弹幕可导出", true);
+      return;
+    }
+    const title = state.subject?.name_cn || state.subject?.name || "anime";
+    const ep = state.currentEp || 1;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rawEvents, null, 2));
+    const a = document.createElement("a");
+    a.href = dataStr;
+    a.download = `[弹幕]_${title}_第${ep}集.json`;
+    a.click();
+    toast(`已导出 ${rawEvents.length} 条弹幕 JSON`, true);
+    showPlayerOsd(`💾 已导出 ${rawEvents.length} 条弹幕`);
+  };
 }
 
 // ---------- 弹幕开关、不透明度循环与联动 ----------
@@ -10509,6 +10937,46 @@ const audioDelayBtBtn = $("audio-delay-bt-btn");
 if (audioDelayBtBtn) audioDelayBtBtn.onclick = () => setAudioDelay(200, true);
 const audioDelayReset = $("audio-delay-reset");
 if (audioDelayReset) audioDelayReset.onclick = () => setAudioDelay(0, true);
+
+document.querySelectorAll(".visual-vocal-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const vocal = parseFloat(btn.getAttribute("data-vocal")) || 0;
+    setVocalBoost(vocal, true);
+  };
+});
+document.querySelectorAll(".visual-vocal-opt").forEach((btn) => {
+  btn.classList.toggle("active", parseFloat(btn.dataset.vocal) === audioBoostState.vocalBoost);
+});
+
+const audioPanSlider = $("audio-pan-slider");
+if (audioPanSlider) {
+  audioPanSlider.value = String(audioBoostState.pan);
+  audioPanSlider.addEventListener("input", (e) => {
+    setAudioPan(e.target.value, false);
+  });
+  audioPanSlider.addEventListener("change", (e) => {
+    setAudioPan(e.target.value, true);
+  });
+}
+const panValEl = $("audio-pan-val");
+if (panValEl) {
+  if (Math.abs(audioBoostState.pan) < 0.05) panValEl.textContent = "居中";
+  else if (audioBoostState.pan < 0) panValEl.textContent = `L ${Math.round(Math.abs(audioBoostState.pan) * 100)}%`;
+  else panValEl.textContent = `R ${Math.round(audioBoostState.pan * 100)}%`;
+}
+const resetAudioPanBtn = $("btn-reset-audio-pan");
+if (resetAudioPanBtn) {
+  resetAudioPanBtn.onclick = () => setAudioPan(0.0, true);
+}
+
+const currentAutoNextDelay = localStorage.getItem("ani_autonext_delay") || "5";
+document.querySelectorAll(".visual-autonext-opt").forEach((btn) => {
+  btn.classList.toggle("active", btn.dataset.delay === currentAutoNextDelay);
+  btn.onclick = () => {
+    const delay = btn.getAttribute("data-delay") || "5";
+    setAutoNextDelay(delay, true);
+  };
+});
 
 const sleepState = {
   mode: "off",
