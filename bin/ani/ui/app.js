@@ -4374,6 +4374,46 @@ function renderDanmakuHeatmap(events, duration) {
   }
 }
 
+function renderDanmakuHotKeywords() {
+  const container = $("dm-hot-keywords-list");
+  if (!container) return;
+  const hot = typeof DanmakuOverlay !== "undefined" && typeof DanmakuOverlay.getHotKeywords === "function"
+    ? DanmakuOverlay.getHotKeywords()
+    : [];
+  if (!hot || !hot.length) {
+    container.innerHTML = `<span class="meta" style="font-size:12px;">载入弹幕后将自动分析高能热词</span>`;
+    return;
+  }
+  container.innerHTML = hot
+    .map(
+      (item) => `
+      <button class="dm-hot-pill" data-sec="${item.peakSec}" data-word="${escapeAttr(item.word)}" data-count="${item.count}" title="点击跳转至该词高能时刻 (${fmtTime(item.peakSec)})">
+        <span class="dm-hot-flame">🔥</span>
+        <span class="dm-hot-word">${escapeHtml(item.word)}</span>
+        <span class="dm-hot-badge">${item.count}</span>
+      </button>
+    `
+    )
+    .join("");
+
+  container.querySelectorAll(".dm-hot-pill").forEach((pill) => {
+    pill.onclick = () => {
+      const sec = parseFloat(pill.getAttribute("data-sec")) || 0;
+      const word = pill.getAttribute("data-word");
+      const count = pill.getAttribute("data-count");
+      const v = $("video");
+      if (v) {
+        v.currentTime = sec;
+        if (typeof DanmakuOverlay !== "undefined") {
+          DanmakuOverlay.seekTo(sec);
+        }
+        showPlayerOsd(`🔥 高能热词: 「${word}」 (全集 ${count} 次) ➔ 已跳转 ${fmtTime(sec)}`);
+        toast(`已跳转至高能热词「${word}」密集时刻（${fmtTime(sec)}）`, true);
+      }
+    };
+  });
+}
+
 // ---------- 弹幕渲染层（Canvas 覆盖层；过滤已在后端完成，这里只管画） ----------
 const DanmakuOverlay = (() => {
   let scrollMs = parseInt(localStorage.getItem("ani_dm_speed") || "6000", 10);
@@ -4403,6 +4443,69 @@ const DanmakuOverlay = (() => {
   let avoidSubtitle = localStorage.getItem("ani_dm_avoid_sub") !== "false";
   let cachedRawEvents = [];
   let sessionBlockedCount = 0;
+
+  const KNOWN_MEMES = [
+    "草", "前方高能", "awsl", "神回", "名场面", "泪目", "起立", "反转", "卧槽", "dio",
+    "太强了", "完结撒花", "燃起来了", "可爱", "纯爱", "牛逼", "好活", "核能", "心疼", "刀", "贴贴",
+    "要素过多", "绝了", "我哭死", "名台词", "注入灵魂", "好耶"
+  ];
+  let hotKeywordsCache = [];
+
+  function analyzeHotKeywords(rawEvents) {
+    if (!rawEvents || !rawEvents.length) {
+      hotKeywordsCache = [];
+      return [];
+    }
+    const counts = new Map();
+    const timestamps = new Map();
+
+    for (const e of rawEvents) {
+      const text = (e.text || "").trim();
+      if (!text) continue;
+      const t = (e.time_ms || 0) / 1000;
+
+      for (const meme of KNOWN_MEMES) {
+        if (text.toLowerCase().includes(meme.toLowerCase())) {
+          counts.set(meme, (counts.get(meme) || 0) + 1);
+          if (!timestamps.has(meme)) timestamps.set(meme, []);
+          timestamps.get(meme).push(t);
+        }
+      }
+
+      const cleaned = text.replace(/[\s\d\p{P}\p{S}]+/gu, " ").trim();
+      const parts = cleaned.split(" ").filter((p) => p.length >= 2 && p.length <= 6);
+      for (const p of parts) {
+        if (KNOWN_MEMES.includes(p)) continue;
+        counts.set(p, (counts.get(p) || 0) + 1);
+        if (!timestamps.has(p)) timestamps.set(p, []);
+        timestamps.get(p).push(t);
+      }
+    }
+
+    const results = [];
+    for (const [word, count] of counts.entries()) {
+      if (count < 3 && !KNOWN_MEMES.includes(word)) continue;
+      if (count < 2) continue;
+
+      const ts = timestamps.get(word) || [];
+      let peakSec = ts[0] || 0;
+      if (ts.length > 2) {
+        let maxDensity = 0;
+        for (const target of ts) {
+          const inWindow = ts.filter((x) => Math.abs(x - target) <= 15).length;
+          if (inWindow > maxDensity) {
+            maxDensity = inWindow;
+            peakSec = target;
+          }
+        }
+      }
+      results.push({ word, count, peakSec });
+    }
+
+    results.sort((a, b) => b.count - a.count);
+    hotKeywordsCache = results.slice(0, 10);
+    return hotKeywordsCache;
+  }
 
   function shouldFilter(e) {
     if (!e) return false;
@@ -4645,6 +4748,8 @@ const DanmakuOverlay = (() => {
       if (blockedInfoEl) blockedInfoEl.textContent = `本次播放已拦截 0 条弹幕`;
       this.seekTo(lastT);
       this.setEnabled(this.enabled);
+      analyzeHotKeywords(cachedRawEvents);
+      renderDanmakuHotKeywords();
       const v = vid();
       if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
         renderDanmakuHeatmap(events, v.duration);
@@ -4652,6 +4757,8 @@ const DanmakuOverlay = (() => {
     },
     clear() {
       events = []; cursor = 0; items = []; lastT = 0; sessionBlockedCount = 0;
+      hotKeywordsCache = [];
+      renderDanmakuHotKeywords();
       const c = cv();
       if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
       const wrap = $("danmaku-heatmap-wrap");
@@ -4799,6 +4906,10 @@ const DanmakuOverlay = (() => {
     /** 获取当前所有弹幕事件 */
     getEvents() {
       return events;
+    },
+    /** 获取当集高能热词洞察 */
+    getHotKeywords() {
+      return hotKeywordsCache;
     },
     isMergeDuplicate() {
       return mergeDuplicate;
@@ -5159,6 +5270,9 @@ async function openStatsModal() {
   const closeBtn = $("stats-close");
   if (closeBtn) closeBtn.onclick = () => modal.classList.add("hidden");
 
+  const bentoBtn = $("btn-export-bento");
+  if (bentoBtn) bentoBtn.onclick = () => exportViewingBentoCard();
+
   try {
     const stats = await invoke("get_playback_statistics");
 
@@ -5170,6 +5284,13 @@ async function openStatsModal() {
 
     const activeDays = (stats.last_7_days_activity || []).filter((a) => a.watch_seconds > 60).length;
     if ($("stats-active-days")) $("stats-active-days").textContent = `${activeDays} 天`;
+
+    try {
+      const bms = await invoke("list_scene_bookmarks", { subjectId: null, videoPath: null });
+      if ($("stats-total-bookmarks")) $("stats-total-bookmarks").textContent = String(bms?.length || 0);
+    } catch (_) {
+      if ($("stats-total-bookmarks")) $("stats-total-bookmarks").textContent = "0";
+    }
 
     // 追番状态分布
     const typeBars = $("stats-type-bars");
@@ -5191,6 +5312,9 @@ async function openStatsModal() {
         typeBars.appendChild(pill);
       }
     }
+
+    // 绘制动漫题材偏好分布
+    await renderStatsGenreDistribution(stats);
 
     // 绘制近 7 天活跃趋势图
     renderStatsActivitySvg(stats.last_7_days_activity || []);
@@ -5228,6 +5352,112 @@ async function openStatsModal() {
     }
   } catch (err) {
     toast("获取观影统计失败：" + err);
+  }
+}
+
+async function renderStatsGenreDistribution(stats) {
+  const container = $("stats-genres-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const genreKeywords = [
+    { genre: "奇幻冒险", keywords: ["奇幻", "冒险", "异世界", "魔法", "转生", "芙莉莲", "史莱姆"], color: "#38bdf8" },
+    { genre: "热血战斗", keywords: ["热血", "战斗", "动作", "鬼灭", "咒术", "巨人", "英雄", "火影", "海贼"], color: "#f87171" },
+    { genre: "日常治愈", keywords: ["日常", "治愈", "搞笑", "喜剧", "过家家", "轻音", "摇曳", "露营"], color: "#34d399" },
+    { genre: "科幻机战", keywords: ["科幻", "机战", "高达", "EVA", "赛博", "未来", "机甲"], color: "#818cf8" },
+    { genre: "青春恋爱", keywords: ["恋爱", "校园", "青春", "辉夜", "女友", "纯爱", "情书"], color: "#f472b6" },
+    { genre: "悬疑推理", keywords: ["悬疑", "推理", "心理", "犯罪", "名侦探", "死亡", "反转"], color: "#fbbf24" },
+  ];
+
+  let collections = [];
+  try {
+    collections = await invoke("list_subject_collections", { collectionType: null });
+  } catch (_) {}
+
+  const allNames = [
+    ...collections.map((c) => (c.name_cn || "") + " " + (c.name || "")),
+    ...(stats.top_subjects || []).map((s) => s.subject_name || "")
+  ].filter(Boolean);
+
+  if (!allNames.length) {
+    container.innerHTML = `<div class="meta" style="grid-column: 1 / -1; padding: 10px 0;">暂无追番或观影数据，关注番剧后将自动分析题材偏好</div>`;
+    return;
+  }
+
+  const scores = genreKeywords.map((g) => {
+    let count = 0;
+    for (const text of allNames) {
+      if (g.keywords.some((kw) => text.includes(kw))) {
+        count += 1;
+      }
+    }
+    return { ...g, count };
+  });
+
+  const totalHits = scores.reduce((sum, s) => sum + s.count, 0) || 1;
+  const filtered = scores.filter((s) => s.count > 0).sort((a, b) => b.count - a.count);
+  const displayGenres = filtered.length ? filtered : genreKeywords.slice(0, 4).map(g => ({ ...g, count: 1 }));
+
+  container.innerHTML = displayGenres.slice(0, 6).map((g) => {
+    const pct = Math.max(8, Math.round((g.count / totalHits) * 100));
+    return `
+      <div class="stats-genre-item">
+        <div class="stats-genre-header">
+          <span class="stats-genre-name">${escapeHtml(g.genre)}</span>
+          <span class="stats-genre-count" style="color:${g.color}">${pct}% (${g.count}部)</span>
+        </div>
+        <div class="stats-genre-bar-bg">
+          <div class="stats-genre-bar" style="width:${pct}%;background:${g.color}"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function exportViewingBentoCard() {
+  try {
+    const stats = await invoke("get_playback_statistics");
+    const totalHours = (stats.total_watch_seconds / 3600).toFixed(1);
+    const totalSub = stats.total_subjects_collected || 0;
+    const totalEps = stats.total_episodes_finished || 0;
+    let totalBms = 0;
+    try {
+      const bms = await invoke("list_scene_bookmarks", { subjectId: null, videoPath: null });
+      totalBms = bms?.length || 0;
+    } catch (_) {}
+
+    let curStreak = 0;
+    const badge = $("streak-current-badge");
+    if (badge) {
+      const m = badge.textContent.match(/\d+/);
+      if (m) curStreak = parseInt(m[0], 10);
+    }
+
+    const top3 = (stats.top_subjects || []).slice(0, 3).map((it, i) => {
+      const h = (it.total_seconds / 3600).toFixed(1);
+      return `${i + 1}. 《${it.subject_name}》 (${h}h · ${it.episode_count}话)`;
+    }).join("\n");
+
+    const card = [
+      "╔══════════════════════════════════════════════════════╗",
+      "║     🎬 animete-rs 追番成就战报 / Anime Bento Wrapped  ║",
+      "╠══════════════════════════════════════════════════════╣",
+      `║  ⏱️ 累计观影时长: ${totalHours.padStart(6)} 小时`,
+      `║  📺 累计追番部数: ${String(totalSub).padStart(6)} 部`,
+      `║  🎞️ 看毕剧集话数: ${String(totalEps).padStart(6)} 话`,
+      `║  💎 记录名场面数: ${String(totalBms).padStart(6)} 处`,
+      `║  🔥 连续打卡天数: ${String(curStreak).padStart(6)} 天`,
+      "╠══════════════════════════════════════════════════════╣",
+      "║  🏆 最长陪伴番剧 Top 3:",
+      top3 ? top3.split("\n").map(l => `║  ${l}`).join("\n") : "║  暂无观影数据",
+      "╚══════════════════════════════════════════════════════╝",
+      "—— 由 animete-rs (Ani-Rust) 桌面追番播放器生成",
+    ].join("\n");
+
+    await navigator.clipboard.writeText(card);
+    toast("🎴 追番战报已生成并复制到剪贴板，可直接发送分享！", true);
+  } catch (err) {
+    toast("生成追番战报失败: " + err);
   }
 }
 
@@ -5423,6 +5653,10 @@ function renderStatsHeatmap(heatmapList) {
 const statsHeaderBtn = $("stats-btn");
 if (statsHeaderBtn) {
   statsHeaderBtn.onclick = () => openStatsModal();
+}
+const navStatsBtn = $("nav-stats-btn");
+if (navStatsBtn) {
+  navStatsBtn.onclick = () => openStatsModal();
 }
 
 function mediaKey(str) {
@@ -6597,6 +6831,7 @@ const audioBoostState = {
   level: parseFloat(localStorage.getItem("ani_audio_boost")) || 1.0,
   eqMode: localStorage.getItem("ani_audio_eq") || "flat",
   delayMs: parseFloat(localStorage.getItem("ani_audio_delay")) || 0,
+  drcEnabled: localStorage.getItem("ani_audio_drc") === "true",
   ctx: null,
   sourceNode: null,
   gainNode: null,
@@ -6604,6 +6839,7 @@ const audioBoostState = {
   lowFilter: null,
   midFilter: null,
   highFilter: null,
+  compressorNode: null,
 };
 
 const BOOST_LEVELS = [1.0, 1.5, 2.0, 3.0];
@@ -6639,17 +6875,22 @@ function initAudioBoost() {
       audioBoostState.highFilter.type = "highshelf";
       audioBoostState.highFilter.frequency.value = 6000;
 
+      // 动态范围压缩器 (DynamicsCompressorNode)：夜间微弱人声提亮 & 爆炸声平滑压限
+      audioBoostState.compressorNode = audioBoostState.ctx.createDynamicsCompressor();
+      applyAudioDrc(audioBoostState.drcEnabled);
+
       audioBoostState.gainNode = audioBoostState.ctx.createGain();
       audioBoostState.gainNode.gain.value = audioBoostState.level;
 
       audioBoostState.delayNode = audioBoostState.ctx.createDelay(2.0);
       audioBoostState.delayNode.delayTime.value = Math.max(0, audioBoostState.delayMs / 1000);
 
-      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> gainNode -> delayNode -> destination
+      // 串联拓扑：source -> lowFilter -> midFilter -> highFilter -> compressorNode -> gainNode -> delayNode -> destination
       audioBoostState.sourceNode.connect(audioBoostState.lowFilter);
       audioBoostState.lowFilter.connect(audioBoostState.midFilter);
       audioBoostState.midFilter.connect(audioBoostState.highFilter);
-      audioBoostState.highFilter.connect(audioBoostState.gainNode);
+      audioBoostState.highFilter.connect(audioBoostState.compressorNode);
+      audioBoostState.compressorNode.connect(audioBoostState.gainNode);
       audioBoostState.gainNode.connect(audioBoostState.delayNode);
       audioBoostState.delayNode.connect(audioBoostState.ctx.destination);
 
@@ -6682,6 +6923,44 @@ function setAudioEq(mode, notify = false) {
     const preset = EQ_PRESETS[mode] || EQ_PRESETS.flat;
     showPlayerOsd(`🎧 均衡器: ${preset.name}`);
     toast(`已切换音频均衡器模式：${preset.name}`, true);
+  }
+}
+
+function applyAudioDrc(enabled) {
+  if (!audioBoostState.compressorNode || !audioBoostState.ctx) return;
+  const comp = audioBoostState.compressorNode;
+  const now = audioBoostState.ctx.currentTime;
+  if (enabled) {
+    // 动漫夜间人声压限：提升对话可懂度，平滑抑制深夜爆破
+    comp.threshold.setValueAtTime(-24, now);
+    comp.knee.setValueAtTime(30, now);
+    comp.ratio.setValueAtTime(12, now);
+    comp.attack.setValueAtTime(0.003, now);
+    comp.release.setValueAtTime(0.25, now);
+  } else {
+    // 线性旁路（Bypass）
+    comp.threshold.setValueAtTime(0, now);
+    comp.knee.setValueAtTime(0, now);
+    comp.ratio.setValueAtTime(1, now);
+    comp.attack.setValueAtTime(0.003, now);
+    comp.release.setValueAtTime(0.25, now);
+  }
+}
+
+function setAudioDrc(enabled, notify = false) {
+  audioBoostState.drcEnabled = !!enabled;
+  localStorage.setItem("ani_audio_drc", String(audioBoostState.drcEnabled));
+  initAudioBoost();
+  applyAudioDrc(audioBoostState.drcEnabled);
+  const btn = $("btn-audio-drc");
+  if (btn) {
+    btn.classList.toggle("active", audioBoostState.drcEnabled);
+    btn.textContent = audioBoostState.drcEnabled ? "🌙 夜间压限: 开" : "🌙 夜间压限: 关";
+  }
+  if (notify) {
+    const text = audioBoostState.drcEnabled ? "🌙 夜间人声压限 (DRC): 已开启 (对白提升/爆破抑制)" : "🌙 夜间人声压限 (DRC): 已关闭";
+    showPlayerOsd(text);
+    toast(text, true);
   }
 }
 
@@ -7046,17 +7325,19 @@ function showPlayer(url, title, extra = {}) {
   if (audioBoostState.level !== 1.0) {
     setAudioBoost(audioBoostState.level);
   }
+  if (audioBoostState.drcEnabled) {
+    setAudioDrc(audioBoostState.drcEnabled);
+  }
   restoreDanmakuOffset();
   loadSceneBookmarks();
   if (!url) return;
 
   autoDetectAndMountSubtitles(extra?.localPath || btFallbackPath, extra?.subtitles);
 
-  // 断点续播：加载后跳到上次位置（看完的从头播）。
-  // 元数据加载与进度查询的完成顺序不定，两侧都要能触发，且只 seek 一次
+  // 断点续播：优先使用换源传入的 resumeAt，其次读取数据库进度
   currentMediaKey = mediaKey(url);
   lastSavedSec = -10;
-  let resumeAt = null;
+  let resumeAt = extra?.resumeAt != null ? extra.resumeAt : null;
   let resumeDone = false;
   const tryResume = () => {
     if (resumeDone || !resumeAt) return;
@@ -7067,12 +7348,16 @@ function showPlayer(url, title, extra = {}) {
       toast(`已从 ${fmtTime(resumeAt)} 继续播放`, true);
     }
   };
-  invoke("load_progress", { key: currentMediaKey })
-    .then((pos) => {
-      if (pos && pos > 10) resumeAt = pos;
-      tryResume();
-    })
-    .catch(() => {});
+  if (resumeAt == null) {
+    invoke("load_progress", { key: currentMediaKey })
+      .then((pos) => {
+        if (pos && pos > 10) resumeAt = pos;
+        tryResume();
+      })
+      .catch(() => {});
+  } else {
+    tryResume();
+  }
   resumeListener = tryResume;
   v.addEventListener("loadedmetadata", resumeListener, { once: true });
 
@@ -7345,7 +7630,9 @@ listen("stream-ready", async (ev) => {
   if (url) {
     // 应用内边下边播（anibt:// 协议）：弹幕/断点续播/倍速全可用
     btFallbackPath = path || null;
-    openPlayer(url, title, { localPath: path, subtitles });
+    const resumeAt = pendingSwitchResumeTime != null ? pendingSwitchResumeTime : null;
+    pendingSwitchResumeTime = null;
+    openPlayer(url, title, { localPath: path, subtitles, resumeAt });
     toast("BT 边下边播：正在应用内播放器缓冲…", true);
     return;
   }
@@ -7575,6 +7862,158 @@ const epDrawerBtn = $("player-ep-drawer-btn");
 if (epDrawerBtn) epDrawerBtn.onclick = () => toggleEpDrawer();
 const epDrawerClose = $("ep-drawer-close");
 if (epDrawerClose) epDrawerClose.onclick = () => toggleEpDrawer(false);
+
+// ---------- 播放器内无缝换源 (In-Player Source Switcher) ----------
+let pendingSwitchResumeTime = null;
+
+async function openSourceSwitcher() {
+  const modal = $("player-source-modal");
+  if (!modal) return;
+  const v = $("video");
+  const curTime = (v && isFinite(v.currentTime)) ? v.currentTime : 0;
+
+  modal.classList.remove("hidden");
+  const closeBtn = $("player-source-modal-close");
+  if (closeBtn) closeBtn.onclick = () => modal.classList.add("hidden");
+
+  const epTitleEl = $("source-modal-ep-title");
+  const timePosEl = $("source-modal-time-pos");
+  const listEl = $("source-modal-list");
+  const loadingEl = $("source-modal-loading");
+
+  if (timePosEl) timePosEl.textContent = `当前进度: ${fmtTime(curTime)}`;
+  const title = (state.subject?.name_cn || state.subject?.name || "") + (state.currentEp ? ` 第 ${state.currentEp} 集` : "");
+  if (epTitleEl) epTitleEl.textContent = title || "当前动画剧集";
+
+  if (state.candidates && state.candidates.length > 0) {
+    if (loadingEl) loadingEl.classList.add("hidden");
+    renderSourceModalList(state.candidates, curTime);
+    return;
+  }
+
+  // 动态检索当前集的候选片源
+  const subjectId = state.subject?.id?.id ?? state.subject?.id;
+  if (subjectId && state.currentEp != null) {
+    if (loadingEl) loadingEl.classList.remove("hidden");
+    if (listEl) listEl.innerHTML = "";
+    try {
+      const sel = await invoke("fetch_medias", { subjectId: Number(subjectId), ep: Number(state.currentEp) });
+      state.candidates = sel.candidates || [];
+      if (loadingEl) loadingEl.classList.add("hidden");
+      renderSourceModalList(state.candidates, curTime);
+    } catch (err) {
+      if (loadingEl) loadingEl.classList.add("hidden");
+      if (listEl) listEl.innerHTML = `<div class="empty">拉取片源失败：${escapeHtml(String(err))}</div>`;
+    }
+  } else {
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (listEl) listEl.innerHTML = `<div class="empty">暂无可用候选片源或当前为直链播放</div>`;
+  }
+}
+
+function renderSourceModalList(candidates, curTime) {
+  const listEl = $("source-modal-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+
+  if (!candidates || candidates.length === 0) {
+    listEl.innerHTML = `<div class="empty">暂未检索到其他候选片源</div>`;
+    return;
+  }
+
+  // 检查是否有本地缓存
+  if (typeof cachedItems !== "undefined" && Array.isArray(cachedItems) && state.currentEpId) {
+    const cachedForEp = cachedItems.find((it) => it.episode_id === state.currentEpId);
+    if (cachedForEp) {
+      const cacheCard = document.createElement("div");
+      cacheCard.className = "source-cand-item is-cache";
+      const isCurrent = currentMediaUrl && currentMediaUrl.includes(cachedForEp.id);
+      cacheCard.innerHTML = `
+        <div class="source-cand-info">
+          <div class="source-cand-title">⚡ 本地离线缓存: ${escapeHtml(cachedForEp.title)}</div>
+          <div class="source-cand-tags">
+            <span class="tag" style="background:#10b981;color:#fff;">极速离线秒开</span>
+            <span class="tag">${fmtSize(cachedForEp.total_bytes || cachedForEp.downloaded_bytes)}</span>
+            ${isCurrent ? '<span class="source-badge-current">● 当前播放中</span>' : ''}
+          </div>
+        </div>
+        <div class="source-cand-actions">
+          ${isCurrent
+            ? '<button class="btn small" disabled>当前播放中</button>'
+            : '<button class="btn primary small btn-switch-action">▶ 无缝切至缓存</button>'}
+        </div>
+      `;
+      if (!isCurrent) {
+        cacheCard.querySelector(".btn-switch-action").onclick = () => {
+          $("player-source-modal").classList.add("hidden");
+          openPlayer(`http://anicache.localhost/${cachedForEp.id}/master.m3u8`, cachedForEp.title, { resumeAt: curTime });
+          toast(`已无缝切换至本地缓存（从 ${fmtTime(curTime)} 续播）`, true);
+        };
+      }
+      listEl.appendChild(cacheCard);
+    }
+  }
+
+  candidates.slice(0, 30).forEach((c, idx) => {
+    const m = c.media;
+    const p = m.properties;
+    const magnet = m.download?.type === "torrent" ? m.download.uri : null;
+    const httpUrl = m.download?.type === "http" ? m.download.url : null;
+    if (!magnet && !httpUrl) return;
+
+    const isCurrent = (httpUrl && currentMediaUrl === httpUrl) ||
+                      (magnet && btFallbackPath && btFallbackPath.includes(m.title));
+
+    const item = document.createElement("div");
+    item.className = "source-cand-item" + (c.type === "excluded" ? " excluded" : "") + (isCurrent ? " current-source" : "");
+
+    const tags = [
+      `<span class="tag src">${escapeHtml(m.media_source_id)}</span>`,
+      p.resolution ? `<span class="tag res">${p.resolution.height}p</span>` : "",
+      p.subtitle_group ? `<span class="tag group">${escapeHtml(p.subtitle_group)}</span>` : "",
+      fmtSize(p.size_bytes) ? `<span class="tag">${fmtSize(p.size_bytes)}</span>` : "",
+      c.type === "available"
+        ? `<span class="tag score">${c.score.toFixed(1)}分</span>`
+        : `<span class="tag bad">排除: ${reasonText(c.reason)}</span>`,
+      isCurrent ? `<span class="source-badge-current">● 当前播放中</span>` : "",
+    ].filter(Boolean).join(" ");
+
+    item.innerHTML = `
+      <div class="source-cand-rank">#${idx + 1}</div>
+      <div class="source-cand-info">
+        <div class="source-cand-title" title="${escapeAttr(m.title)}">${escapeHtml(m.title)}</div>
+        <div class="source-cand-tags">${tags}</div>
+      </div>
+      <div class="source-cand-actions">
+        ${isCurrent
+          ? '<button class="btn small" disabled>当前播放</button>'
+          : `<button class="btn primary small btn-switch-action">▶ 无缝换源</button>`}
+      </div>
+    `;
+
+    if (!isCurrent) {
+      const switchBtn = item.querySelector(".btn-switch-action");
+      if (switchBtn) {
+        switchBtn.onclick = () => {
+          $("player-source-modal").classList.add("hidden");
+          learnPreference({ group: p.subtitle_group, res: p.resolution ? p.resolution.height : "" });
+          pendingSwitchResumeTime = curTime;
+          if (httpUrl) {
+            openPlayer(httpUrl, m.title, { resumeAt: curTime });
+            toast(`已切换至直链片源（从 ${fmtTime(curTime)} 续播）`, true);
+          } else if (magnet) {
+            startStream(magnet, m.title);
+            toast(`已发起新片源边下边播（正在缓冲头部数据，将从 ${fmtTime(curTime)} 续播）…`, true);
+          }
+        };
+      }
+    }
+    listEl.appendChild(item);
+  });
+}
+
+const switchSourceBtn = $("player-switch-source-btn");
+if (switchSourceBtn) switchSourceBtn.onclick = () => openSourceSwitcher();
 
 document.querySelectorAll(".ep-drawer-tab").forEach((tab) => {
   tab.onclick = () => {
@@ -9427,6 +9866,13 @@ document.querySelectorAll(".visual-eq-opt").forEach((btn) => {
   };
 });
 
+const audioDrcBtn = $("btn-audio-drc");
+if (audioDrcBtn) {
+  audioDrcBtn.onclick = () => setAudioDrc(!audioBoostState.drcEnabled, true);
+  audioDrcBtn.classList.toggle("active", audioBoostState.drcEnabled);
+  audioDrcBtn.textContent = audioBoostState.drcEnabled ? "🌙 夜间压限: 开" : "🌙 夜间压限: 关";
+}
+
 const audioDelayMinus = $("audio-delay-minus");
 if (audioDelayMinus) audioDelayMinus.onclick = () => adjustAudioDelay(-50);
 const audioDelayPlus = $("audio-delay-plus");
@@ -9626,7 +10072,10 @@ document.addEventListener("keydown", (e) => {
       break;
     }
     case "w": case "W": cycleAspectRatio(); break;
-    case "s": case "S": skipOp(); break;
+    case "s": case "S":
+      if (e.shiftKey) openSourceSwitcher();
+      else skipOp();
+      break;
     case "c": case "C": captureVideoFrame(); break;
     case "p": case "P": togglePiP(); break;
     case "d": case "D": {
@@ -10091,6 +10540,12 @@ document.addEventListener("keydown", (e) => {
   if ((e.key === "h" || e.key === "H") && !isInput && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
     toggleHistoryModal();
+    return;
+  }
+
+  if ((e.key === "a" || e.key === "A") && e.shiftKey && !isInput && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    openStatsModal();
     return;
   }
 

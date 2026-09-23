@@ -54,6 +54,13 @@
           <polyline points="12 6 12 12 16 14"></polyline>
         </svg> 历史
       </button>
+      <button id="nav-stats-btn" class="ghost small" title="追番数据统计与年鉴看板 (快捷键 Shift+A)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
+        </svg> 统计
+      </button>
       <button id="player-btn" class="ghost small" title="在线播放">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 播放
       </button>
@@ -770,6 +777,7 @@
         <select id="player-quality" class="select hidden" title="画质"></select>
         <button id="player-next-ep" class="ghost small hidden" title="下一集 (快捷键 N)">下一集 ⏭</button>
         <button id="player-ep-drawer-btn" class="ghost small" title="选集列表 (快捷键 E)">选集 📑</button>
+        <button id="player-switch-source-btn" class="ghost small" title="无缝换源：切换其他字幕组或清晰度 (快捷键 Shift+S)">换源 🔄</button>
         <button id="player-loop-btn" class="ghost small" title="播放循环模式：顺序连播 / 单集循环 / 列表循环 / 播完即止 (快捷键 R)">顺序 ⏭</button>
         <button id="player-external-btn" class="ghost small" title="切换到外部播放器播放 (快捷键 O)">外部播放 ↗</button>
         <div class="player-danmaku-wrap">
@@ -831,6 +839,13 @@
                 <span id="dm-delay-val" class="meta mono">0.0s</span>
                 <button id="dm-delay-plus" class="ghost small" title="延后 0.5s (快捷键 =)">+0.5s</button>
                 <button id="dm-delay-reset" class="ghost small" title="重置弹幕时间">重置</button>
+              </div>
+            </div>
+            <div class="danmaku-menu-sep"></div>
+            <div class="danmaku-menu-row dm-hot-kw-row">
+              <span class="danmaku-menu-label">高能热词</span>
+              <div id="dm-hot-keywords-list" class="dm-hot-keywords-list">
+                <span class="meta" style="font-size:12px;">载入弹幕后将自动分析高能热词</span>
               </div>
             </div>
             <div class="sub-menu-sep"></div>
@@ -1090,6 +1105,12 @@
                 <button class="ghost small visual-eq-opt" data-eq="vocal" title="增强台词人声频段 (2kHz)，字字清晰">人声清晰</button>
                 <button class="ghost small visual-eq-opt" data-eq="bass" title="增强 80Hz 重低音与战斗爆炸氛围">影院重低音</button>
                 <button class="ghost small visual-eq-opt" data-eq="bright" title="增强高频 6kHz，清澈通透">明亮高音</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">夜间人声</span>
+              <div class="visual-btn-group">
+                <button id="btn-audio-drc" class="ghost small visual-action-btn" title="动态范围压缩 (DRC)：提升微弱对话清晰度，平滑抑制深夜突发巨大爆炸或枪声">🌙 夜间压限: 关</button>
               </div>
             </div>
             <div class="visual-menu-row">
@@ -1481,6 +1502,7 @@
           <div class="sg-title">全局与导航</div>
           <div class="sg-item"><span class="sg-desc">聚焦顶部搜索框</span><kbd>/</kbd></div>
           <div class="sg-item"><span class="sg-desc">打开观影历史面板</span><kbd>H</kbd></div>
+          <div class="sg-item"><span class="sg-desc">打开追番数据统计大屏</span><div class="kbds"><kbd>Shift</kbd> + <kbd>A</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">层级返回 / 关闭弹窗</span><kbd>Esc</kbd></div>
           <div class="sg-item"><span class="sg-desc">快捷老板键 (静音暂停并最小化)</span><div class="kbds"><kbd>Alt</kbd> + <kbd>Q</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">打开快捷键指南</span><kbd>?</kbd></div>
@@ -1493,11 +1515,13 @@
           <div class="sg-item"><span class="sg-desc">音量调整 (+10% / -10%)</span><div class="kbds"><kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">标记名场面打点书签</span><kbd>M</kbd></div>
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><div class="kbds"><kbd>U</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>M</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">播放中无缝换源 (自动继承进度)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>S</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">百分比进度跳转 (0% ~ 90%)</span><div class="kbds"><kbd>0</kbd> <span class="meta">~</span> <kbd>9</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">倍速切换 / 微调 (±0.1x 平滑调节)</span><div class="kbds"><kbd>&lt;</kbd> <kbd>&gt;</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>&lt;</kbd> <kbd>&gt;</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">长按画面 / 长按快进键极速快进 (2.0x ⚡)</span><span class="sg-highlight">长按鼠标左键 或 长按 <kbd>→</kbd></span></div>
           <div class="sg-item"><span class="sg-desc">鼠标滚轮调音 / 进度微调</span><span class="sg-highlight">滚轮调音量 · <kbd>Shift</kbd>+滚轮调进度 · <kbd>Ctrl</kbd>+滚轮倍速</span></div>
           <div class="sg-item"><span class="sg-desc">音画同步 (音频提前 50ms / 延后 50ms)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>[</kbd> <kbd>]</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">夜间人声动态压限 (DRC 抑制爆破提亮对白)</span><span>控制栏「画面 📺」</span></div>
           <div class="sg-item"><span class="sg-desc">名场面截帧（含字幕与弹幕合成预览）</span><kbd>C</kbd></div>
           <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
@@ -1517,7 +1541,11 @@
         <div class="shortcut-group">
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">呼出 / 隐藏弹幕高级调谐面板</span><kbd>D</kbd></div>
+          <div class="sg-item"><span class="sg-desc">高能热词洞察与时刻定位</span><span>控制栏「弹幕」➔ 点击热词</span></div>
           <div class="sg-item"><span class="sg-desc">加载本地弹幕 (.xml / .json)</span><span>拖拽至播放器 或 控制栏「弹幕」</span></div>
+          <div class="sg-item"><span class="sg-desc">弹幕时间轴微调 (自动记忆当前条目)</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd> <span class="meta">或控制栏「⏱️ 胶囊」</span></div></div>
+          <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
+        </div>
           <div class="sg-item"><span class="sg-desc">弹幕时间轴微调 (自动记忆当前条目)</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd> <span class="meta">或控制栏「⏱️ 胶囊」</span></div></div>
           <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
         </div>
@@ -1643,7 +1671,10 @@
           <div class="modal-title">追番足迹与观影数据统计 📊</div>
           <span class="meta">数据基于本地 SQLite 播放进度与追番收藏聚合计算</span>
         </div>
-        <button id="stats-close" class="ghost small" title="关闭 (Esc)">✕</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="btn-export-bento" class="primary small" title="生成并复制精美追番战报 (Bento Card) 到剪贴板">🎴 导出追番战报</button>
+          <button id="stats-close" class="ghost small" title="关闭 (Esc)">✕</button>
+        </div>
       </div>
       <div class="modal-body stats-modal-body">
         <div class="stats-overview-grid">
@@ -1663,11 +1694,20 @@
             <div class="stats-card-num" id="stats-active-days">0</div>
             <div class="stats-card-title">近7天看番天数</div>
           </div>
+          <div class="stats-card">
+            <div class="stats-card-num" id="stats-total-bookmarks">0</div>
+            <div class="stats-card-title">名场面打点数</div>
+          </div>
         </div>
 
         <div class="stats-section">
           <div class="stats-section-title">我的追番状态分布</div>
           <div class="stats-type-bars" id="stats-type-bars"></div>
+        </div>
+
+        <div class="stats-section">
+          <div class="stats-section-title">动漫题材偏好分布 🏷️</div>
+          <div id="stats-genres-list" class="stats-genres-list"></div>
         </div>
 
         <div class="stats-section">
@@ -1996,6 +2036,30 @@
             <button id="share-card-save-btn" class="ghost">💾 保存为高清 PNG</button>
           </div>
         </div>
+      </div>
+    </div>
+  <!-- 播放器无缝换源浮层弹窗 -->
+  <div id="player-source-modal" class="modal-backdrop hidden">
+    <div class="modal-card source-modal-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title">🔄 播放器内无缝换源</div>
+          <div class="modal-sub">秒级平滑切换不同字幕组、清晰度或本地缓存，自动继承播放进度</div>
+        </div>
+        <button id="player-source-modal-close" class="ghost small">✕</button>
+      </div>
+      <div class="modal-body source-modal-body">
+        <div class="source-modal-header">
+          <div class="source-modal-ep-info">
+            <span id="source-modal-ep-title" class="bold">当前剧集</span>
+            <span id="source-modal-time-pos" class="meta mono">当前进度: 00:00</span>
+          </div>
+          <div class="meta source-modal-tip">💡 选源后自动无缝续播，无需退回搜索或重新拉进度条</div>
+        </div>
+        <div id="source-modal-loading" class="source-modal-loading hidden">
+          <span class="spinner"></span> 正在并发检索候选片源...
+        </div>
+        <div id="source-modal-list" class="source-modal-list"></div>
       </div>
     </div>
   </div>

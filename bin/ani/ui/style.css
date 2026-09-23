@@ -7892,6 +7892,237 @@ body.window-drag-over::after {
   padding-top: 8px;
 }
 
+/* ==========================================================================
+   播放器内无缝换源 (In-Player Source Switcher)
+   ========================================================================== */
+
+.source-modal-card {
+  max-width: 680px;
+  width: 90vw;
+  max-height: 80vh;
+}
+
+.source-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.source-modal-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.source-modal-ep-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.source-modal-tip {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.source-modal-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.source-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-cand-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  transition: all var(--trans-fast);
+}
+
+.source-cand-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.source-cand-item.current-source {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.source-cand-item.is-cache {
+  background: rgba(56, 189, 248, 0.09);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.source-cand-rank {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  min-width: 24px;
+}
+
+.source-cand-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-cand-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-cand-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-badge-current {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+/* ==========================================================================
+   弹幕高能热词分析 (Danmaku High-Energy Keyword Insights)
+   ========================================================================== */
+
+.dm-hot-kw-row {
+  align-items: flex-start !important;
+}
+
+.dm-hot-keywords-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 240px;
+}
+
+.dm-hot-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 9999px;
+  color: var(--text-main);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all var(--trans-fast);
+}
+
+.dm-hot-pill:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+}
+
+.dm-hot-flame {
+  font-size: 11px;
+}
+
+.dm-hot-word {
+  font-weight: 600;
+}
+
+.dm-hot-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   追番统计：动漫题材偏好分布与战报导出
+   ========================================================================== */
+
+.stats-genres-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.stats-genre-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+}
+
+.stats-genre-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.stats-genre-name {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.stats-genre-count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.stats-genre-bar-bg {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.stats-genre-bar {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
 
 
 
