@@ -943,6 +943,52 @@
               </div>
             </div>
             <div class="sub-menu-sep"></div>
+            <div class="sub-menu-title" style="font-size:12px; margin-top:2px; margin-bottom:6px;">🎨 排版与字体工坊</div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">字体风格</span>
+              <div class="sub-btn-group sub-wrap-group">
+                <button class="ghost small sub-font-opt active" data-font="system">默认</button>
+                <button class="ghost small sub-font-opt" data-font="noto">思源黑体</button>
+                <button class="ghost small sub-font-opt" data-font="wenkai">霞鹜文楷</button>
+                <button class="ghost small sub-font-opt" data-font="yahei">微软雅黑</button>
+                <button class="ghost small sub-font-opt" data-font="rounded">圆体幼圆</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">字间距</span>
+              <div class="sub-btn-group">
+                <button class="ghost small sub-space-opt active" data-space="0px">标准 0</button>
+                <button class="ghost small sub-space-opt" data-space="1px">+1px</button>
+                <button class="ghost small sub-space-opt" data-space="2px">+2px</button>
+                <button class="ghost small sub-space-opt" data-space="4px">+4px</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">行间间距</span>
+              <div class="sub-btn-group">
+                <button class="ghost small sub-lh-opt" data-lh="1.2">紧凑 1.2</button>
+                <button class="ghost small sub-lh-opt active" data-lh="1.4">标准 1.4</button>
+                <button class="ghost small sub-lh-opt" data-lh="1.7">舒展 1.7</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">光影质感</span>
+              <div class="sub-btn-group sub-wrap-group">
+                <button class="ghost small sub-shadow-opt active" data-shadow="standard">标准</button>
+                <button class="ghost small sub-shadow-opt" data-shadow="thick">加厚重边</button>
+                <button class="ghost small sub-shadow-opt" data-shadow="glow">柔光氛围</button>
+                <button class="ghost small sub-shadow-opt" data-shadow="cinema">胶片投影</button>
+              </div>
+            </div>
+            <div class="sub-menu-row">
+              <span class="sub-menu-label">风格预设</span>
+              <div class="sub-btn-group">
+                <button class="ghost small sub-preset-btn" data-preset="anime" title="思源黑体 + 纯白 + 加厚黑边 + 21px">🌟 新番</button>
+                <button class="ghost small sub-preset-btn" data-preset="kai" title="霞鹜文楷 + 明黄 + 柔光发光 + 23px">🏮 文楷</button>
+                <button class="ghost small sub-preset-btn" data-preset="cinema" title="圆体 + 纯白 + 胶片投影 + 2px字距">🎬 院线</button>
+              </div>
+            </div>
+            <div class="sub-menu-sep"></div>
             <div class="sub-menu-row">
               <span class="sub-menu-label">双语双字幕</span>
               <div class="sub-btn-group">
@@ -1258,10 +1304,25 @@
             <div id="heatmap-peaks" class="heatmap-peaks"></div>
           </div>
           <div class="heatmap-track" id="heatmap-track">
+            <div id="heatmap-chapters-layer" class="heatmap-chapters-layer"></div>
             <canvas id="danmaku-heatmap-canvas" class="danmaku-heatmap-canvas"></canvas>
             <div id="heatmap-playhead" class="heatmap-playhead"></div>
             <div id="player-bookmarks-layer" class="player-bookmarks-layer"></div>
             <div id="heatmap-hover-line" class="heatmap-hover-line hidden"></div>
+            <!-- 悬浮微缩视频画面与时间轴实时预览卡片 -->
+            <div id="heatmap-scrub-card" class="heatmap-scrub-card hidden">
+              <div class="scrub-preview-box">
+                <canvas id="scrub-preview-canvas" width="160" height="90" class="scrub-preview-canvas"></canvas>
+                <div id="scrub-preview-badge" class="scrub-preview-badge hidden">🔥 名场面</div>
+              </div>
+              <div class="scrub-preview-info">
+                <div class="scrub-preview-time-row">
+                  <span id="scrub-preview-time" class="scrub-preview-time mono">00:00 / 00:00</span>
+                  <span id="scrub-preview-pct" class="scrub-preview-pct mono meta">(0%)</span>
+                </div>
+                <span id="scrub-preview-extra" class="scrub-preview-extra meta"></span>
+              </div>
+            </div>
             <div id="heatmap-hover-tip" class="heatmap-hover-tip hidden"></div>
           </div>
         </div>

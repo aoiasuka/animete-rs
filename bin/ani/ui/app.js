@@ -4200,19 +4200,173 @@ function saveUserDanmaku(evt) {
   } catch {}
 }
 
+// ---------- 时间轴悬浮微缩视频画面与预览引擎 ----------
+let scrubVideo = null;
+let isScrubSeeking = false;
+let pendingScrubSec = null;
+let lastScrubSeekTime = 0;
+
+function getOrCreateScrubVideo() {
+  if (!scrubVideo) {
+    scrubVideo = document.createElement("video");
+    scrubVideo.muted = true;
+    scrubVideo.preload = "auto";
+    scrubVideo.playsInline = true;
+    scrubVideo.style.display = "none";
+    scrubVideo.addEventListener("seeked", () => {
+      isScrubSeeking = false;
+      paintScrubFrame();
+      if (pendingScrubSec !== null) {
+        const next = pendingScrubSec;
+        pendingScrubSec = null;
+        dispatchScrubSeek(next);
+      }
+    });
+    scrubVideo.addEventListener("error", () => {
+      isScrubSeeking = false;
+    });
+    document.body.appendChild(scrubVideo);
+  }
+  return scrubVideo;
+}
+
+function destroyScrubVideo() {
+  if (scrubVideo) {
+    scrubVideo.pause();
+    scrubVideo.removeAttribute("src");
+    scrubVideo.load();
+    scrubVideo.remove();
+    scrubVideo = null;
+  }
+  isScrubSeeking = false;
+  pendingScrubSec = null;
+}
+
+function paintScrubFrame() {
+  const canvas = $("scrub-preview-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const sv = scrubVideo;
+  if (sv && sv.videoWidth > 0 && sv.videoHeight > 0) {
+    ctx.drawImage(sv, 0, 0, canvas.width, canvas.height);
+  }
+}
+
+function requestScrubFrame(targetSec) {
+  const v = $("video");
+  if (!v) return;
+  const canvas = $("scrub-preview-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  // 如果悬浮时间距离主视频播放进度非常接近 (0.8s 内)，直接复用主视频画面，瞬时绘制
+  if (Math.abs(v.currentTime - targetSec) < 0.8 && v.videoWidth > 0) {
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  const sv = getOrCreateScrubVideo();
+  const vSrc = v.currentSrc || v.src;
+  if (!vSrc) return;
+  if (sv.src !== vSrc) {
+    sv.src = vSrc;
+  }
+
+  const now = Date.now();
+  if (now - lastScrubSeekTime < 80) {
+    pendingScrubSec = targetSec;
+    return;
+  }
+  dispatchScrubSeek(targetSec);
+}
+
+function dispatchScrubSeek(sec) {
+  const sv = getOrCreateScrubVideo();
+  if (!sv || isNaN(sec)) return;
+  if (isScrubSeeking) {
+    pendingScrubSec = sec;
+    return;
+  }
+  isScrubSeeking = true;
+  pendingScrubSec = null;
+  lastScrubSeekTime = Date.now();
+  try {
+    sv.currentTime = sec;
+  } catch {
+    isScrubSeeking = false;
+  }
+}
+
+function renderTimelineChapters(duration) {
+  const layer = $("heatmap-chapters-layer");
+  if (!layer || !duration || duration <= 120) {
+    if (layer) layer.innerHTML = "";
+    return;
+  }
+  layer.innerHTML = "";
+
+  // OP 范围计算
+  const opLen = typeof getOpSkipSeconds === "function" ? getOpSkipSeconds() : 90;
+  const customPoint = (typeof currentSubjectId !== "undefined" && currentSubjectId && typeof customOpPoints !== "undefined" && customOpPoints[currentSubjectId] !== undefined)
+    ? customOpPoints[currentSubjectId]
+    : null;
+  const effectiveOp = customPoint !== null ? customPoint : opLen;
+
+  if (effectiveOp > 0 && effectiveOp < duration * 0.4) {
+    const opBar = document.createElement("div");
+    opBar.className = "heatmap-chapter-bar chapter-op";
+    const opPct = (effectiveOp / duration) * 100;
+    opBar.style.left = "0%";
+    opBar.style.width = `${opPct}%`;
+    opBar.textContent = "OP";
+    opBar.title = `🎵 片头曲 OP (00:00 - ${fmtTime(effectiveOp)}) · 点击跳过`;
+    opBar.onclick = (e) => {
+      e.stopPropagation();
+      skipOp();
+    };
+    layer.appendChild(opBar);
+  }
+
+  // ED 范围计算
+  const edLen = typeof getEdSkipSeconds === "function" ? getEdSkipSeconds() : 90;
+  if (edLen > 0 && edLen < duration * 0.4) {
+    const edBar = document.createElement("div");
+    edBar.className = "heatmap-chapter-bar chapter-ed";
+    const edPct = (edLen / duration) * 100;
+    edBar.style.right = "0%";
+    edBar.style.width = `${edPct}%`;
+    edBar.textContent = "ED";
+    edBar.title = `🎶 片尾曲 ED (${fmtTime(duration - edLen)} - ${fmtTime(duration)}) · 点击直达`;
+    edBar.onclick = (e) => {
+      e.stopPropagation();
+      const v = $("video");
+      if (v) {
+        v.currentTime = duration - edLen;
+        showPlayerOsd("跳转至片尾 ED");
+      }
+    };
+    layer.appendChild(edBar);
+  }
+}
+
 function renderDanmakuHeatmap(events, duration) {
   const wrap = $("danmaku-heatmap-wrap");
   const canvas = $("danmaku-heatmap-canvas");
-  if (!wrap || !canvas || !events || !events.length || !duration || !isFinite(duration) || duration <= 0) {
+  if (!wrap || !canvas || !duration || !isFinite(duration) || duration <= 0) {
     if (wrap) wrap.classList.add("hidden");
     return;
   }
 
+  wrap.classList.remove("hidden");
+  renderTimelineChapters(duration);
+
+  const evList = Array.isArray(events) ? events : [];
   const NUM_BINS = 100;
   const binSec = duration / NUM_BINS;
   const bins = new Array(NUM_BINS).fill(0);
 
-  for (const e of events) {
+  for (const e of evList) {
     const sec = (e.time_ms || 0) / 1000;
     if (sec >= 0 && sec <= duration) {
       const idx = Math.min(NUM_BINS - 1, Math.floor(sec / binSec));
@@ -4220,13 +4374,7 @@ function renderDanmakuHeatmap(events, duration) {
     }
   }
 
-  const maxCount = Math.max(...bins);
-  if (maxCount === 0) {
-    wrap.classList.add("hidden");
-    return;
-  }
-  wrap.classList.remove("hidden");
-
+  const maxCount = Math.max(0, ...bins);
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const w = canvas.clientWidth || 600;
   const h = canvas.clientHeight || 32;
@@ -4239,99 +4387,117 @@ function renderDanmakuHeatmap(events, duration) {
   ctx.save();
   ctx.scale(dpr, dpr);
 
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, "rgba(244, 63, 94, 0.75)");
-  grad.addColorStop(0.4, "rgba(139, 92, 246, 0.55)");
-  grad.addColorStop(1, "rgba(56, 189, 248, 0.12)");
+  if (maxCount > 0) {
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "rgba(244, 63, 94, 0.75)");
+    grad.addColorStop(0.4, "rgba(139, 92, 246, 0.55)");
+    grad.addColorStop(1, "rgba(56, 189, 248, 0.12)");
 
-  ctx.beginPath();
-  ctx.moveTo(0, h);
+    ctx.beginPath();
+    ctx.moveTo(0, h);
 
-  const stepX = w / (NUM_BINS - 1);
-  for (let i = 0; i < NUM_BINS; i++) {
-    const norm = bins[i] / maxCount;
-    const scaled = Math.pow(norm, 0.7);
-    const x = i * stepX;
-    const y = h - scaled * (h - 4);
-    if (i === 0) {
-      ctx.lineTo(x, y);
-    } else {
-      const prevX = (i - 1) * stepX;
-      const prevNorm = bins[i - 1] / maxCount;
-      const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
-      const cx = (prevX + x) / 2;
-      ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+    const stepX = w / (NUM_BINS - 1);
+    for (let i = 0; i < NUM_BINS; i++) {
+      const norm = bins[i] / maxCount;
+      const scaled = Math.pow(norm, 0.7);
+      const x = i * stepX;
+      const y = h - scaled * (h - 4);
+      if (i === 0) {
+        ctx.lineTo(x, y);
+      } else {
+        const prevX = (i - 1) * stepX;
+        const prevNorm = bins[i - 1] / maxCount;
+        const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
+        const cx = (prevX + x) / 2;
+        ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+      }
     }
-  }
 
-  ctx.lineTo(w, h);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
 
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
-  ctx.beginPath();
-  for (let i = 0; i < NUM_BINS; i++) {
-    const norm = bins[i] / maxCount;
-    const scaled = Math.pow(norm, 0.7);
-    const x = i * stepX;
-    const y = h - scaled * (h - 4);
-    if (i === 0) ctx.moveTo(x, y);
-    else {
-      const prevX = (i - 1) * stepX;
-      const prevNorm = bins[i - 1] / maxCount;
-      const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
-      const cx = (prevX + x) / 2;
-      ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+    ctx.beginPath();
+    for (let i = 0; i < NUM_BINS; i++) {
+      const norm = bins[i] / maxCount;
+      const scaled = Math.pow(norm, 0.7);
+      const x = i * stepX;
+      const y = h - scaled * (h - 4);
+      if (i === 0) ctx.moveTo(x, y);
+      else {
+        const prevX = (i - 1) * stepX;
+        const prevNorm = bins[i - 1] / maxCount;
+        const prevY = h - Math.pow(prevNorm, 0.7) * (h - 4);
+        const cx = (prevX + x) / 2;
+        ctx.bezierCurveTo(cx, prevY, cx, y, x, y);
+      }
     }
+    ctx.stroke();
+  } else {
+    // 纯视频无弹幕时渲染优雅的平滑环境微光基线
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, h - 2);
+    ctx.lineTo(w, h - 2);
+    ctx.stroke();
   }
-  ctx.stroke();
   ctx.restore();
 
+  const selectedPeaks = [];
   const peaksContainer = $("heatmap-peaks");
   if (peaksContainer) {
     peaksContainer.innerHTML = "";
-    const peakIndices = [];
-    const threshold = maxCount * 0.4;
-    for (let i = 1; i < NUM_BINS - 1; i++) {
-      if (bins[i] >= threshold && bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1]) {
-        peakIndices.push(i);
-      }
-    }
-    peakIndices.sort((a, b) => bins[b] - bins[a]);
-
-    const selected = [];
-    for (const idx of peakIndices) {
-      if (!selected.some((s) => Math.abs(s - idx) < 8)) {
-        selected.push(idx);
-        if (selected.length >= 3) break;
-      }
-    }
-    selected.sort((a, b) => a - b);
-
-    for (const idx of selected) {
-      const peakTime = Math.round(idx * binSec);
-      const count = bins[idx];
-      const btn = document.createElement("button");
-      btn.className = "peak-badge";
-      btn.innerHTML = `🔥 ${fmtTime(peakTime)} <span style="opacity:0.8;font-size:9.5px">(${count}条)</span>`;
-      btn.title = `点击直达名场面高能时刻（${fmtTime(peakTime)}，本段约 ${count} 条弹幕）`;
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const v = $("video");
-        if (v) {
-          v.currentTime = Math.max(0, peakTime - 2);
-          showPlayerOsd(`🔥 已直达高能时刻：${fmtTime(peakTime)}`);
+    if (maxCount > 0) {
+      const peakIndices = [];
+      const threshold = maxCount * 0.4;
+      for (let i = 1; i < NUM_BINS - 1; i++) {
+        if (bins[i] >= threshold && bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1]) {
+          peakIndices.push(i);
         }
-      };
-      peaksContainer.appendChild(btn);
+      }
+      peakIndices.sort((a, b) => bins[b] - bins[a]);
+
+      for (const idx of peakIndices) {
+        if (!selectedPeaks.some((s) => Math.abs(s - idx) < 8)) {
+          selectedPeaks.push(idx);
+          if (selectedPeaks.length >= 3) break;
+        }
+      }
+      selectedPeaks.sort((a, b) => a - b);
+
+      for (const idx of selectedPeaks) {
+        const peakTime = Math.round(idx * binSec);
+        const count = bins[idx];
+        const btn = document.createElement("button");
+        btn.className = "peak-badge";
+        btn.innerHTML = `🔥 ${fmtTime(peakTime)} <span style="opacity:0.8;font-size:9.5px">(${count}条)</span>`;
+        btn.title = `点击直达名场面高能时刻（${fmtTime(peakTime)}，本段约 ${count} 条弹幕）`;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const v = $("video");
+          if (v) {
+            v.currentTime = Math.max(0, peakTime - 2);
+            showPlayerOsd(`🔥 已直达高能时刻：${fmtTime(peakTime)}`);
+          }
+        };
+        peaksContainer.appendChild(btn);
+      }
     }
   }
 
   const track = $("heatmap-track");
-  const hoverTip = $("heatmap-hover-tip");
+  const scrubCard = $("heatmap-scrub-card");
+  const scrubTime = $("scrub-preview-time");
+  const scrubPct = $("scrub-preview-pct");
+  const scrubExtra = $("scrub-preview-extra");
+  const scrubBadge = $("scrub-preview-badge");
   const hoverLine = $("heatmap-hover-line");
+  const hoverTip = $("heatmap-hover-tip");
+
   if (track) {
     track.onmousemove = (e) => {
       const rect = track.getBoundingClientRect();
@@ -4346,20 +4512,79 @@ function renderDanmakuHeatmap(events, duration) {
         hoverLine.classList.remove("hidden");
       }
 
+      // OP / ED 阶段检测
+      const opLen = typeof getOpSkipSeconds === "function" ? getOpSkipSeconds() : 90;
+      const customPoint = (typeof currentSubjectId !== "undefined" && currentSubjectId && typeof customOpPoints !== "undefined" && customOpPoints[currentSubjectId] !== undefined)
+        ? customOpPoints[currentSubjectId]
+        : null;
+      const effectiveOp = customPoint !== null ? customPoint : opLen;
+      const edLen = typeof getEdSkipSeconds === "function" ? getEdSkipSeconds() : 90;
+
+      const isOp = effectiveOp > 0 && hoverSec <= effectiveOp;
+      const isEd = edLen > 0 && hoverSec >= (duration - edLen);
+      const isPeak = selectedPeaks && selectedPeaks.some((idx) => Math.abs(idx - binIdx) <= 2);
+      const nearbyBm = (typeof currentBookmarks !== "undefined" && Array.isArray(currentBookmarks))
+        ? currentBookmarks.find((b) => Math.abs(b.position_seconds - hoverSec) <= 4)
+        : null;
+
+      // 智能悬浮预览卡片位置计算（防边缘越界裁剪）
+      if (scrubCard) {
+        scrubCard.classList.remove("hidden");
+        const cardHalfWidth = 88;
+        const clampedX = Math.max(cardHalfWidth, Math.min(rect.width - cardHalfWidth, clientX));
+        scrubCard.style.left = `${clampedX}px`;
+
+        if (scrubTime) scrubTime.textContent = `${fmtTime(hoverSec)} / ${fmtTime(duration)}`;
+        if (scrubPct) scrubPct.textContent = `(${Math.round(ratio * 100)}%)`;
+
+        if (scrubBadge) {
+          if (nearbyBm) {
+            scrubBadge.className = "scrub-preview-badge badge-bm";
+            scrubBadge.textContent = `💎 ${nearbyBm.title}`;
+            scrubBadge.classList.remove("hidden");
+          } else if (isPeak) {
+            scrubBadge.className = "scrub-preview-badge";
+            scrubBadge.textContent = `🔥 名场面 (${count}条)`;
+            scrubBadge.classList.remove("hidden");
+          } else if (isOp) {
+            scrubBadge.className = "scrub-preview-badge badge-op";
+            scrubBadge.textContent = "🎵 片头曲 OP";
+            scrubBadge.classList.remove("hidden");
+          } else if (isEd) {
+            scrubBadge.className = "scrub-preview-badge badge-ed";
+            scrubBadge.textContent = "🎶 片尾曲 ED";
+            scrubBadge.classList.remove("hidden");
+          } else {
+            scrubBadge.classList.add("hidden");
+          }
+        }
+
+        if (scrubExtra) {
+          if (count > 0 && !isPeak) {
+            scrubExtra.textContent = `当前弹幕频度: ${count} 条`;
+          } else if (nearbyBm) {
+            scrubExtra.textContent = `已添加打点书签`;
+          } else {
+            scrubExtra.textContent = "";
+          }
+        }
+
+        // 调度画面抓取与渲染
+        requestScrubFrame(hoverSec);
+      }
+
+      // 保留经典紧凑型 hoverTip 作为轻量备选/屏幕阅读支持
       if (hoverTip) {
-        hoverTip.classList.remove("hidden");
-        const tipPct = Math.max(8, Math.min(92, ratio * 100));
-        hoverTip.style.left = `${tipPct}%`;
-        const pct = Math.round(ratio * 100);
-        const isPeak = selected && selected.some((idx) => Math.abs(idx - binIdx) <= 2);
-        const peakHtml = isPeak ? `<span class="heatmap-hover-peak-tag">🔥 名场面</span>` : "";
-        hoverTip.innerHTML = `<span>${fmtTime(hoverSec)} / ${fmtTime(duration)}</span> <span class="meta mono">(${pct}%)</span> ${peakHtml} <span class="meta" style="font-size:10.5px">(${count}条)</span>`;
+        hoverTip.classList.add("hidden");
       }
     };
+
     track.onmouseleave = () => {
       if (hoverTip) hoverTip.classList.add("hidden");
       if (hoverLine) hoverLine.classList.add("hidden");
+      if (scrubCard) scrubCard.classList.add("hidden");
     };
+
     track.onclick = (e) => {
       const rect = track.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -7282,9 +7507,14 @@ function destroyPlayer() {
   clearAbLoop(false);
   opAutoSkipped = false;
   edAutoSkipped = false;
+  destroyScrubVideo();
+  const scrubCard = $("heatmap-scrub-card");
+  if (scrubCard) scrubCard.classList.add("hidden");
   v.removeAttribute("src");
   v.load();
 }
+
+const closePlayer = destroyPlayer;
 
 function openPlayer(url, title, extra = {}) {
   playerPrev = $("view-detail").classList.contains("hidden")
@@ -7838,9 +8068,7 @@ $("video").addEventListener("canplay", () => setPlayerSpinner(false));
 $("video").addEventListener("loadedmetadata", () => {
   const v = $("video");
   if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
-    if (DanmakuOverlay.getEvents().length) {
-      renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
-    }
+    renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
     renderSceneBookmarks();
   }
 });
@@ -8681,6 +8909,10 @@ const subState = {
   color: localStorage.getItem("ani_sub_color") || "white",
   bg: localStorage.getItem("ani_sub_bg") || "dim",
   position: localStorage.getItem("ani_sub_pos") || "bottom",
+  fontFamily: localStorage.getItem("ani_sub_font") || "system",
+  letterSpacing: localStorage.getItem("ani_sub_spacing") || "0px",
+  lineHeight: localStorage.getItem("ani_sub_line_height") || "1.4",
+  shadowMode: localStorage.getItem("ani_sub_shadow_mode") || "standard",
   trackEl: null,
   blobUrl: null,
 
@@ -8694,6 +8926,21 @@ const subState = {
   dualPosition: localStorage.getItem("ani_sub_dual_pos") || "above", // "above" or "top"
   dualTrackEl: null,
   dualBlobUrl: null,
+};
+
+const SUB_FONTS = {
+  system: "system-ui, -apple-system, sans-serif",
+  wenkai: "'LXGW WenKai', 'LXGWWenKai-Regular', 'Kaiti SC', 'STKaiti', serif",
+  noto: "'Source Han Sans SC', 'Noto Sans SC', 'PingFang SC', sans-serif",
+  yahei: "'Microsoft YaHei', 'SimHei', sans-serif",
+  rounded: "'YouYuan', 'Rounded Mplus 1c', 'Hiragino Maru Gothic ProN', sans-serif",
+};
+
+const SUB_SHADOW_MODES = {
+  standard: "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)",
+  thick: "0 0 3px #000, 0 0 6px #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000",
+  glow: "0 0 8px rgba(56, 189, 248, 0.7), 0 0 2px #000, 0 2px 4px #000",
+  cinema: "2px 2px 0 rgba(0, 0, 0, 0.95), 3px 3px 5px rgba(0, 0, 0, 0.8)",
 };
 
 const SUB_COLORS = {
@@ -9170,16 +9417,22 @@ function applySubtitleStyles() {
   const bottomPx = subState.bottomMarginPx || 36;
   const weight = subState.fontWeight || "600";
   const stroke = subState.strokeType || "normal";
+  const fontFam = SUB_FONTS[subState.fontFamily] || SUB_FONTS.system;
+  const spacing = subState.letterSpacing || "0px";
+  const lineH = subState.lineHeight || "1.4";
 
   document.documentElement.style.setProperty("--sub-font-size", `${fontPx}px`);
   document.documentElement.style.setProperty("--sub-bottom-margin", `${bottomPx}px`);
   document.documentElement.style.setProperty("--sub-font-weight", weight);
+  document.documentElement.style.setProperty("--sub-font-family", fontFam);
+  document.documentElement.style.setProperty("--sub-letter-spacing", spacing);
+  document.documentElement.style.setProperty("--sub-line-height", lineH);
   document.documentElement.style.setProperty("--sub-color", SUB_COLORS[subState.color] || "#ffffff");
   document.documentElement.style.setProperty("--sub-bg", SUB_BGS[subState.bg] || "rgba(10, 13, 20, 0.78)");
 
-  let shadow = SUB_SHADOWS[subState.bg] || "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9)";
-  if (stroke === "thick") {
-    shadow = "0 0 3px #000, 0 0 6px #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000";
+  let shadow = SUB_SHADOW_MODES[subState.shadowMode] || SUB_SHADOWS[subState.bg] || SUB_SHADOW_MODES.standard;
+  if (stroke === "thick" && subState.shadowMode === "standard") {
+    shadow = SUB_SHADOW_MODES.thick;
   }
   document.documentElement.style.setProperty("--sub-shadow", shadow);
 
@@ -9208,6 +9461,56 @@ function applySubtitleStyles() {
   document.querySelectorAll(".sub-pos-opt").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-pos") === subState.position);
   });
+  document.querySelectorAll(".sub-font-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-font") === subState.fontFamily);
+  });
+  document.querySelectorAll(".sub-space-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-space") === subState.letterSpacing);
+  });
+  document.querySelectorAll(".sub-lh-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-lh") === subState.lineHeight);
+  });
+  document.querySelectorAll(".sub-shadow-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-shadow") === subState.shadowMode);
+  });
+}
+
+function applySubPreset(preset) {
+  if (preset === "anime") {
+    subState.fontFamily = "noto";
+    subState.color = "white";
+    subState.shadowMode = "thick";
+    subState.strokeType = "thick";
+    subState.letterSpacing = "0px";
+    subState.lineHeight = "1.4";
+    subState.fontSizePx = 22;
+  } else if (preset === "kai") {
+    subState.fontFamily = "wenkai";
+    subState.color = "yellow";
+    subState.shadowMode = "glow";
+    subState.strokeType = "normal";
+    subState.letterSpacing = "1px";
+    subState.lineHeight = "1.5";
+    subState.fontSizePx = 23;
+  } else if (preset === "cinema") {
+    subState.fontFamily = "rounded";
+    subState.color = "white";
+    subState.shadowMode = "cinema";
+    subState.strokeType = "thick";
+    subState.letterSpacing = "2px";
+    subState.lineHeight = "1.6";
+    subState.fontSizePx = 21;
+  }
+  localStorage.setItem("ani_sub_font", subState.fontFamily);
+  localStorage.setItem("ani_sub_color", subState.color);
+  localStorage.setItem("ani_sub_shadow_mode", subState.shadowMode);
+  localStorage.setItem("ani_sub_stroke", subState.strokeType);
+  localStorage.setItem("ani_sub_spacing", subState.letterSpacing);
+  localStorage.setItem("ani_sub_line_height", subState.lineHeight);
+  localStorage.setItem("ani_sub_size_px", String(subState.fontSizePx));
+  applySubtitleStyles();
+  const names = { anime: "🌟 动漫新番", kai: "🏮 典雅文楷", cinema: "🎬 院线电影" };
+  showPlayerOsd(`已套用字幕排版预设: ${names[preset] || preset}`);
 }
 
 function setSubSize(size) {
@@ -9346,6 +9649,55 @@ document.querySelectorAll(".sub-bg-opt").forEach((btn) => {
 });
 document.querySelectorAll(".sub-pos-opt").forEach((btn) => {
   btn.onclick = () => setSubPosition(btn.getAttribute("data-pos"));
+});
+
+document.querySelectorAll(".sub-font-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const f = btn.getAttribute("data-font") || "system";
+    subState.fontFamily = f;
+    localStorage.setItem("ani_sub_font", f);
+    applySubtitleStyles();
+    const names = { system: "默认无衬线", noto: "思源黑体", wenkai: "霞鹜文楷", yahei: "微软雅黑", rounded: "圆体幼圆" };
+    showPlayerOsd(`字幕字体: ${names[f] || f}`);
+  };
+});
+
+document.querySelectorAll(".sub-space-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const sp = btn.getAttribute("data-space") || "0px";
+    subState.letterSpacing = sp;
+    localStorage.setItem("ani_sub_spacing", sp);
+    applySubtitleStyles();
+    showPlayerOsd(`字幕字距: ${sp}`);
+  };
+});
+
+document.querySelectorAll(".sub-lh-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const lh = btn.getAttribute("data-lh") || "1.4";
+    subState.lineHeight = lh;
+    localStorage.setItem("ani_sub_line_height", lh);
+    applySubtitleStyles();
+    showPlayerOsd(`字幕行距: ${lh}`);
+  };
+});
+
+document.querySelectorAll(".sub-shadow-opt").forEach((btn) => {
+  btn.onclick = () => {
+    const sh = btn.getAttribute("data-shadow") || "standard";
+    subState.shadowMode = sh;
+    localStorage.setItem("ani_sub_shadow_mode", sh);
+    applySubtitleStyles();
+    const names = { standard: "标准", thick: "加厚重边", glow: "柔光氛围", cinema: "胶片投影" };
+    showPlayerOsd(`字幕质感: ${names[sh] || sh}`);
+  };
+});
+
+document.querySelectorAll(".sub-preset-btn").forEach((btn) => {
+  btn.onclick = () => {
+    const preset = btn.getAttribute("data-preset");
+    applySubPreset(preset);
+  };
 });
 
 const subDualToggle = $("sub-dual-toggle");
