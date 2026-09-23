@@ -589,6 +589,37 @@ pub fn win_is_maximized(win: tauri::WebviewWindow) -> bool {
     win.is_maximized().unwrap_or(false)
 }
 
+#[tauri::command]
+pub fn win_set_always_on_top(win: tauri::WebviewWindow, on_top: bool) -> Result<(), String> {
+    win.set_always_on_top(on_top).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn win_is_always_on_top(win: tauri::WebviewWindow) -> bool {
+    win.is_always_on_top().unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn win_toggle_always_on_top(win: tauri::WebviewWindow) -> Result<bool, String> {
+    let current = win.is_always_on_top().unwrap_or(false);
+    let next = !current;
+    win.set_always_on_top(next).map_err(|e| e.to_string())?;
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn win_set_size(win: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height })).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn win_get_size(win: tauri::WebviewWindow) -> Result<(f64, f64), String> {
+    let size = win.inner_size().map_err(|e| e.to_string())?;
+    let factor = win.scale_factor().unwrap_or(1.0);
+    let logical = size.to_logical::<f64>(factor);
+    Ok((logical.width, logical.height))
+}
+
 /// 在资源管理器中打开：目录直接打开；文件定位到所在目录并选中（Windows：explorer；macOS：open -R；Linux：xdg-open）。
 #[tauri::command]
 pub async fn reveal_path(path: String) -> Result<(), String> {

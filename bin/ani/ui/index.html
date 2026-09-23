@@ -92,6 +92,9 @@
       </button>
     </div>
     <div class="win-controls">
+      <button id="win-pin" class="wc-pin" title="置顶窗口 (始终保持在最前)" aria-label="置顶窗口">
+        📌
+      </button>
       <button id="win-min" title="最小化" aria-label="最小化">
         <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1.5 6h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       </button>
@@ -817,11 +820,21 @@
               </div>
             </div>
             <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">同屏密度</span>
+              <div class="dm-btn-group">
+                <button class="ghost small dm-density-opt active" data-density="120" title="不限制同屏最大弹幕数">不限</button>
+                <button class="ghost small dm-density-opt" data-density="80" title="同屏最多 80 条弹幕">密集</button>
+                <button class="ghost small dm-density-opt" data-density="40" title="同屏最多 40 条弹幕">适中</button>
+                <button class="ghost small dm-density-opt" data-density="20" title="同屏最多 20 条弹幕">清爽</button>
+              </div>
+            </div>
+            <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">弹幕字号</span>
               <div class="dm-btn-group">
-                <button class="ghost small dm-size-opt" data-size="sm">小</button>
-                <button class="ghost small dm-size-opt active" data-size="md">中</button>
-                <button class="ghost small dm-size-opt" data-size="lg">大</button>
+                <button class="ghost small dm-size-opt" data-size="sm">小 18</button>
+                <button class="ghost small dm-size-opt active" data-size="md">中 24</button>
+                <button class="ghost small dm-size-opt" data-size="lg">大 30</button>
+                <button class="ghost small dm-size-opt" data-size="xl">巨 36</button>
               </div>
             </div>
             <div class="danmaku-menu-row">
@@ -1200,7 +1213,16 @@
             </label>
           </div>
         </div>
+        <div class="player-audio-track-wrap">
+          <button id="player-audio-track-btn" class="ghost small" title="切换声轨 / 多音轨">音轨 🎧</button>
+          <div id="audio-track-menu" class="audio-track-menu hidden">
+            <div class="audio-track-menu-title">切换声轨 / 多音轨</div>
+            <div id="audio-track-list" class="audio-track-list"></div>
+          </div>
+        </div>
         <button id="player-bookmark-btn" class="ghost small" title="添加高能打点书签 (快捷键 M)">打点 💎</button>
+        <button id="player-pin-btn" class="ghost small" title="窗口置顶保持最前 (快捷键 Shift+P)">置顶 📌</button>
+        <button id="player-mini-btn" class="ghost small" title="极简桌面画中画伴播模式 (快捷键 Shift+M)">伴播 🗖</button>
         <button id="player-pip" class="ghost small" title="画中画悬浮小窗 (快捷键 P)">画中画 🗗</button>
         <button id="player-fs" class="ghost small" title="全屏 (F)">⛶</button>
         <button id="player-rate" class="ghost small" title="播放速度">倍速 1.0x</button>
@@ -1209,6 +1231,10 @@
         <button id="player-syncplay-btn" class="ghost small" title="与好友一起看协同抽屉 (快捷键 Y)">一起看 👥<span id="player-syncplay-dot" class="syncplay-dot hidden"></span></button>
       </div>
       <div class="player-stage">
+        <!-- 伴播模式一键复原悬浮胶囊 -->
+        <button id="mini-mode-restore-btn" class="mini-mode-restore-btn hidden" title="退出伴播模式，还原窗口 (快捷键 Esc / Shift+M)">
+          ⛶ 还原窗口
+        </button>
         <canvas id="ambient-canvas" class="player-ambient-canvas hidden"></canvas>
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
@@ -1585,6 +1611,9 @@
           <div class="sg-item"><span class="sg-desc">夜间人声动态压限 (DRC 抑制爆破提亮对白)</span><span>控制栏「画面 📺」</span></div>
           <div class="sg-item"><span class="sg-desc">名场面截帧（含字幕与弹幕合成预览）</span><kbd>C</kbd></div>
           <div class="sg-item"><span class="sg-desc">开启 / 退出画中画悬浮小窗</span><kbd>P</kbd></div>
+          <div class="sg-item"><span class="sg-desc">桌面窗口始终置顶 / 取消置顶</span><div class="kbds"><kbd>Shift</kbd> + <kbd>P</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">极简画中画伴播模式 (540×340 自动置顶)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>M</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">切换声轨 / 多音轨</span><span>控制栏「音轨 🎧」</span></div>
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">睡眠定时器 (关/播完本集/30/60/90分)</span><span>控制栏「画面 📺」</span></div>
           <div class="sg-item"><span class="sg-desc">循环切换画面比例与填充</span><kbd>W</kbd></div>
@@ -1602,11 +1631,9 @@
         <div class="shortcut-group">
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">呼出 / 隐藏弹幕高级调谐面板</span><kbd>D</kbd></div>
+          <div class="sg-item"><span class="sg-desc">同屏密度温控 (不限/密集/适中/清爽)</span><span>控制栏「弹幕」</span></div>
           <div class="sg-item"><span class="sg-desc">高能热词洞察与时刻定位</span><span>控制栏「弹幕」➔ 点击热词</span></div>
           <div class="sg-item"><span class="sg-desc">加载本地弹幕 (.xml / .json)</span><span>拖拽至播放器 或 控制栏「弹幕」</span></div>
-          <div class="sg-item"><span class="sg-desc">弹幕时间轴微调 (自动记忆当前条目)</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd> <span class="meta">或控制栏「⏱️ 胶囊」</span></div></div>
-          <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
-        </div>
           <div class="sg-item"><span class="sg-desc">弹幕时间轴微调 (自动记忆当前条目)</span><div class="kbds"><kbd>-</kbd> <kbd>=</kbd> <span class="meta">或控制栏「⏱️ 胶囊」</span></div></div>
           <div class="sg-item"><span class="sg-desc">弹幕高级调谐 (区域/字号/速度)</span><span>控制栏「弹幕」</span></div>
         </div>

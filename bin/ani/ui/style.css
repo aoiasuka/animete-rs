@@ -589,6 +589,16 @@ body {
   color: var(--text-main);
 }
 
+.win-controls .wc-pin {
+  font-size: 12px;
+}
+
+.win-controls .wc-pin.pinned {
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.22);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.45);
+}
+
 .win-controls #win-close:hover,
 .win-controls .wc-close:hover {
   background: #e81123 !important;
@@ -2318,10 +2328,14 @@ main {
   font-weight: 600;
 }
 
-#player-pip.active {
+#player-pip.active,
+#player-pin-btn.active,
+#player-mini-btn.active,
+.dm-density-opt.active {
   background: var(--accent-gradient) !important;
   color: #fff !important;
   box-shadow: 0 0 12px var(--accent-glow);
+  font-weight: 600;
 }
 
 .visual-menu-sep {
@@ -2511,6 +2525,157 @@ body.window-drag-over::after {
 #player-external-btn:hover {
   color: #38bdf8;
   border-color: rgba(56, 189, 248, 0.6);
+}
+
+/* 音轨切换下拉菜单 */
+.player-audio-track-wrap {
+  position: relative;
+}
+
+.audio-track-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 240px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 10px;
+  z-index: 1000;
+  animation: visualMenuIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.audio-track-menu-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audio-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.audio-track-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.audio-track-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.audio-track-item.active {
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  font-weight: 600;
+}
+
+.audio-track-check {
+  font-size: 13px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+/* 极简画中画伴播模式 (Mini Companion Mode) */
+body.mini-companion-mode header,
+body.mini-companion-mode #nav-history-btn,
+body.mini-companion-mode #nav-stats-btn,
+body.mini-companion-mode .player-top-actions,
+body.mini-companion-mode .player-danmaku-bar {
+  display: none !important;
+}
+
+body.mini-companion-mode main {
+  height: 100vh !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.mini-companion-mode #view-player {
+  height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+body.mini-companion-mode .player-stage {
+  flex: 1 !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+}
+
+body.mini-companion-mode .player-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: linear-gradient(180deg, transparent 0%, rgba(10, 12, 18, 0.95) 100%);
+  padding: 8px 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+body.mini-companion-mode .player-stage:hover .player-controls,
+body.mini-companion-mode .player-controls:hover {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* 伴播模式一键复原悬浮胶囊 */
+.mini-mode-restore-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 60;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(15, 20, 32, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mini-mode-restore-btn:hover {
+  background: var(--accent-gradient);
+  color: #fff;
+  border-color: transparent;
+  transform: scale(1.05);
+  box-shadow: 0 0 16px var(--accent-glow);
 }
 
 /* 现代原生 WebVTT 字幕渲染样式 */

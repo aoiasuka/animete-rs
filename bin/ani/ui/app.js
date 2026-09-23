@@ -3476,6 +3476,81 @@ if (clearContinueBtn) {
   $("win-min").onclick = () => invoke("win_minimize").catch(() => {});
   $("win-max").onclick = () => invoke("win_toggle_maximize").catch(() => {});
   $("win-close").onclick = () => invoke("win_close").catch(() => {});
+
+  let isWindowPinned = false;
+  let isMiniMode = false;
+  let prevWindowSize = null;
+
+  const syncPinState = (pinned) => {
+    isWindowPinned = !!pinned;
+    const winPinBtn = $("win-pin");
+    const playerPinBtn = $("player-pin-btn");
+    if (winPinBtn) {
+      winPinBtn.classList.toggle("pinned", isWindowPinned);
+      winPinBtn.title = isWindowPinned ? "取消置顶 (当前窗口已置顶)" : "置顶窗口 (始终保持在最前)";
+    }
+    if (playerPinBtn) {
+      playerPinBtn.classList.toggle("active", isWindowPinned);
+      playerPinBtn.textContent = isWindowPinned ? "已置顶 📌" : "置顶 📌";
+    }
+  };
+
+  window.toggleWindowPin = async () => {
+    try {
+      const next = await invoke("win_toggle_always_on_top");
+      syncPinState(next);
+      showPlayerOsd(next ? "📌 窗口已置顶 (始终保持最前)" : "📌 已取消窗口置顶");
+      toast(next ? "窗口已置顶" : "已取消窗口置顶", true);
+    } catch (e) {
+      console.warn("win_toggle_always_on_top error:", e);
+    }
+  };
+
+  window.toggleMiniMode = async () => {
+    if (!isMiniMode) {
+      try {
+        const sz = await invoke("win_get_size");
+        if (sz && sz[0] && sz[1]) prevWindowSize = sz;
+      } catch {}
+      isMiniMode = true;
+      document.body.classList.add("mini-companion-mode");
+      $("player-mini-btn")?.classList.add("active");
+      $("mini-mode-restore-btn")?.classList.remove("hidden");
+      await invoke("win_set_always_on_top", { onTop: true }).catch(() => {});
+      syncPinState(true);
+      await invoke("win_set_size", { width: 540, height: 340 }).catch(() => {});
+      showPlayerOsd("🗖 极简伴播模式 (按 Esc 或点击右上角还原)");
+      toast("已开启伴播模式 (540×340 自动置顶悬浮)", true);
+    } else {
+      window.restoreNormalMode();
+    }
+  };
+
+  window.restoreNormalMode = async () => {
+    isMiniMode = false;
+    document.body.classList.remove("mini-companion-mode");
+    $("player-mini-btn")?.classList.remove("active");
+    $("mini-mode-restore-btn")?.classList.add("hidden");
+    if (prevWindowSize && prevWindowSize[0] && prevWindowSize[1]) {
+      await invoke("win_set_size", { width: prevWindowSize[0], height: prevWindowSize[1] }).catch(() => {});
+    }
+    showPlayerOsd("⛶ 已恢复常规窗口模式");
+  };
+
+  const winPin = $("win-pin");
+  if (winPin) winPin.onclick = () => window.toggleWindowPin();
+
+  const miniRestoreBtn = $("mini-mode-restore-btn");
+  if (miniRestoreBtn) miniRestoreBtn.onclick = () => window.restoreNormalMode();
+
+  const playerMiniBtn = $("player-mini-btn");
+  if (playerMiniBtn) playerMiniBtn.onclick = () => window.toggleMiniMode();
+
+  const playerPinBtn = $("player-pin-btn");
+  if (playerPinBtn) playerPinBtn.onclick = () => window.toggleWindowPin();
+
+  invoke("win_is_always_on_top").then(syncPinState).catch(() => {});
+
   // 关闭窗口 = 隐藏到托盘（Rust 侧拦截 CloseRequested，下载/做种继续）；首次给出提示
   listen("hidden-to-tray", () => {
     if (!localStorage.getItem("ani_tray_hint")) {
@@ -4643,7 +4718,7 @@ function renderDanmakuHotKeywords() {
 const DanmakuOverlay = (() => {
   let scrollMs = parseInt(localStorage.getItem("ani_dm_speed") || "6000", 10);
   let staticMs = 4000;
-  const MAX_ITEMS = 100;
+  let maxDensity = parseInt(localStorage.getItem("ani_dm_max_density") || "120", 10);
   let events = [];   // 按时间升序
   let cursor = 0;    // 下一条待上屏的下标
   let items = [];    // 活动中的弹幕 {text,color,mode,lane,born,width}
@@ -4785,7 +4860,7 @@ const DanmakuOverlay = (() => {
     }
     c.width = Math.round(W * dpr);
     c.height = Math.round(H * dpr);
-    const mult = fontScale === "sm" ? 0.75 : fontScale === "lg" ? 1.3 : 1.0;
+    const mult = fontScale === "sm" ? 0.75 : fontScale === "lg" ? 1.25 : fontScale === "xl" ? 1.55 : 1.0;
     fontPx = Math.round(Math.max(16, Math.min(36, Math.round(H / 22))) * mult);
   }
 
@@ -4804,7 +4879,7 @@ const DanmakuOverlay = (() => {
   }
 
   function spawn(e, now) {
-    if (items.length >= MAX_ITEMS) return;
+    if (items.length >= maxDensity) return;
     if (shouldFilter(e)) {
       sessionBlockedCount++;
       const blockedInfoEl = $("dm-session-blocked-info");
@@ -5071,6 +5146,13 @@ const DanmakuOverlay = (() => {
     },
     setSpeedMs(ms) {
       scrollMs = ms;
+    },
+    getMaxDensity() {
+      return maxDensity;
+    },
+    setMaxDensity(val) {
+      maxDensity = parseInt(val, 10) || 120;
+      localStorage.setItem("ani_dm_max_density", String(maxDensity));
     },
     getBlockedKeywords() {
       return [...blockedKeywords];
@@ -7497,6 +7579,8 @@ function destroyPlayer() {
   if (subMenu) subMenu.classList.add("hidden");
   const visualMenu = $("visual-menu");
   if (visualMenu) visualMenu.classList.add("hidden");
+  const audioMenu = $("audio-track-menu");
+  if (audioMenu) audioMenu.classList.add("hidden");
   const skipCapsule = $("player-skip-capsule");
   if (skipCapsule) skipCapsule.classList.add("hidden");
   if (document.pictureInPictureElement) {
@@ -7560,6 +7644,7 @@ function showPlayer(url, title, extra = {}) {
   }
   restoreDanmakuOffset();
   loadSceneBookmarks();
+  initAudioTracks();
   if (!url) return;
 
   autoDetectAndMountSubtitles(extra?.localPath || btFallbackPath, extra?.subtitles);
@@ -7598,6 +7683,7 @@ function showPlayer(url, title, extra = {}) {
     hls.loadSource(url);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+      initAudioTracks();
       // 画质选择（多码率 HLS）
       const sel = $("player-quality");
       const levels = data.levels ?? [];
@@ -7610,6 +7696,9 @@ function showPlayer(url, title, extra = {}) {
             .join("");
       }
     });
+    if (Hls.Events.AUDIO_TRACKS_UPDATED) {
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => initAudioTracks());
+    }
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
       // 可恢复的错误自动重试，避免网络闪断后播放卡死
@@ -8071,6 +8160,7 @@ $("video").addEventListener("loadedmetadata", () => {
     renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
     renderSceneBookmarks();
   }
+  initAudioTracks();
 });
 $("video").addEventListener("pause", () => {
   clearPlayerIdle();
@@ -8287,8 +8377,13 @@ function syncDanmakuMenuUI() {
   const curSize = localStorage.getItem("ani_dm_size") || "md";
   const curSpeed = parseInt(localStorage.getItem("ani_dm_speed") || "6000", 10);
 
+  const curDensity = parseInt(localStorage.getItem("ani_dm_max_density") || "120", 10);
+
   document.querySelectorAll(".dm-opacity-opt").forEach((btn) => {
     btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.opacity) - op) < 0.05);
+  });
+  document.querySelectorAll(".dm-density-opt").forEach((btn) => {
+    btn.classList.toggle("active", parseInt(btn.dataset.density, 10) === curDensity);
   });
   document.querySelectorAll(".dm-area-opt").forEach((btn) => {
     btn.classList.toggle("active", Math.abs(parseFloat(btn.dataset.area) - curArea) < 0.05);
@@ -8359,8 +8454,17 @@ function setDanmakuSize(size) {
   localStorage.setItem("ani_dm_size", size);
   DanmakuOverlay.setFontScale(size);
   syncDanmakuMenuUI();
-  const names = { sm: "小", md: "中", lg: "大" };
+  const names = { sm: "小 18px", md: "中 24px", lg: "大 30px", xl: "巨 36px" };
   showPlayerOsd(`弹幕字号: ${names[size] || size}`);
+}
+
+function setDanmakuDensity(val) {
+  const density = parseInt(val, 10) || 120;
+  localStorage.setItem("ani_dm_max_density", String(density));
+  DanmakuOverlay.setMaxDensity(density);
+  syncDanmakuMenuUI();
+  const names = { 120: "不限 (120+条)", 80: "密集 (80条)", 40: "适中 (40条)", 20: "清爽 (20条)" };
+  showPlayerOsd(`弹幕同屏密度温控: ${names[density] || (density + "条")}`);
 }
 
 function setDanmakuSpeed(speedMs) {
@@ -8388,6 +8492,9 @@ if (dmBtn && dmMenu) {
 
 document.querySelectorAll(".dm-opacity-opt").forEach((btn) => {
   btn.onclick = () => setDanmakuOpacity(parseFloat(btn.dataset.opacity));
+});
+document.querySelectorAll(".dm-density-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuDensity(btn.dataset.density);
 });
 document.querySelectorAll(".dm-area-opt").forEach((btn) => {
   btn.onclick = () => setDanmakuArea(parseFloat(btn.dataset.area));
@@ -9764,6 +9871,144 @@ if (subDualDelayReset) subDualDelayReset.onclick = () => {
 
 applySubtitleStyles();
 
+// ---------- 多音轨 / 声轨切换逻辑 (Multi-Track Audio Switcher) ----------
+let detectedAudioTracks = [];
+
+function getTrackLangLabel(track, index) {
+  const lang = (track.lang || track.language || "").toLowerCase();
+  const name = (track.name || track.label || "").trim();
+  let flag = "🎵";
+  let langName = "";
+  if (lang.includes("ja") || lang.includes("jpn") || name.includes("日") || name.toLowerCase().includes("jap")) {
+    flag = "🇯🇵";
+    langName = "日语 (Japanese)";
+  } else if (lang.includes("zh") || lang.includes("chi") || lang.includes("zho") || name.includes("中") || name.includes("国语") || name.includes("普通话")) {
+    flag = "🇨🇳";
+    langName = "中文 (Chinese)";
+  } else if (lang.includes("en") || lang.includes("eng") || name.includes("英") || name.toLowerCase().includes("eng")) {
+    flag = "🇺🇸";
+    langName = "英语 (English)";
+  } else if (lang.includes("yue") || name.includes("粤")) {
+    flag = "🇭🇰";
+    langName = "粤语 (Cantonese)";
+  } else if (name.includes("评论") || name.includes("副音轨") || name.toLowerCase().includes("commentary")) {
+    flag = "🎙️";
+    langName = "解说 / 评论声轨";
+  } else {
+    langName = name || (lang ? `语言 [${lang.toUpperCase()}]` : `声轨 #${index + 1}`);
+  }
+  const displayTitle = name && name !== langName ? `${flag} ${name}` : `${flag} ${langName}`;
+  return { flag, displayTitle };
+}
+
+function initAudioTracks() {
+  const listEl = $("audio-track-list");
+  const btn = $("player-audio-track-btn");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  detectedAudioTracks = [];
+
+  const v = $("video");
+  if (hls && hls.audioTracks && hls.audioTracks.length > 0) {
+    detectedAudioTracks = hls.audioTracks.map((t, idx) => ({
+      index: idx,
+      type: "hls",
+      name: t.name || "",
+      lang: t.lang || "",
+      active: hls.audioTrack === idx || (hls.audioTrack === -1 && idx === 0),
+    }));
+  } else if (v && v.audioTracks && v.audioTracks.length > 0) {
+    for (let i = 0; i < v.audioTracks.length; i++) {
+      const t = v.audioTracks[i];
+      detectedAudioTracks.push({
+        index: i,
+        type: "html5",
+        name: t.label || "",
+        lang: t.language || "",
+        active: !!t.enabled,
+      });
+    }
+  }
+
+  if (detectedAudioTracks.length === 0) {
+    detectedAudioTracks.push({
+      index: 0,
+      type: "default",
+      name: "默认主音轨 [原声]",
+      lang: "",
+      active: true,
+    });
+  }
+
+  if (!detectedAudioTracks.some((t) => t.active)) {
+    detectedAudioTracks[0].active = true;
+  }
+
+  const activeTrack = detectedAudioTracks.find((t) => t.active) || detectedAudioTracks[0];
+  if (btn) {
+    const info = getTrackLangLabel(activeTrack, activeTrack.index);
+    btn.textContent = `音轨 🎧`;
+    btn.title = `切换声轨 / 多音轨 (当前: ${info.displayTitle})`;
+  }
+
+  detectedAudioTracks.forEach((t) => {
+    const item = document.createElement("div");
+    item.className = `audio-track-item ${t.active ? "active" : ""}`;
+    const info = getTrackLangLabel(t, t.index);
+    item.innerHTML = `
+      <span>${info.displayTitle}</span>
+      <span class="audio-track-check">${t.active ? "✓" : ""}</span>
+    `;
+    item.onclick = (e) => {
+      e.stopPropagation();
+      switchAudioTrack(t.index);
+    };
+    listEl.appendChild(item);
+  });
+}
+
+function switchAudioTrack(index) {
+  const target = detectedAudioTracks[index];
+  if (!target) return;
+
+  if (target.type === "hls" && hls) {
+    hls.audioTrack = index;
+  } else if (target.type === "html5") {
+    const v = $("video");
+    if (v && v.audioTracks) {
+      for (let i = 0; i < v.audioTracks.length; i++) {
+        v.audioTracks[i].enabled = (i === index);
+      }
+    }
+  }
+
+  detectedAudioTracks.forEach((t, i) => {
+    t.active = (i === index);
+  });
+
+  const info = getTrackLangLabel(target, index);
+  showPlayerOsd(`已切换声轨: ${info.displayTitle}`);
+  toast(`已切换声轨: ${info.displayTitle}`, true);
+
+  initAudioTracks();
+  $("audio-track-menu")?.classList.add("hidden");
+}
+
+const audioTrackBtn = $("player-audio-track-btn");
+const audioTrackMenu = $("audio-track-menu");
+if (audioTrackBtn && audioTrackMenu) {
+  audioTrackBtn.onclick = (e) => {
+    e.stopPropagation();
+    initAudioTracks();
+    audioTrackMenu.classList.toggle("hidden");
+  };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".player-audio-track-wrap")) {
+      audioTrackMenu.classList.add("hidden");
+    }
+  });
+}
+
 // 播放器区域支持直接拖拽挂载字幕文件
 const pStage = document.querySelector(".player-stage");
 if (pStage) {
@@ -10377,8 +10622,9 @@ document.addEventListener("keydown", (e) => {
       break;
     case "m": case "M":
       if (e.shiftKey) {
-        v.muted = !v.muted;
-        showPlayerOsd(v.muted ? "🔇 静音" : `🔊 音量: ${Math.round(v.volume * 100)}%`);
+        if (typeof window.toggleMiniMode === "function") {
+          window.toggleMiniMode();
+        }
       } else {
         openBookmarkModal();
       }
@@ -10429,7 +10675,15 @@ document.addEventListener("keydown", (e) => {
       else skipOp();
       break;
     case "c": case "C": captureVideoFrame(); break;
-    case "p": case "P": togglePiP(); break;
+    case "p": case "P":
+      if (e.shiftKey) {
+        if (typeof window.toggleWindowPin === "function") {
+          window.toggleWindowPin();
+        }
+      } else {
+        togglePiP();
+      }
+      break;
     case "d": case "D": {
       const dmMenu = $("danmaku-menu");
       if (dmMenu) {
@@ -11000,6 +11254,17 @@ document.addEventListener("keydown", (e) => {
       dlVisible = false;
       $("download-panel").classList.add("hidden");
     } else if (!$("view-player").classList.contains("hidden")) {
+      if (document.body.classList.contains("mini-companion-mode")) {
+        if (typeof window.restoreNormalMode === "function") {
+          window.restoreNormalMode();
+        }
+        return;
+      }
+      const audioMenu = $("audio-track-menu");
+      if (audioMenu && !audioMenu.classList.contains("hidden")) {
+        audioMenu.classList.add("hidden");
+        return;
+      }
       const drawer = $("player-ep-drawer");
       if (drawer && !drawer.classList.contains("hidden")) {
         toggleEpDrawer(false);
