@@ -4618,10 +4618,20 @@ function renderDanmakuHeatmap(events, duration) {
         if (scrubTime) scrubTime.textContent = `${fmtTime(hoverSec)} / ${fmtTime(duration)}`;
         if (scrubPct) scrubPct.textContent = `(${Math.round(ratio * 100)}%)`;
 
+        const isAb = visualState.abLoop?.active &&
+          visualState.abLoop?.a !== null &&
+          visualState.abLoop?.b !== null &&
+          hoverSec >= Math.min(visualState.abLoop.a, visualState.abLoop.b) &&
+          hoverSec <= Math.max(visualState.abLoop.a, visualState.abLoop.b);
+
         if (scrubBadge) {
           if (nearbyBm) {
             scrubBadge.className = "scrub-preview-badge badge-bm";
             scrubBadge.textContent = `💎 ${nearbyBm.title}`;
+            scrubBadge.classList.remove("hidden");
+          } else if (isAb) {
+            scrubBadge.className = "scrub-preview-badge badge-ab";
+            scrubBadge.textContent = "🔁 A-B 循环区间";
             scrubBadge.classList.remove("hidden");
           } else if (isPeak) {
             scrubBadge.className = "scrub-preview-badge";
@@ -7430,7 +7440,7 @@ const visualState = {
   sharpness: parseInt(localStorage.getItem("ani_visual_sharpness") || "0", 10),
   autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
   autoSkipEd: parseInt(localStorage.getItem("ani_auto_skip_ed") || "0", 10),
-  abLoop: { a: null, b: null, active: false },
+  abLoop: { a: null, b: null, active: false, count: 0 },
   zoom: parseFloat(localStorage.getItem("ani_visual_zoom") || "1.0"),
   panX: 0,
   panY: 0,
@@ -7441,6 +7451,9 @@ let edAutoSkipped = false;
 let ambientTimer = null;
 let ambientSampleCanvas = null;
 let ambientSampleCtx = null;
+let audioVisualizerActive = localStorage.getItem("ani_audio_visualizer") === "1";
+let visualizerRafId = null;
+let resumeToastTimer = null;
 
 const ASPECT_LABELS = {
   default: "自适应",
@@ -7460,6 +7473,8 @@ const FILTER_LABELS = {
   cinema: "胶片院线",
   cyber: "激燃战斗",
   vintage: "复古赛璐珞",
+  crisp: "线条锐化",
+  deep: "超清增强",
   manga: "黑白漫画",
 };
 
@@ -7529,6 +7544,8 @@ function applyVisualEffects(notify = false) {
     cinema: "contrast(1.12) brightness(0.98) saturate(1.15) sepia(0.08)",
     cyber: "contrast(1.22) brightness(1.04) saturate(1.35) hue-rotate(5deg)",
     vintage: "sepia(0.28) contrast(1.15) brightness(0.94) saturate(0.85)",
+    crisp: "url(#svg-anime-crisp) contrast(1.08) saturate(1.06)",
+    deep: "url(#svg-anime-deep) contrast(1.15) saturate(1.12)",
     manga: "grayscale(1) contrast(1.35) brightness(1.05)",
   };
 
@@ -7899,16 +7916,8 @@ function setAbPointA() {
   const now = v.currentTime;
   visualState.abLoop.a = now;
   visualState.abLoop.active = false;
-  const btnA = $("btn-ab-a");
-  if (btnA) {
-    btnA.textContent = `A: ${fmtTime(now)}`;
-    btnA.classList.add("active");
-  }
-  const btnB = $("btn-ab-b");
-  if (btnB) {
-    btnB.textContent = "设 B 点";
-    btnB.classList.remove("active");
-  }
+  visualState.abLoop.count = 0;
+  updateAbLoopUI();
   showPlayerOsd(`🔁 A-B 循环：起点 A = ${fmtTime(now)}`);
   toast(`已标记 A 点：${fmtTime(now)}（请在终点按 ] 设 B 点）`, true);
 }
@@ -7919,11 +7928,6 @@ function setAbPointB() {
   const now = v.currentTime;
   if (visualState.abLoop.a === null) {
     visualState.abLoop.a = 0;
-    const btnA = $("btn-ab-a");
-    if (btnA) {
-      btnA.textContent = `A: 00:00`;
-      btnA.classList.add("active");
-    }
   }
   if (now <= visualState.abLoop.a) {
     toast("B 点时间必须大于 A 点");
@@ -7931,31 +7935,295 @@ function setAbPointB() {
   }
   visualState.abLoop.b = now;
   visualState.abLoop.active = true;
-  const btnB = $("btn-ab-b");
-  if (btnB) {
-    btnB.textContent = `B: ${fmtTime(now)}`;
-    btnB.classList.add("active");
-  }
+  visualState.abLoop.count = 1;
   v.currentTime = visualState.abLoop.a;
+  updateAbLoopUI();
   showPlayerOsd(`🔁 A-B 循环中：${fmtTime(visualState.abLoop.a)} ➔ ${fmtTime(now)}`);
   toast(`A-B 循环已激活：${fmtTime(visualState.abLoop.a)} ~ ${fmtTime(now)}`, true);
 }
 
 function clearAbLoop(notify = true) {
-  visualState.abLoop = { a: null, b: null, active: false };
-  const btnA = $("btn-ab-a");
-  if (btnA) {
-    btnA.textContent = "设 A 点";
-    btnA.classList.remove("active");
-  }
-  const btnB = $("btn-ab-b");
-  if (btnB) {
-    btnB.textContent = "设 B 点";
-    btnB.classList.remove("active");
-  }
+  visualState.abLoop = { a: null, b: null, active: false, count: 0 };
+  updateAbLoopUI();
   if (notify) {
     showPlayerOsd("🔁 A-B 循环已清除");
     toast("A-B 循环已清除", true);
+  }
+}
+
+function updateAbLoopUI() {
+  const v = $("video");
+  const dur = v && v.duration && isFinite(v.duration) && v.duration > 0 ? v.duration : 1;
+  const loop = visualState.abLoop;
+
+  // 1. 控制栏菜单按钮文本与高亮
+  const btnA = $("btn-ab-a");
+  if (btnA) {
+    btnA.textContent = loop.a !== null ? `A: ${fmtTime(loop.a)}` : "设 A 点";
+    btnA.classList.toggle("active", loop.a !== null);
+  }
+  const btnB = $("btn-ab-b");
+  if (btnB) {
+    btnB.textContent = loop.b !== null ? `B: ${fmtTime(loop.b)}` : "设 B 点";
+    btnB.classList.toggle("active", loop.b !== null);
+  }
+
+  // 2. 时间轴图层 (player-ab-layer)
+  const layer = $("player-ab-layer");
+  if (layer) {
+    layer.innerHTML = "";
+    if (loop.a !== null) {
+      const pctA = Math.max(0, Math.min(100, (loop.a / dur) * 100));
+      const pinA = document.createElement("div");
+      pinA.className = "player-ab-pin pin-a";
+      pinA.style.left = `${pctA}%`;
+      pinA.title = `循环起点 A: ${fmtTime(loop.a)} (点击跳转)`;
+      pinA.innerHTML = `<span class="ab-flag">A</span>`;
+      pinA.onclick = (e) => {
+        e.stopPropagation();
+        if (v) v.currentTime = loop.a;
+        showPlayerOsd(`🔁 跳转至起点 A: ${fmtTime(loop.a)}`);
+      };
+      layer.appendChild(pinA);
+
+      if (loop.b !== null) {
+        const pctB = Math.max(0, Math.min(100, (loop.b / dur) * 100));
+        const pinB = document.createElement("div");
+        pinB.className = "player-ab-pin pin-b";
+        pinB.style.left = `${pctB}%`;
+        pinB.title = `循环终点 B: ${fmtTime(loop.b)} (点击跳转)`;
+        pinB.innerHTML = `<span class="ab-flag">B</span>`;
+        pinB.onclick = (e) => {
+          e.stopPropagation();
+          if (v) v.currentTime = loop.b;
+          showPlayerOsd(`🔁 跳转至终点 B: ${fmtTime(loop.b)}`);
+        };
+
+        const rangeBar = document.createElement("div");
+        rangeBar.className = "player-ab-range-bar";
+        const leftPct = Math.min(pctA, pctB);
+        const widthPct = Math.abs(pctB - pctA);
+        rangeBar.style.left = `${leftPct}%`;
+        rangeBar.style.width = `${widthPct}%`;
+        rangeBar.title = `A-B 循环区间：${fmtTime(loop.a)} ~ ${fmtTime(loop.b)}`;
+        rangeBar.onclick = (e) => {
+          e.stopPropagation();
+          if (v) v.currentTime = loop.a;
+        };
+
+        layer.appendChild(rangeBar);
+        layer.appendChild(pinB);
+      }
+    }
+  }
+
+  // 3. 悬浮微调控制器 (player-ab-controller)
+  const ctl = $("player-ab-controller");
+  if (ctl) {
+    if (loop.active && loop.a !== null && loop.b !== null) {
+      ctl.classList.remove("hidden");
+      const rangeEl = $("ab-ctl-range");
+      if (rangeEl) rangeEl.textContent = `${fmtTime(loop.a)} ➔ ${fmtTime(loop.b)}`;
+      const countEl = $("ab-ctl-counter");
+      if (countEl) countEl.textContent = `第 ${loop.count || 1} 次`;
+    } else {
+      ctl.classList.add("hidden");
+    }
+  }
+}
+
+function adjustAbPointA(delta) {
+  if (visualState.abLoop.a === null) return;
+  const v = $("video");
+  const maxLimit = visualState.abLoop.b !== null ? visualState.abLoop.b - 0.2 : (v?.duration || 9999);
+  visualState.abLoop.a = Math.max(0, Math.min(maxLimit, visualState.abLoop.a + delta));
+  updateAbLoopUI();
+  showPlayerOsd(`🔁 循环起点 A 微调: ${fmtTime(visualState.abLoop.a)}`);
+}
+
+function adjustAbPointB(delta) {
+  if (visualState.abLoop.b === null) return;
+  const v = $("video");
+  const minLimit = visualState.abLoop.a !== null ? visualState.abLoop.a + 0.2 : 0;
+  const maxLimit = v && v.duration && isFinite(v.duration) ? v.duration : 9999;
+  visualState.abLoop.b = Math.max(minLimit, Math.min(maxLimit, visualState.abLoop.b + delta));
+  updateAbLoopUI();
+  showPlayerOsd(`🔁 循环终点 B 微调: ${fmtTime(visualState.abLoop.b)}`);
+}
+
+// ---------- 断点续播智能交互胶囊 ----------
+function triggerResumeToast(sec) {
+  const toastEl = $("player-resume-toast");
+  const timeEl = $("resume-toast-time");
+  if (!toastEl) return;
+  if (timeEl) timeEl.textContent = fmtTime(sec);
+  toastEl.classList.remove("hidden");
+
+  const replayBtn = $("resume-toast-replay-btn");
+  if (replayBtn) {
+    replayBtn.onclick = () => {
+      const v = $("video");
+      if (v) {
+        v.currentTime = 0;
+        showPlayerOsd("↺ 已从头播放");
+        toast("已恢复至 00:00 从头开始播放", true);
+      }
+      dismissResumeToast();
+    };
+  }
+
+  const closeBtn = $("resume-toast-close-btn");
+  if (closeBtn) {
+    closeBtn.onclick = () => dismissResumeToast();
+  }
+
+  clearTimeout(resumeToastTimer);
+  resumeToastTimer = setTimeout(() => {
+    dismissResumeToast();
+  }, 7000);
+}
+
+function dismissResumeToast() {
+  const toastEl = $("player-resume-toast");
+  if (toastEl) toastEl.classList.add("hidden");
+  clearTimeout(resumeToastTimer);
+}
+
+// ---------- 音频动态频谱仪 (Cyber Anime Audio Spectrum Visualizer) ----------
+function toggleAudioVisualizer(forceState) {
+  if (typeof forceState === "boolean") {
+    audioVisualizerActive = forceState;
+  } else {
+    audioVisualizerActive = !audioVisualizerActive;
+  }
+  localStorage.setItem("ani_audio_visualizer", audioVisualizerActive ? "1" : "0");
+  updateAudioVisualizerUI();
+  if (audioVisualizerActive) {
+    initAudioBoost();
+    startAudioVisualizerLoop();
+    showPlayerOsd("🎵 动态频谱: 已开启");
+    toast("动态音频频谱仪已开启（随番剧音乐律动）", true);
+  } else {
+    stopAudioVisualizerLoop();
+    showPlayerOsd("🎵 动态频谱: 已关闭");
+  }
+}
+
+function updateAudioVisualizerUI() {
+  const btn = $("btn-audio-visualizer");
+  if (btn) {
+    btn.textContent = `🎵 动态频谱: ${audioVisualizerActive ? "开" : "关"}`;
+    btn.classList.toggle("active", audioVisualizerActive);
+  }
+  const canvas = $("audio-visualizer-canvas");
+  if (canvas) {
+    canvas.classList.toggle("hidden", !audioVisualizerActive);
+  }
+}
+
+const spectrumPeaks = new Float32Array(32);
+
+function startAudioVisualizerLoop() {
+  if (!audioVisualizerActive) return;
+  const canvas = $("audio-visualizer-canvas");
+  const v = $("video");
+  if (!canvas || !v) return;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  initAudioBoost();
+  const analyser = audioBoostState.analyserNode;
+  if (!analyser) return;
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  function renderFrame() {
+    if (!audioVisualizerActive || $("view-player")?.classList.contains("hidden")) {
+      visualizerRafId = null;
+      return;
+    }
+
+    visualizerRafId = requestAnimationFrame(renderFrame);
+
+    if (v.paused || v.ended) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    analyser.getByteFrequencyData(dataArray);
+
+    const numBars = 32;
+    const barSpacing = 4;
+    const totalBarWidth = w - (numBars - 1) * barSpacing;
+    const barWidth = Math.max(3, totalBarWidth / numBars);
+
+    for (let i = 0; i < numBars; i++) {
+      const val = dataArray[i] || 0;
+      const percent = Math.min(1, val / 240);
+      const barHeight = Math.max(3, percent * (h - 10));
+
+      const x = i * (barWidth + barSpacing);
+      const y = h - barHeight;
+
+      if (barHeight > (spectrumPeaks[i] || 0)) {
+        spectrumPeaks[i] = barHeight;
+      } else {
+        spectrumPeaks[i] = Math.max(0, (spectrumPeaks[i] || 0) - 1.2);
+      }
+
+      const grad = ctx.createLinearGradient(x, h, x, y);
+      grad.addColorStop(0, "rgba(139, 92, 246, 0.22)");
+      grad.addColorStop(0.55, "rgba(236, 72, 153, 0.6)");
+      grad.addColorStop(1, "rgba(56, 189, 248, 0.92)");
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x, y, barWidth, barHeight, [3, 3, 0, 0]);
+      ctx.fill();
+
+      const peakY = h - spectrumPeaks[i] - 3;
+      if (peakY >= 0 && peakY < h - 4) {
+        ctx.fillStyle = "rgba(56, 189, 248, 0.95)";
+        ctx.shadowColor = "rgba(56, 189, 248, 0.75)";
+        ctx.shadowBlur = 6;
+        ctx.fillRect(x, peakY, barWidth, 2);
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    ctx.restore();
+  }
+
+  if (!visualizerRafId) {
+    visualizerRafId = requestAnimationFrame(renderFrame);
+  }
+}
+
+function stopAudioVisualizerLoop() {
+  if (visualizerRafId) {
+    cancelAnimationFrame(visualizerRafId);
+    visualizerRafId = null;
+  }
+  const canvas = $("audio-visualizer-canvas");
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
 
@@ -7968,6 +8236,7 @@ const audioBoostState = {
   vocalBoost: parseFloat(localStorage.getItem("ani_vocal_boost")) || 0,
   pan: parseFloat(localStorage.getItem("ani_audio_pan")) || 0.0,
   ctx: null,
+  analyserNode: null,
   sourceNode: null,
   gainNode: null,
   delayNode: null,
@@ -8050,6 +8319,12 @@ function initAudioBoost() {
         audioBoostState.gainNode.connect(audioBoostState.delayNode);
       }
       audioBoostState.delayNode.connect(audioBoostState.ctx.destination);
+
+      // 频谱分析节点 (AnalyserNode)：用于音频律动频谱仪
+      audioBoostState.analyserNode = audioBoostState.ctx.createAnalyser();
+      audioBoostState.analyserNode.fftSize = 64;
+      audioBoostState.analyserNode.smoothingTimeConstant = 0.78;
+      audioBoostState.gainNode.connect(audioBoostState.analyserNode);
 
       applyAudioEq(audioBoostState.eqMode);
     } catch {
@@ -8504,6 +8779,8 @@ function destroyPlayer() {
   const pipBtn = $("player-pip");
   if (pipBtn) pipBtn.classList.remove("active");
   clearAbLoop(false);
+  dismissResumeToast();
+  stopAudioVisualizerLoop();
   opAutoSkipped = false;
   edAutoSkipped = false;
   destroyScrubVideo();
@@ -8534,6 +8811,8 @@ function showPlayer(url, title, extra = {}) {
   if (extra?.localPath) btFallbackPath = extra.localPath;
   updateLoopBtn();
   updateCustomOpSkipUI();
+  updateAbLoopUI();
+  updateAudioVisualizerUI();
   $("player-title").textContent = title || "在线播放";
   showView("player");
   updatePlayerNextBtn();
@@ -8573,9 +8852,9 @@ function showPlayer(url, title, extra = {}) {
     if (resumeDone || !resumeAt) return;
     if (!v.duration || !isFinite(v.duration)) return;
     resumeDone = true;
-    if (resumeAt < v.duration * 0.95) {
+    if (resumeAt < v.duration * 0.95 && resumeAt > 10) {
       v.currentTime = resumeAt;
-      toast(`已从 ${fmtTime(resumeAt)} 继续播放`, true);
+      triggerResumeToast(resumeAt);
     }
   };
   if (resumeAt == null) {
@@ -8826,13 +9105,16 @@ $("video").addEventListener("dblclick", () => {
 $("video").addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   if (visualState.ambient !== "off") startAmbientLoop();
+  if (audioVisualizerActive) startAudioVisualizerLoop();
 });
 $("video").addEventListener("pause", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
   stopAmbientLoop();
+  stopAudioVisualizerLoop();
 });
 $("video").addEventListener("ended", () => {
   stopAmbientLoop();
+  stopAudioVisualizerLoop();
 });
 
 function toggleFullscreen() {
@@ -8931,6 +9213,9 @@ $("video").addEventListener("timeupdate", () => {
   // A-B 片段循环播放
   if (visualState.abLoop.active && visualState.abLoop.b !== null && v.currentTime >= visualState.abLoop.b) {
     v.currentTime = visualState.abLoop.a ?? 0;
+    visualState.abLoop.count = (visualState.abLoop.count || 1) + 1;
+    const countEl = $("ab-ctl-counter");
+    if (countEl) countEl.textContent = `第 ${visualState.abLoop.count} 次`;
   }
 
   // 弹幕热力图进度游标跟随
@@ -9083,6 +9368,7 @@ $("video").addEventListener("loadedmetadata", () => {
   if (v && v.duration && isFinite(v.duration) && v.duration > 0) {
     renderDanmakuHeatmap(DanmakuOverlay.getEvents(), v.duration);
     renderSceneBookmarks();
+    updateAbLoopUI();
   }
   initAudioTracks();
 });
@@ -11508,6 +11794,14 @@ if (btnAbB) btnAbB.onclick = () => setAbPointB();
 const btnAbClear = $("btn-ab-clear");
 if (btnAbClear) btnAbClear.onclick = () => clearAbLoop();
 
+$("ab-ctl-a-minus")?.addEventListener("click", () => adjustAbPointA(-1));
+$("ab-ctl-a-plus")?.addEventListener("click", () => adjustAbPointA(1));
+$("ab-ctl-b-minus")?.addEventListener("click", () => adjustAbPointB(-1));
+$("ab-ctl-b-plus")?.addEventListener("click", () => adjustAbPointB(1));
+$("ab-ctl-clear-btn")?.addEventListener("click", () => clearAbLoop());
+
+$("btn-audio-visualizer")?.addEventListener("click", () => toggleAudioVisualizer());
+
 const skipCapsule = $("player-skip-capsule");
 if (skipCapsule) {
   skipCapsule.onclick = () => skipOp();
@@ -11909,10 +12203,12 @@ document.addEventListener("keydown", (e) => {
       break;
     case "[":
       if (e.shiftKey) adjustAudioDelay(-50);
+      else if (e.ctrlKey) adjustAbPointA(-1);
       else setAbPointA();
       break;
     case "]":
       if (e.shiftKey) adjustAudioDelay(50);
+      else if (e.ctrlKey) adjustAbPointB(1);
       else setAbPointB();
       break;
     case "\\": clearAbLoop(); break;

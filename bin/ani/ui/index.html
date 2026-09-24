@@ -1112,6 +1112,8 @@
                 <button class="ghost small visual-filter-opt" data-filter="cinema" title="胶片院线：细腻微对比度与温暖微红质感">胶片院线</button>
                 <button class="ghost small visual-filter-opt" data-filter="cyber" title="激燃战斗：冷艳高饱和与霓虹微锐化">激燃战斗</button>
                 <button class="ghost small visual-filter-opt" data-filter="vintage" title="复古赛璐珞：90年代经典 OVA 黄金时代胶片质感">复古赛璐珞</button>
+                <button class="ghost small visual-filter-opt" data-filter="crisp" title="线条锐化：基于卷积矩阵的动漫边缘轮廓锐化重塑">线条锐化</button>
+                <button class="ghost small visual-filter-opt" data-filter="deep" title="超清增强：高阶轮廓增强与色彩对比微调">超清增强</button>
                 <button class="ghost small visual-filter-opt" data-filter="manga" title="黑白漫画风高对比灰阶">黑白漫画</button>
               </div>
             </div>
@@ -1239,6 +1241,12 @@
                 <span class="audio-pan-tag">R</span>
                 <span id="audio-pan-val" class="meta mono" style="min-width: 44px; text-align: center;">居中</span>
                 <button id="btn-reset-audio-pan" class="ghost small" title="重置声道平衡居中">重置</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">动态频谱仪</span>
+              <div class="visual-btn-group">
+                <button id="btn-audio-visualizer" class="ghost small visual-action-btn" title="在视频画面底部投射实时律动音频动态频谱（适合 OP/ED 与高燃战斗曲）">🎵 动态频谱: 关</button>
               </div>
             </div>
             <div class="visual-menu-row">
@@ -1372,7 +1380,47 @@
           <span id="player-zoom-text" class="zoom-capsule-text">150% 拖拽中</span>
           <button id="player-zoom-reset-btn" class="zoom-capsule-reset" title="还原 100%">✕</button>
         </div>
+        <!-- A-B 循环浮动微调交互面板 -->
+        <div id="player-ab-controller" class="player-ab-controller hidden">
+          <div class="ab-ctl-info">
+            <span class="ab-ctl-badge">🔁 A-B 循环</span>
+            <span id="ab-ctl-counter" class="ab-ctl-counter">第 1 次</span>
+            <span id="ab-ctl-range" class="ab-ctl-range mono">00:00 ➔ 00:00</span>
+          </div>
+          <div class="ab-ctl-actions">
+            <button id="ab-ctl-a-minus" class="ghost small ab-step-btn" title="A点提前 1 秒 (快捷键 Ctrl+[)">A-1s</button>
+            <button id="ab-ctl-a-plus" class="ghost small ab-step-btn" title="A点延后 1 秒">A+1s</button>
+            <button id="ab-ctl-b-minus" class="ghost small ab-step-btn" title="B点提前 1 秒">B-1s</button>
+            <button id="ab-ctl-b-plus" class="ghost small ab-step-btn" title="B点延后 1 秒 (快捷键 Ctrl+])">B+1s</button>
+            <button id="ab-ctl-clear-btn" class="ghost small ab-clear-btn" title="解除循环 (快捷键 \)">✕ 解除</button>
+          </div>
+        </div>
+        <!-- 记忆断点续播智能交互胶囊 -->
+        <div id="player-resume-toast" class="player-resume-toast hidden">
+          <div class="resume-toast-icon">📍</div>
+          <div class="resume-toast-text">
+            <span class="resume-toast-label">已为您恢复至上次播放进度</span>
+            <span id="resume-toast-time" class="resume-toast-time mono">00:00</span>
+          </div>
+          <div class="resume-toast-actions">
+            <button id="resume-toast-replay-btn" class="primary small resume-toast-replay" title="从头开始播放">↺ 从头播放</button>
+            <button id="resume-toast-close-btn" class="ghost small resume-toast-close" title="关闭 (Esc)">✕</button>
+          </div>
+        </div>
+        <!-- 动态音频频谱仪画布 -->
+        <canvas id="audio-visualizer-canvas" class="audio-visualizer-canvas hidden"></canvas>
         <canvas id="ambient-canvas" class="player-ambient-canvas hidden"></canvas>
+        <!-- SVG 硬件加速卷积着色器滤镜 -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="player-svg-filters" style="display:none;position:absolute;width:0;height:0;">
+          <defs>
+            <filter id="svg-anime-crisp" x="0" y="0" width="100%" height="100%">
+              <feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.5 0 -0.5 3 -0.5 0 -0.5 0" />
+            </filter>
+            <filter id="svg-anime-deep" x="0" y="0" width="100%" height="100%">
+              <feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="-0.2 -0.6 -0.2 -0.6 4.2 -0.6 -0.2 -0.6 -0.2" />
+            </filter>
+          </defs>
+        </svg>
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
 
@@ -1488,6 +1536,7 @@
             <div id="heatmap-chapters-layer" class="heatmap-chapters-layer"></div>
             <canvas id="danmaku-heatmap-canvas" class="danmaku-heatmap-canvas"></canvas>
             <div id="heatmap-playhead" class="heatmap-playhead"></div>
+            <div id="player-ab-layer" class="player-ab-layer"></div>
             <div id="player-bookmarks-layer" class="player-bookmarks-layer"></div>
             <div id="heatmap-hover-line" class="heatmap-hover-line hidden"></div>
             <!-- 悬浮微缩视频画面与时间轴实时预览卡片 -->
@@ -1873,11 +1922,13 @@
           <div class="sg-item"><span class="sg-desc">音效超频增益 (100% ~ 300%)</span><div class="kbds"><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">睡眠定时器 (关/播完本集/30/60/90分)</span><span>控制栏「画面 📺」</span></div>
           <div class="sg-item"><span class="sg-desc">循环切换画面比例与填充</span><kbd>W</kbd></div>
-          <div class="sg-item"><span class="sg-desc">一键跳过片头 (+90s)</span><kbd>S</kbd></div>
-          <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd> <span class="meta">(支持时间轴高光标记与微调浮窗)</span></div></div>
+          <div class="sg-item"><span class="sg-desc">A-B 循环端点微调 (±1s)</span><div class="kbds"><kbd>Ctrl</kbd>+<kbd>[</kbd> <kbd>]</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">全屏 / 退出全屏（弹幕跟随）</span><kbd>F</kbd></div>
           <div class="sg-item"><span class="sg-desc">播放上一集 / 下一集</span><div class="kbds"><kbd>B</kbd> <kbd>N</kbd> <span class="meta">或控制栏「⏮ 上集」「下集 ⏭」</span></div></div>
           <div class="sg-item"><span class="sg-desc">画面缩放赏析与拖拽平移 (100% ~ 300%)</span><div class="kbds"><kbd>Ctrl</kbd>+<kbd>+</kbd> <kbd>-</kbd> <span class="meta">/</span> <kbd>Ctrl</kbd>+<kbd>0</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">动漫线条锐化与超清增强滤镜</span><span>控制栏「画面 📺」➔ 滤镜</span></div>
+          <div class="sg-item"><span class="sg-desc">音频动态频谱仪 (OP/ED 实时律动)</span><span>控制栏「画面 📺」➔ 动态频谱</span></div>
           <div class="sg-item"><span class="sg-desc">切换播放循环模式 (顺序 / 🔂单集 / 🔁列表 / ⏹即止)</span><kbd>R</kbd></div>
           <div class="sg-item"><span class="sg-desc">切换到外部播放器播放 (mpv / 系统默认)</span><kbd>O</kbd></div>
           <div class="sg-item"><span class="sg-desc">滑出 / 收起选集、名场面与截图相册抽屉</span><kbd>E</kbd></div>
