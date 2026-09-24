@@ -4734,6 +4734,29 @@ const DanmakuOverlay = (() => {
   let opacity = 0.5;
   let areaRatio = parseFloat(localStorage.getItem("ani_dm_area") || "0.5");
   let fontScale = localStorage.getItem("ani_dm_size") || "md";
+  let fontFamily = localStorage.getItem("ani_dm_font") || "system";
+  let strokeStyle = localStorage.getItem("ani_dm_stroke") || "normal";
+  let fontWeight = localStorage.getItem("ani_dm_weight") || "600";
+
+  function getDanmakuFontFace() {
+    switch (fontFamily) {
+      case "noto": return '"Noto Sans SC", "Source Han Sans CN", "Microsoft YaHei", sans-serif';
+      case "wenkai": return '"LXGW WenKai", "霞鹜文楷", "Kaiti", serif';
+      case "heavy": return '"Arial Black", "Impact", "Microsoft YaHei", sans-serif';
+      case "rounded": return '"YouYuan", "幼圆", "Comic Sans MS", sans-serif';
+      case "system":
+      default: return '"Segoe UI", "Microsoft YaHei", sans-serif';
+    }
+  }
+
+  function getDanmakuStrokeWidth() {
+    switch (strokeStyle) {
+      case "thin": return Math.max(1.5, Math.round(fontPx * 0.08));
+      case "heavy": return Math.max(4.0, Math.round(fontPx * 0.20));
+      case "normal":
+      default: return Math.max(2.5, Math.round(fontPx * 0.14));
+    }
+  }
 
   let blockedKeywords = [];
   try {
@@ -4932,10 +4955,12 @@ const DanmakuOverlay = (() => {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.save();
     ctx.scale(dpr, dpr);
-    ctx.font = `600 ${fontPx}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+    const fontFace = getDanmakuFontFace();
+    const strokeW = getDanmakuStrokeWidth();
+    ctx.font = `${fontWeight} ${fontPx}px ${fontFace}`;
     ctx.textBaseline = "top";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0,0,0,.7)";
+    ctx.lineWidth = strokeW;
+    ctx.strokeStyle = strokeStyle === "heavy" ? "rgba(0,0,0,.92)" : "rgba(0,0,0,.7)";
     const next = [];
     for (const it of items) {
       const age = (now - it.born) * 1000;
@@ -4948,7 +4973,7 @@ const DanmakuOverlay = (() => {
         ctx.font = `bold ${badgeFontPx}px "Segoe UI", sans-serif`;
         badgeW = ctx.measureText(badgeText).width + 12;
       }
-      ctx.font = `600 ${fontPx}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+      ctx.font = `${fontWeight} ${fontPx}px ${fontFace}`;
       const tw = ctx.measureText(it.text).width;
       const w = tw + (hasCount ? badgeW + 6 : 0);
       let alpha = 1, x = 0, y = 0;
@@ -5288,6 +5313,30 @@ const DanmakuOverlay = (() => {
       avoidCenter = !!val;
       localStorage.setItem("ani_dm_avoid_center", String(avoidCenter));
       resetLanes();
+    },
+    getFontFamily() {
+      return fontFamily;
+    },
+    setFontFamily(val) {
+      fontFamily = val || "system";
+      localStorage.setItem("ani_dm_font", fontFamily);
+      items = [];
+    },
+    getStrokeWidth() {
+      return strokeStyle;
+    },
+    setStrokeWidth(val) {
+      strokeStyle = val || "normal";
+      localStorage.setItem("ani_dm_stroke", strokeStyle);
+      items = [];
+    },
+    getFontWeight() {
+      return fontWeight;
+    },
+    setFontWeight(val) {
+      fontWeight = val || "600";
+      localStorage.setItem("ani_dm_weight", fontWeight);
+      items = [];
     },
     enabled: false,
     resize,
@@ -6062,15 +6111,105 @@ function getNextEpisode() {
 
 function updatePlayerNextBtn() {
   const btn = $("player-next-ep");
-  if (!btn) return;
   const nextEp = getNextEpisode();
-  if (nextEp) {
-    btn.classList.remove("hidden");
-    btn.textContent = `下一集 ${nextEp.ep} ⏭`;
-    btn.title = `播放第 ${nextEp.ep} 集 (${nextEp.display_title || ""}) (快捷键 N)`;
-  } else {
-    btn.classList.add("hidden");
+  if (btn) {
+    if (nextEp) {
+      btn.classList.remove("hidden");
+      btn.textContent = `下一集 ${nextEp.ep} ⏭`;
+      btn.title = `播放第 ${nextEp.ep} 集 (${nextEp.display_title || ""}) (快捷键 N)`;
+    } else {
+      btn.classList.add("hidden");
+    }
   }
+  updatePlayerNavBtns();
+  hideSeriesFinishCard();
+}
+
+function updatePlayerNavBtns() {
+  const prevBtn = $("player-ctl-prev-ep");
+  const nextBtn = $("player-ctl-next-ep");
+
+  const prevEp = getPreviousEpisode();
+  const nextEp = getNextEpisode();
+
+  if (prevBtn) {
+    if (prevEp) {
+      prevBtn.disabled = false;
+      prevBtn.title = `播放上一集：第 ${prevEp.ep} 话 (${prevEp.display_title || ""}) (快捷键 B)`;
+    } else {
+      prevBtn.disabled = true;
+      prevBtn.title = "已是第一集";
+    }
+    prevBtn.onclick = () => playPreviousEpisode();
+  }
+
+  if (nextBtn) {
+    if (nextEp) {
+      nextBtn.disabled = false;
+      nextBtn.title = `播放下一集：第 ${nextEp.ep} 话 (${nextEp.display_title || ""}) (快捷键 N)`;
+    } else {
+      nextBtn.disabled = true;
+      nextBtn.title = "已是最后一集";
+    }
+    nextBtn.onclick = () => playNextEpisode();
+  }
+}
+
+function showSeriesFinishCard() {
+  const card = $("player-series-finish-card");
+  if (!card) return;
+  const s = state.subject;
+  const name = s?.display_title || s?.name_cn || s?.name || "本剧";
+  const total = (state.episodes && state.episodes.length) || state.currentEp || 12;
+
+  const titleEl = $("series-finish-title");
+  if (titleEl) titleEl.textContent = `${name} · 全剧完结！🎉`;
+
+  const descEl = $("series-finish-desc");
+  if (descEl) descEl.textContent = `全剧共 ${total} 集已全部补完，恭喜达成全剧通关成就！打卡与进度已自动同步。`;
+
+  card.classList.remove("hidden");
+
+  const rateBtn = $("series-finish-rate-btn");
+  if (rateBtn) {
+    rateBtn.onclick = () => {
+      card.classList.add("hidden");
+      const bangumiId = Number(s?.bangumi_id ?? s?.id?.id ?? s?.id);
+      if (typeof openCollectionEditModal === "function") {
+        openCollectionEditModal(bangumiId, s);
+      }
+    };
+  }
+
+  const shareBtn = $("series-finish-share-btn");
+  if (shareBtn) {
+    shareBtn.onclick = () => {
+      card.classList.add("hidden");
+      if (typeof openShareCardModal === "function") {
+        openShareCardModal();
+      }
+    };
+  }
+
+  const replayBtn = $("series-finish-replay-btn");
+  if (replayBtn) {
+    replayBtn.onclick = () => {
+      card.classList.add("hidden");
+      if (state.episodes && state.episodes.length > 0) {
+        playEpisodeByObject(state.episodes[0]);
+      }
+    };
+  }
+
+  const closeBtn = $("series-finish-close");
+  if (closeBtn) {
+    closeBtn.onclick = () => card.classList.add("hidden");
+  }
+}
+
+function hideSeriesFinishCard() {
+  const card = $("player-series-finish-card");
+  if (card) card.classList.add("hidden");
 }
 
 // ==========================================================================
@@ -6840,6 +6979,7 @@ function renderEpDrawer() {
   const listEl = $("ep-drawer-list");
   const bmWrap = $("ep-drawer-bookmarks-wrap");
   const dmWrap = $("ep-drawer-danmaku-wrap");
+  const galleryWrap = $("ep-drawer-gallery-wrap");
   const epSearchWrap = document.querySelector(".ep-drawer-search-wrap");
   const countEl = $("ep-drawer-count");
   if (!listEl) return;
@@ -6848,9 +6988,12 @@ function renderEpDrawer() {
     drawer.classList.toggle("danmaku-mode", epDrawerKind === "danmaku");
   }
 
+  if (galleryWrap) galleryWrap.classList.add("hidden");
+
   if (epDrawerKind === "danmaku") {
     listEl.classList.add("hidden");
     if (bmWrap) bmWrap.classList.add("hidden");
+    if (galleryWrap) galleryWrap.classList.add("hidden");
     if (epSearchWrap) epSearchWrap.classList.add("hidden");
     if (dmWrap) dmWrap.classList.remove("hidden");
     renderDanmakuDrawer();
@@ -6862,14 +7005,27 @@ function renderEpDrawer() {
   if (epDrawerKind === "bookmarks") {
     listEl.classList.add("hidden");
     if (epSearchWrap) epSearchWrap.classList.add("hidden");
+    if (galleryWrap) galleryWrap.classList.add("hidden");
     if (bmWrap) bmWrap.classList.remove("hidden");
     if (countEl) countEl.textContent = `(${currentBookmarks.length})`;
     renderSceneBookmarks();
     return;
   }
 
+  if (epDrawerKind === "gallery") {
+    listEl.classList.add("hidden");
+    if (epSearchWrap) epSearchWrap.classList.add("hidden");
+    if (bmWrap) bmWrap.classList.add("hidden");
+    if (dmWrap) dmWrap.classList.add("hidden");
+    if (galleryWrap) galleryWrap.classList.remove("hidden");
+    if (countEl) countEl.textContent = `(${sessionScreenshotGallery.length})`;
+    renderDrawerGalleryList();
+    return;
+  }
+
   listEl.classList.remove("hidden");
   if (bmWrap) bmWrap.classList.add("hidden");
+  if (galleryWrap) galleryWrap.classList.add("hidden");
   if (epSearchWrap) epSearchWrap.classList.remove("hidden");
 
   const episodes = state.episodes || [];
@@ -6945,6 +7101,213 @@ function renderEpDrawer() {
     setTimeout(() => {
       activeEl.scrollIntoView({ block: "center", behavior: "smooth" });
     }, 50);
+  }
+}
+
+// ---------- 选集抽屉相册画廊与名场面批处理系统 ----------
+let sessionScreenshotGallery = [];
+
+function addScreenshotToGallery(item) {
+  if (!item) return;
+  sessionScreenshotGallery.unshift(item);
+  if (sessionScreenshotGallery.length > 80) {
+    sessionScreenshotGallery.pop();
+  }
+  updateGalleryDrawerBadge();
+  if (epDrawerKind === "gallery") {
+    renderDrawerGalleryList();
+  }
+}
+
+function updateGalleryDrawerBadge() {
+  const badge = $("ep-drawer-gallery-count");
+  if (badge) badge.textContent = String(sessionScreenshotGallery.length);
+  const sub = $("ep-drawer-gallery-sub");
+  if (sub) sub.textContent = `共 ${sessionScreenshotGallery.length} 张`;
+}
+
+function renderDrawerGalleryList() {
+  const listEl = $("ep-drawer-gallery-list");
+  if (!listEl) return;
+  updateGalleryDrawerBadge();
+
+  if (sessionScreenshotGallery.length === 0) {
+    listEl.innerHTML = `
+      <div class="gallery-empty">
+        <span style="font-size:32px;">📸</span>
+        <span class="bold">当前相册空空如也</span>
+        <span class="meta">在播放过程中按下快捷键 <kbd>C</kbd> 或点击「截屏 📸」，即可将名场面原画收藏至此</span>
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = "";
+  sessionScreenshotGallery.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "gallery-card";
+
+    const modeText = item.mode === "clean" ? "原画" : item.mode === "sub" ? "字幕" : "全合成";
+
+    card.innerHTML = `
+      <div class="gallery-thumb-wrap" title="点击放大高清查看 (点击时间标签快速 Seek)">
+        <img class="gallery-thumb-img" src="${item.dataUrl}" alt="截图" loading="lazy" />
+        <span class="gallery-time-badge" title="点击秒级跳转此画面">${item.timeFormatted}</span>
+        <span class="gallery-mode-badge">${modeText}</span>
+      </div>
+      <div class="gallery-card-body">
+        <span class="gallery-card-res">${item.resolution}</span>
+        <div class="gallery-card-btns">
+          <button class="gallery-card-btn btn-copy" title="复制图像到剪贴板">📋</button>
+          <button class="gallery-card-btn btn-save" title="下载原图 PNG">💾</button>
+          <button class="gallery-card-btn btn-bm" title="设为名场面打点书签">💎</button>
+          <button class="gallery-card-btn danger btn-del" title="从相册移除">🗑</button>
+        </div>
+      </div>
+    `;
+
+    const thumbWrap = card.querySelector(".gallery-thumb-wrap");
+    thumbWrap.onclick = (e) => {
+      if (e.target.classList.contains("gallery-time-badge")) {
+        const v = $("video");
+        if (v && typeof item.timeSec === "number") {
+          v.currentTime = item.timeSec;
+          showPlayerOsd(`⏱️ 跳转至名场面时刻：${item.timeFormatted}`);
+          toast(`已跳转至名场面时刻：${item.timeFormatted}`, true);
+        }
+        return;
+      }
+      openGalleryLightbox(item);
+    };
+
+    card.querySelector(".btn-copy").onclick = async () => {
+      try {
+        const res = await fetch(item.dataUrl);
+        const blob = await res.blob();
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toast("截图已成功复制到系统剪贴板！可直接粘贴", true);
+      } catch (err) {
+        toast("复制图像受阻：" + err);
+      }
+    };
+
+    card.querySelector(".btn-save").onclick = () => {
+      const a = document.createElement("a");
+      a.href = item.dataUrl;
+      a.download = item.filename || `screenshot_${item.timeFormatted.replace(":", "m")}s.png`;
+      a.click();
+      toast("已下载原图 PNG: " + a.download, true);
+    };
+
+    card.querySelector(".btn-bm").onclick = async () => {
+      try {
+        const subId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id) || null;
+        const epId = Number(state.currentEpId) || null;
+        const videoPath = (typeof currentMediaUrl === "string" && !currentMediaUrl.startsWith("http")) ? currentMediaUrl : null;
+        const title = `名场面截图 · ${item.timeFormatted}`;
+        await invoke("add_scene_bookmark", {
+          payload: {
+            subject_id: subId,
+            episode_id: epId,
+            video_path: videoPath,
+            timestamp_seconds: item.timeSec,
+            title,
+          },
+        });
+        toast(`已成功将时刻 ${item.timeFormatted} 设为名场面打点书签 💎`, true);
+        if (typeof loadAndRenderBookmarks === "function") {
+          loadAndRenderBookmarks();
+        }
+      } catch (e) {
+        toast("添加书签失败: " + e);
+      }
+    };
+
+    card.querySelector(".btn-del").onclick = () => {
+      sessionScreenshotGallery.splice(idx, 1);
+      renderDrawerGalleryList();
+      toast("已从相册移除该截图", true);
+    };
+
+    listEl.appendChild(card);
+  });
+}
+
+function openGalleryLightbox(item) {
+  const modal = $("gallery-lightbox-modal");
+  if (!modal) return;
+  const img = $("lightbox-img");
+  const title = $("lightbox-title");
+  const meta = $("lightbox-meta");
+  if (img) img.src = item.dataUrl;
+  if (title) title.textContent = `📸 名场面高清原图 · ${item.timeFormatted}`;
+  if (meta) meta.textContent = `${item.resolution} · ${item.subjectName || ""} ${item.epNo != null ? `EP${item.epNo}` : ""}`;
+
+  modal.classList.remove("hidden");
+
+  const copyBtn = $("lightbox-copy-btn");
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      try {
+        const res = await fetch(item.dataUrl);
+        const blob = await res.blob();
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toast("截图已成功复制到系统剪贴板！", true);
+      } catch (err) {
+        toast("复制图像失败：" + err);
+      }
+    };
+  }
+
+  const dlBtn = $("lightbox-download-btn");
+  if (dlBtn) {
+    dlBtn.onclick = () => {
+      const a = document.createElement("a");
+      a.href = item.dataUrl;
+      a.download = item.filename || `screenshot_${item.timeFormatted.replace(":", "m")}s.png`;
+      a.click();
+      toast("已下载原图 PNG: " + a.download, true);
+    };
+  }
+
+  const bmBtn = $("lightbox-bookmark-btn");
+  if (bmBtn) {
+    bmBtn.onclick = async () => {
+      try {
+        const subId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id) || null;
+        const epId = Number(state.currentEpId) || null;
+        const videoPath = (typeof currentMediaUrl === "string" && !currentMediaUrl.startsWith("http")) ? currentMediaUrl : null;
+        const bTitle = `名场面截图 · ${item.timeFormatted}`;
+        await invoke("add_scene_bookmark", {
+          payload: {
+            subject_id: subId,
+            episode_id: epId,
+            video_path: videoPath,
+            timestamp_seconds: item.timeSec,
+            title: bTitle,
+          },
+        });
+        toast(`已成功将时刻 ${item.timeFormatted} 设为名场面打点书签 💎`, true);
+        if (typeof loadAndRenderBookmarks === "function") {
+          loadAndRenderBookmarks();
+        }
+      } catch (e) {
+        toast("添加书签失败: " + e);
+      }
+    };
+  }
+
+  const delBtn = $("lightbox-delete-btn");
+  if (delBtn) {
+    delBtn.onclick = () => {
+      const idx = sessionScreenshotGallery.findIndex((x) => x.id === item.id);
+      if (idx !== -1) {
+        sessionScreenshotGallery.splice(idx, 1);
+        renderDrawerGalleryList();
+      }
+      modal.classList.add("hidden");
+      toast("已删除截图", true);
+    };
   }
 }
 
@@ -7068,6 +7431,9 @@ const visualState = {
   autoSkipOp: localStorage.getItem("ani_auto_skip_op") === "1",
   autoSkipEd: parseInt(localStorage.getItem("ani_auto_skip_ed") || "0", 10),
   abLoop: { a: null, b: null, active: false },
+  zoom: parseFloat(localStorage.getItem("ani_visual_zoom") || "1.0"),
+  panX: 0,
+  panY: 0,
 };
 
 let opAutoSkipped = false;
@@ -7143,10 +7509,14 @@ function applyVisualEffects(notify = false) {
     v.style.removeProperty("--video-height");
   }
 
-  // 2. 变换（镜像翻转与旋转）
+  // 2. 变换（镜像翻转、旋转、缩放与视口平移）
   const transforms = [];
   if (visualState.mirror) transforms.push("scaleX(-1)");
   if (visualState.rotateDeg) transforms.push(`rotate(${visualState.rotateDeg}deg)`);
+  if (visualState.zoom && visualState.zoom !== 1.0) {
+    transforms.push(`scale(${visualState.zoom})`);
+    transforms.push(`translate(${visualState.panX || 0}px, ${visualState.panY || 0}px)`);
+  }
   v.style.setProperty("--video-transform", transforms.length > 0 ? transforms.join(" ") : "none");
 
   // 3. 动漫硬件加速色彩滤镜 + 细节微调滑块 (亮度/对比度/饱和度)
@@ -7234,11 +7604,105 @@ function applyVisualEffects(notify = false) {
     autoSkipEdBtn.classList.toggle("active", visualState.autoSkipEd > 0);
   }
 
+  // 同步缩放按钮
+  document.querySelectorAll(".visual-zoom-opt").forEach((btn) => {
+    const bZoom = parseFloat(btn.getAttribute("data-zoom")) || 1.0;
+    btn.classList.toggle("active", Math.abs(bZoom - (visualState.zoom || 1.0)) < 0.05);
+  });
+
   applyAmbientGlow();
 
   if (notify) {
     showPlayerOsd(`画面比例: ${ASPECT_LABELS[visualState.aspect] || visualState.aspect}`);
   }
+}
+
+function setVideoZoom(zoomLevel, notify = false) {
+  const level = Math.max(1.0, Math.min(4.0, Math.round(zoomLevel * 100) / 100));
+  visualState.zoom = level;
+  localStorage.setItem("ani_visual_zoom", String(level));
+  if (level === 1.0) {
+    visualState.panX = 0;
+    visualState.panY = 0;
+  }
+  const stage = document.querySelector(".player-stage");
+  if (stage) {
+    stage.classList.toggle("zoomed-mode", level > 1.0);
+  }
+  const capsule = $("player-zoom-capsule");
+  const textEl = $("player-zoom-text");
+  if (capsule && textEl) {
+    if (level > 1.0) {
+      capsule.classList.remove("hidden");
+      textEl.textContent = `${Math.round(level * 100)}% 拖拽平移中`;
+    } else {
+      capsule.classList.add("hidden");
+    }
+  }
+  applyVisualEffects(false);
+  if (notify) {
+    const desc = level === 1.0 ? "100% 原始尺寸" : `${Math.round(level * 100)}% 局部放大 (按住画面平移)`;
+    showPlayerOsd(`🔍 画面缩放：${desc}`);
+  }
+}
+
+let isPanningZoom = false;
+let panStartX = 0;
+let panStartY = 0;
+let panInitialX = 0;
+let panInitialY = 0;
+
+function initZoomPanning() {
+  const stage = document.querySelector(".player-stage");
+  if (!stage) return;
+
+  stage.addEventListener("mousedown", (e) => {
+    if (visualState.zoom <= 1.0) return;
+    if (e.button !== 0) return;
+    if (e.target.closest("button, input, select, .player-osd, .player-zoom-capsule, .syncplay-drawer, .player-ep-drawer, .danmaku-heatmap-wrap, .player-controls, .player-head, .player-danmaku-bar")) return;
+
+    isPanningZoom = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panInitialX = visualState.panX || 0;
+    panInitialY = visualState.panY || 0;
+    stage.classList.add("zoomed-dragging");
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isPanningZoom || visualState.zoom <= 1.0) return;
+    const dx = (e.clientX - panStartX) / visualState.zoom;
+    const dy = (e.clientY - panStartY) / visualState.zoom;
+    visualState.panX = Math.round(panInitialX + dx);
+    visualState.panY = Math.round(panInitialY + dy);
+    applyVisualEffects(false);
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isPanningZoom) {
+      isPanningZoom = false;
+      stage.classList.remove("zoomed-dragging");
+    }
+  });
+
+  const resetBtn = $("player-zoom-reset-btn");
+  if (resetBtn) {
+    resetBtn.onclick = (e) => {
+      e.stopPropagation();
+      setVideoZoom(1.0, true);
+    };
+  }
+  const capsule = $("player-zoom-capsule");
+  if (capsule) {
+    capsule.onclick = () => setVideoZoom(1.0, true);
+  }
+
+  document.querySelectorAll(".visual-zoom-opt").forEach((btn) => {
+    btn.onclick = () => {
+      const z = parseFloat(btn.getAttribute("data-zoom")) || 1.0;
+      setVideoZoom(z, true);
+    };
+  });
 }
 
 function applyAmbientGlow() {
@@ -7880,11 +8344,28 @@ async function captureVideoFrame() {
         }
       }
 
+      // 记录到当前播放相册画廊
+      const dataUrl = canvas.toDataURL("image/png");
+      if (typeof addScreenshotToGallery === "function") {
+        addScreenshotToGallery({
+          id: "ss_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+          timeSec: v.currentTime,
+          timeFormatted: `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`,
+          resolution: `${canvas.width}×${canvas.height}`,
+          mode: screenshotMode,
+          dataUrl,
+          filename,
+          subjectName,
+          epNo: state.currentEp,
+          createdAt: Date.now(),
+        });
+      }
+
       // 唤起右下角悬浮微缩卡片
       const toastCard = $("player-screenshot-toast");
       if (toastCard) {
         const toastImg = $("ss-toast-img");
-        if (toastImg) toastImg.src = canvas.toDataURL("image/png");
+        if (toastImg) toastImg.src = dataUrl;
         const resEl = $("ss-toast-res");
         if (resEl) resEl.textContent = `${canvas.width}×${canvas.height}`;
         const timeEl = $("ss-toast-time");
@@ -8950,6 +9431,19 @@ function syncDanmakuMenuUI() {
     btn.classList.toggle("active", parseInt(btn.dataset.speed, 10) === curSpeed);
   });
 
+  const curFont = DanmakuOverlay.getFontFamily();
+  document.querySelectorAll(".dm-font-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.font === curFont);
+  });
+  const curStroke = DanmakuOverlay.getStrokeWidth();
+  document.querySelectorAll(".dm-stroke-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.stroke === curStroke);
+  });
+  const curWeight = DanmakuOverlay.getFontWeight();
+  document.querySelectorAll(".dm-weight-opt").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.weight === curWeight);
+  });
+
   const toggles = DanmakuOverlay.getFilterToggles();
   const chipScroll = $("dm-filter-scroll");
   if (chipScroll) chipScroll.classList.toggle("active", toggles.hideScroll);
@@ -9037,6 +9531,40 @@ function setDanmakuSpeed(speedMs) {
   showPlayerOsd(`弹幕飘字速度: ${names[speedMs] || (speedMs + "ms")}`);
 }
 
+function setDanmakuFontFamily(font) {
+  DanmakuOverlay.setFontFamily(font);
+  syncDanmakuMenuUI();
+  const names = {
+    system: "默认系统字体",
+    noto: "思源黑体",
+    wenkai: "霞鹜文楷",
+    heavy: "醒目粗黑",
+    rounded: "圆体幼圆",
+  };
+  showPlayerOsd(`弹幕字体: ${names[font] || font}`);
+}
+
+function setDanmakuStroke(stroke) {
+  DanmakuOverlay.setStrokeWidth(stroke);
+  syncDanmakuMenuUI();
+  const names = {
+    thin: "轻描边 (2px)",
+    normal: "标准描边 (3px)",
+    heavy: "重描边 (5px)",
+  };
+  showPlayerOsd(`弹幕描边: ${names[stroke] || stroke}`);
+}
+
+function setDanmakuWeight(weight) {
+  DanmakuOverlay.setFontWeight(weight);
+  syncDanmakuMenuUI();
+  const names = {
+    "600": "常规 (600)",
+    "800": "特粗 (800)",
+  };
+  showPlayerOsd(`弹幕字重: ${names[weight] || weight}`);
+}
+
 const dmBtn = $("player-danmaku");
 const dmMenu = $("danmaku-menu");
 if (dmBtn && dmMenu) {
@@ -9066,6 +9594,15 @@ document.querySelectorAll(".dm-size-opt").forEach((btn) => {
 });
 document.querySelectorAll(".dm-speed-opt").forEach((btn) => {
   btn.onclick = () => setDanmakuSpeed(parseInt(btn.dataset.speed, 10));
+});
+document.querySelectorAll(".dm-font-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuFontFamily(btn.dataset.font);
+});
+document.querySelectorAll(".dm-stroke-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuStroke(btn.dataset.stroke);
+});
+document.querySelectorAll(".dm-weight-opt").forEach((btn) => {
+  btn.onclick = () => setDanmakuWeight(btn.dataset.weight);
 });
 
 const dmDelayMinus = $("dm-delay-minus");
@@ -11217,6 +11754,18 @@ document.addEventListener("keydown", (e) => {
       e.preventDefault();
       stepVideoFrame(1);
       return;
+    } else if (e.key === "=" || e.key === "+") {
+      e.preventDefault();
+      setVideoZoom(Math.min(3.0, (visualState.zoom || 1.0) + 0.25), true);
+      return;
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      setVideoZoom(Math.max(1.0, (visualState.zoom || 1.0) - 0.25), true);
+      return;
+    } else if (e.key === "0") {
+      e.preventDefault();
+      setVideoZoom(1.0, true);
+      return;
     }
     return;
   }
@@ -11452,6 +12001,9 @@ $("video").addEventListener("ended", () => {
         playEpisodeByObject(firstEp);
       }
     }, 3000);
+  } else {
+    // 全剧播放完毕，触发完结撒花纪念卡片！
+    showSeriesFinishCard();
   }
 });
 
@@ -12049,6 +12601,16 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const lightboxModal = $("gallery-lightbox-modal");
+    if (lightboxModal && !lightboxModal.classList.contains("hidden")) {
+      lightboxModal.classList.add("hidden");
+      return;
+    }
+    const finishCard = $("player-series-finish-card");
+    if (finishCard && !finishCard.classList.contains("hidden")) {
+      finishCard.classList.add("hidden");
+      return;
+    }
     const memesPopup = $("dm-memes-popup");
     if (memesPopup && !memesPopup.classList.contains("hidden")) {
       memesPopup.classList.add("hidden");
@@ -13476,5 +14038,43 @@ $("share-theme-light-btn")?.addEventListener("click", () => {
 });
 $("share-card-copy-btn")?.addEventListener("click", copyShareCardImage);
 $("share-card-save-btn")?.addEventListener("click", saveShareCardImage);
+
+// 初始化画面缩放平移交互监听
+initZoomPanning();
+
+// 选集抽屉相册批处理与大图视窗事件绑定
+$("ep-drawer-gallery-export-btn")?.addEventListener("click", () => {
+  if (!sessionScreenshotGallery || sessionScreenshotGallery.length === 0) {
+    toast("相册暂无截图可保存", false);
+    return;
+  }
+  toast(`正在保存相册全部 ${sessionScreenshotGallery.length} 张截图...`, true);
+  sessionScreenshotGallery.forEach((item, idx) => {
+    setTimeout(() => {
+      const a = document.createElement("a");
+      a.href = item.dataUrl;
+      a.download = item.filename || `screenshot_${item.timeFormatted.replace(":", "m")}s_${idx + 1}.png`;
+      a.click();
+    }, idx * 120);
+  });
+});
+
+$("ep-drawer-gallery-clear-btn")?.addEventListener("click", () => {
+  if (!sessionScreenshotGallery || sessionScreenshotGallery.length === 0) return;
+  sessionScreenshotGallery = [];
+  renderDrawerGalleryList();
+  toast("当前会话截图相册已清空 🗑", true);
+});
+
+$("gallery-lightbox-close")?.addEventListener("click", () => {
+  $("gallery-lightbox-modal")?.classList.add("hidden");
+});
+
+$("gallery-lightbox-modal")?.addEventListener("click", (e) => {
+  if (e.target === $("gallery-lightbox-modal")) {
+    $("gallery-lightbox-modal")?.classList.add("hidden");
+  }
+});
+
 
 

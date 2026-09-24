@@ -842,6 +842,31 @@
               </div>
             </div>
             <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">字体风格</span>
+              <div class="dm-btn-group sub-wrap-group">
+                <button class="ghost small dm-font-opt active" data-font="system">默认</button>
+                <button class="ghost small dm-font-opt" data-font="noto">思源黑体</button>
+                <button class="ghost small dm-font-opt" data-font="wenkai">霞鹜文楷</button>
+                <button class="ghost small dm-font-opt" data-font="heavy">醒目粗黑</button>
+                <button class="ghost small dm-font-opt" data-font="rounded">圆体幼圆</button>
+              </div>
+            </div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">描边黑度</span>
+              <div class="dm-btn-group">
+                <button class="ghost small dm-stroke-opt" data-stroke="thin">轻描边 (2px)</button>
+                <button class="ghost small dm-stroke-opt active" data-stroke="normal">标准 (3px)</button>
+                <button class="ghost small dm-stroke-opt" data-stroke="heavy">重描边 (5px)</button>
+              </div>
+            </div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">弹幕字重</span>
+              <div class="dm-btn-group">
+                <button class="ghost small dm-weight-opt active" data-weight="600">常规 (600)</button>
+                <button class="ghost small dm-weight-opt" data-weight="800">特粗 (800)</button>
+              </div>
+            </div>
+            <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">飘字速度</span>
               <div class="dm-btn-group">
                 <button class="ghost small dm-speed-opt" data-speed="8000">慢速</button>
@@ -1059,6 +1084,16 @@
               </div>
             </div>
             <div class="visual-menu-row">
+              <span class="visual-menu-label">画面缩放赏析</span>
+              <div class="visual-btn-group">
+                <button class="ghost small visual-zoom-opt active" data-zoom="1.0" title="100% 原始画面">100%</button>
+                <button class="ghost small visual-zoom-opt" data-zoom="1.25" title="125% 局部放大">125%</button>
+                <button class="ghost small visual-zoom-opt" data-zoom="1.5" title="150% 放大 (支持鼠标按住画面平移拖拽)">150%</button>
+                <button class="ghost small visual-zoom-opt" data-zoom="2.0" title="200% 特写赏析">200%</button>
+                <button class="ghost small visual-zoom-opt" data-zoom="3.0" title="300% 极限赏析">300%</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
               <span class="visual-menu-label">影院环境光</span>
               <div class="visual-btn-group">
                 <button class="ghost small visual-ambient-opt active" data-ambient="off" title="关闭环境氛围光">关闭</button>
@@ -1265,6 +1300,10 @@
             </label>
           </div>
         </div>
+        <div class="player-nav-group">
+          <button id="player-ctl-prev-ep" class="ghost small player-ctl-nav-btn" title="播放上一集 (快捷键 B)">⏮ 上集</button>
+          <button id="player-ctl-next-ep" class="ghost small player-ctl-nav-btn" title="播放下一集 (快捷键 N)">下集 ⏭</button>
+        </div>
         <div class="player-jump-group">
           <button id="player-jump-back" class="ghost small" title="快退 5 秒 (快捷键 ← 或 J)">⏪ 5s</button>
           <button id="player-jump-fwd" class="ghost small" title="快进 5 秒 (快捷键 → 或 L)">5s ⏩</button>
@@ -1327,6 +1366,12 @@
         <button id="mini-mode-restore-btn" class="mini-mode-restore-btn hidden" title="退出伴播模式，还原窗口 (快捷键 Esc / Shift+M)">
           ⛶ 还原窗口
         </button>
+        <!-- 画面缩放平移提示胶囊 -->
+        <div id="player-zoom-capsule" class="player-zoom-capsule hidden" title="点击重置缩放与平移为 100% (快捷键 Ctrl+0)">
+          <span class="zoom-capsule-icon">🔍</span>
+          <span id="player-zoom-text" class="zoom-capsule-text">150% 拖拽中</span>
+          <button id="player-zoom-reset-btn" class="zoom-capsule-reset" title="还原 100%">✕</button>
+        </div>
         <canvas id="ambient-canvas" class="player-ambient-canvas hidden"></canvas>
         <video id="video" controls></video>
         <canvas id="danmaku-canvas" class="hidden"></canvas>
@@ -1412,6 +1457,24 @@
           <div class="next-ep-progress-bar"><div id="next-ep-progress-fill" class="next-ep-progress-fill"></div></div>
         </div>
 
+        <!-- 完结撒花 / 全剧补完纪念卡片 -->
+        <div id="player-series-finish-card" class="player-series-finish-card hidden">
+          <div class="series-finish-glow"></div>
+          <div class="series-finish-content">
+            <div class="series-finish-head">
+              <span class="series-finish-badge">🎉 完结撒花 · 恭喜补完本剧</span>
+              <button id="series-finish-close" class="ghost small finish-close-btn" title="关闭卡片">✕</button>
+            </div>
+            <div id="series-finish-title" class="series-finish-title">番剧名称</div>
+            <div id="series-finish-desc" class="series-finish-desc meta">本剧所有集数已全部看完，已为您自动同步进度与打卡记录。</div>
+            <div class="series-finish-actions">
+              <button id="series-finish-rate-btn" class="primary small finish-action-btn">⭐ Bangumi 评分评价</button>
+              <button id="series-finish-share-btn" class="secondary small finish-action-btn">📸 2x 完结打卡海报</button>
+              <button id="series-finish-replay-btn" class="ghost small finish-action-btn">🔄 从头重播</button>
+            </div>
+          </div>
+        </div>
+
         <div id="player-skip-capsule" class="player-skip-capsule hidden">
           <span>跳过片头 OP</span>
           <kbd>S</kbd>
@@ -1485,6 +1548,7 @@
             <button class="ep-drawer-tab" data-kind="sp">SP/特别</button>
             <button class="ep-drawer-tab" data-kind="bookmarks">💎 名场面 (<span id="ep-drawer-bm-count">0</span>)</button>
             <button class="ep-drawer-tab" data-kind="danmaku">💬 弹幕 (<span id="ep-drawer-dm-count">0</span>)</button>
+            <button class="ep-drawer-tab" data-kind="gallery">📸 相册 (<span id="ep-drawer-gallery-count">0</span>)</button>
           </div>
           <div class="ep-drawer-search-wrap">
             <input type="text" id="ep-drawer-search" class="ep-drawer-search" placeholder="🔍 快速搜索集数 / 标题 (如 12、特别篇)..." />
@@ -1529,6 +1593,19 @@
               </div>
             </div>
             <div id="ep-drawer-dm-list" class="ep-drawer-dm-list"></div>
+          </div>
+          <div id="ep-drawer-gallery-wrap" class="ep-drawer-gallery-wrap hidden">
+            <div class="ep-drawer-gallery-header">
+              <div class="ep-drawer-gallery-title">
+                <span>名场面截图相册</span>
+                <span id="ep-drawer-gallery-sub" class="meta">共 0 张</span>
+              </div>
+              <div class="ep-drawer-gallery-actions">
+                <button id="ep-drawer-gallery-export-btn" class="ghost small" title="全部下载保存为 PNG 文件">全部保存 💾</button>
+                <button id="ep-drawer-gallery-clear-btn" class="ghost small danger" title="清空当前会话截图相册">清空 🗑</button>
+              </div>
+            </div>
+            <div id="ep-drawer-gallery-list" class="ep-drawer-gallery-list"></div>
           </div>
         </div>
       </div>
@@ -1799,10 +1876,11 @@
           <div class="sg-item"><span class="sg-desc">一键跳过片头 (+90s)</span><kbd>S</kbd></div>
           <div class="sg-item"><span class="sg-desc">标记 A-B 循环起点 / 终点 / 清除</span><div class="kbds"><kbd>[</kbd> <kbd>]</kbd> <kbd>\</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">全屏 / 退出全屏（弹幕跟随）</span><kbd>F</kbd></div>
-          <div class="sg-item"><span class="sg-desc">播放上一集 / 下一集</span><div class="kbds"><kbd>B</kbd> <kbd>N</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">播放上一集 / 下一集</span><div class="kbds"><kbd>B</kbd> <kbd>N</kbd> <span class="meta">或控制栏「⏮ 上集」「下集 ⏭」</span></div></div>
+          <div class="sg-item"><span class="sg-desc">画面缩放赏析与拖拽平移 (100% ~ 300%)</span><div class="kbds"><kbd>Ctrl</kbd>+<kbd>+</kbd> <kbd>-</kbd> <span class="meta">/</span> <kbd>Ctrl</kbd>+<kbd>0</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">切换播放循环模式 (顺序 / 🔂单集 / 🔁列表 / ⏹即止)</span><kbd>R</kbd></div>
           <div class="sg-item"><span class="sg-desc">切换到外部播放器播放 (mpv / 系统默认)</span><kbd>O</kbd></div>
-          <div class="sg-item"><span class="sg-desc">滑出 / 收起选集与名场面抽屉</span><kbd>E</kbd></div>
+          <div class="sg-item"><span class="sg-desc">滑出 / 收起选集、名场面与截图相册抽屉</span><kbd>E</kbd></div>
           <div class="sg-item"><span class="sg-desc">显示 / 隐藏播放统计信息</span><kbd>I</kbd></div>
           <div class="sg-item"><span class="sg-desc">系统媒体控制 (SMTC)</span><span>键盘媒体键 / 锁屏控制</span></div>
           <div class="sg-item"><span class="sg-desc">双击视频区域</span><span>全屏切换</span></div>
@@ -1810,6 +1888,7 @@
         <div class="shortcut-group">
           <div class="sg-title">弹幕调谐</div>
           <div class="sg-item"><span class="sg-desc">呼出 / 隐藏弹幕高级调谐面板</span><kbd>D</kbd></div>
+          <div class="sg-item"><span class="sg-desc">弹幕字体工坊 (思源/文楷/醒目粗黑/圆体/重描边)</span><span>控制栏「弹幕」</span></div>
           <div class="sg-item"><span class="sg-desc">同屏密度温控 (不限/密集/适中/清爽)</span><span>控制栏「弹幕」</span></div>
           <div class="sg-item"><span class="sg-desc">高能热词洞察与时刻定位</span><span>控制栏「弹幕」➔ 点击热词</span></div>
           <div class="sg-item"><span class="sg-desc">加载本地弹幕 (.xml / .json)</span><span>拖拽至播放器 或 控制栏「弹幕」</span></div>
@@ -2327,6 +2406,27 @@
           <span class="spinner"></span> 正在并发检索候选片源...
         </div>
         <div id="source-modal-list" class="source-modal-list"></div>
+      </div>
+  <!-- 截图高清原图放大视窗 Lightbox Modal -->
+  <div id="gallery-lightbox-modal" class="modal-backdrop hidden">
+    <div class="modal-card gallery-lightbox-card">
+      <div class="modal-head">
+        <div class="modal-title-wrap">
+          <div class="modal-title" id="lightbox-title">📸 名场面高清原图</div>
+          <div class="modal-sub" id="lightbox-meta">1920×1080 · 05:24</div>
+        </div>
+        <button id="gallery-lightbox-close" class="ghost small" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="modal-body gallery-lightbox-body">
+        <div class="lightbox-img-wrap">
+          <img id="lightbox-img" class="lightbox-img" alt="截图原图" />
+        </div>
+        <div class="lightbox-footer-actions">
+          <button id="lightbox-copy-btn" class="primary small">复制图像 📋</button>
+          <button id="lightbox-download-btn" class="secondary small">下载 PNG 💾</button>
+          <button id="lightbox-bookmark-btn" class="ghost small">💎 设为名场面打点书签</button>
+          <button id="lightbox-delete-btn" class="ghost small danger">🗑 删除截图</button>
+        </div>
       </div>
     </div>
   </div>
