@@ -4405,20 +4405,26 @@ function renderTimelineChapters(duration) {
 
   // ED 范围计算
   const edLen = typeof getEdSkipSeconds === "function" ? getEdSkipSeconds() : 90;
-  if (edLen > 0 && edLen < duration * 0.4) {
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  const customEdPoint = typeof getSubjectCustomEdSkip === "function" ? getSubjectCustomEdSkip(subjectId) : null;
+  const effectiveEdStart = (customEdPoint !== null && customEdPoint > duration * 0.4 && customEdPoint < duration)
+    ? customEdPoint
+    : (edLen > 0 && edLen < duration * 0.4 ? duration - edLen : null);
+
+  if (effectiveEdStart !== null && effectiveEdStart < duration) {
     const edBar = document.createElement("div");
     edBar.className = "heatmap-chapter-bar chapter-ed";
-    const edPct = (edLen / duration) * 100;
+    const edPct = ((duration - effectiveEdStart) / duration) * 100;
     edBar.style.right = "0%";
     edBar.style.width = `${edPct}%`;
     edBar.textContent = "ED";
-    edBar.title = `🎶 片尾曲 ED (${fmtTime(duration - edLen)} - ${fmtTime(duration)}) · 点击直达`;
+    edBar.title = `🎶 片尾曲 ED (${fmtTime(effectiveEdStart)} - ${fmtTime(duration)}) · 点击直达`;
     edBar.onclick = (e) => {
       e.stopPropagation();
       const v = $("video");
       if (v) {
-        v.currentTime = duration - edLen;
-        showPlayerOsd("跳转至片尾 ED");
+        v.currentTime = effectiveEdStart;
+        showPlayerOsd(`跳转至片尾 ED (${fmtTime(effectiveEdStart)})`);
       }
     };
     layer.appendChild(edBar);
@@ -4741,6 +4747,7 @@ const DanmakuOverlay = (() => {
   let hideColor = localStorage.getItem("ani_dm_hide_color") === "true";
   let mergeDuplicate = localStorage.getItem("ani_dm_merge_dup") !== "false";
   let avoidSubtitle = localStorage.getItem("ani_dm_avoid_sub") !== "false";
+  let avoidCenter = localStorage.getItem("ani_dm_avoid_center") === "true";
   let cachedRawEvents = [];
   let sessionBlockedCount = 0;
 
@@ -4866,15 +4873,29 @@ const DanmakuOverlay = (() => {
 
   function resetLanes() {
     const usableH = avoidSubtitle ? Math.floor(H * 0.82) : H;
-    const scrollLaneCount = Math.max(2, Math.floor((usableH * areaRatio) / (fontPx + 4)));
-    scrollLanes = Array(scrollLaneCount).fill(0);
-    staticLanes = Array(3).fill(0);
+    if (avoidCenter) {
+      const topH = Math.floor(H * 0.32);
+      const bottomStart = Math.floor(H * 0.68);
+      const topLanesCount = Math.max(1, Math.floor(topH / (fontPx + 4)));
+      const bottomLanesCount = Math.max(1, Math.floor((usableH - bottomStart) / (fontPx + 4)));
+      scrollLanes = Array(topLanesCount + bottomLanesCount).fill(0);
+      staticLanes = Array(3).fill(0);
+    } else {
+      const scrollLaneCount = Math.max(2, Math.floor((usableH * areaRatio) / (fontPx + 4)));
+      scrollLanes = Array(scrollLaneCount).fill(0);
+      staticLanes = Array(3).fill(0);
+    }
   }
 
-  function takeLane(lanes, now, duration) {
+  function takeLane(lanes, now, duration, isScroll = true, itemW = 120) {
     const i = lanes.findIndex((free) => free <= now);
     if (i === -1) return -1;
-    lanes[i] = now + duration;
+    if (isScroll) {
+      const clearWindow = Math.max(0.7, ((itemW + 40) / Math.max(W, 400)) * duration + 0.35);
+      lanes[i] = now + clearWindow;
+    } else {
+      lanes[i] = now + duration;
+    }
     return i;
   }
 
@@ -4887,9 +4908,10 @@ const DanmakuOverlay = (() => {
       return;
     }
     const color = hideColor ? 0xffffff : e.color;
+    const approxW = (e.text || "").length * fontPx * 0.85;
     const lane = e.mode === "scroll"
-      ? takeLane(scrollLanes, now, scrollMs / 1000)
-      : takeLane(staticLanes, now, staticMs / 1000);
+      ? takeLane(scrollLanes, now, scrollMs / 1000, true, approxW)
+      : takeLane(staticLanes, now, staticMs / 1000, false, 0);
     if (lane === -1) return; // 轨道满则丢弃（高峰期自动限流）
     items.push({ text: e.text, color, mode: e.mode, lane, born: now, count: e.count || 1 });
   }
@@ -4932,7 +4954,18 @@ const DanmakuOverlay = (() => {
       let alpha = 1, x = 0, y = 0;
       if (it.mode === "scroll") {
         x = W - (age / scrollMs) * (W + w);
-        y = it.lane * (fontPx + 4) + 2;
+        if (avoidCenter) {
+          const topH = Math.floor(H * 0.32);
+          const bottomStart = Math.floor(H * 0.68);
+          const topLanesCount = Math.max(1, Math.floor(topH / (fontPx + 4)));
+          if (it.lane < topLanesCount) {
+            y = it.lane * (fontPx + 4) + 2;
+          } else {
+            y = bottomStart + (it.lane - topLanesCount) * (fontPx + 4) + 2;
+          }
+        } else {
+          y = it.lane * (fontPx + 4) + 2;
+        }
         if (x < -w) continue;
       } else {
         if (age > staticMs) continue;
@@ -5246,6 +5279,14 @@ const DanmakuOverlay = (() => {
     setAvoidSubtitle(val) {
       avoidSubtitle = !!val;
       localStorage.setItem("ani_dm_avoid_sub", String(avoidSubtitle));
+      resetLanes();
+    },
+    isAvoidCenter() {
+      return avoidCenter;
+    },
+    setAvoidCenter(val) {
+      avoidCenter = !!val;
+      localStorage.setItem("ani_dm_avoid_center", String(avoidCenter));
       resetLanes();
     },
     enabled: false,
@@ -7050,6 +7091,9 @@ const FILTER_LABELS = {
   warm: "护眼柔和",
   contrast: "明亮锐利",
   shadow: "暗部增强",
+  cinema: "胶片院线",
+  cyber: "激燃战斗",
+  vintage: "复古赛璐珞",
   manga: "黑白漫画",
 };
 
@@ -7112,6 +7156,9 @@ function applyVisualEffects(notify = false) {
     warm: "sepia(0.18) saturate(0.9) brightness(0.96) hue-rotate(-5deg)",
     contrast: "contrast(1.2) brightness(1.06) saturate(1.1)",
     shadow: "brightness(1.15) contrast(1.12) saturate(1.05)",
+    cinema: "contrast(1.12) brightness(0.98) saturate(1.15) sepia(0.08)",
+    cyber: "contrast(1.22) brightness(1.04) saturate(1.35) hue-rotate(5deg)",
+    vintage: "sepia(0.28) contrast(1.15) brightness(0.94) saturate(0.85)",
     manga: "grayscale(1) contrast(1.35) brightness(1.05)",
   };
 
@@ -7300,11 +7347,52 @@ function updateCustomOpSkipUI() {
   const hint = $("custom-op-hint");
   const clearBtn = $("btn-clear-custom-op");
   const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  if (hint) {
+    const custom = getSubjectCustomOpSkip(subjectId);
+    if (custom !== null) {
+      hint.textContent = `${fmtTime(custom)} (${Math.round(custom)}s)`;
+      hint.classList.add("has-value");
+      if (clearBtn) clearBtn.classList.remove("hidden");
+    } else {
+      hint.textContent = "未设置";
+      hint.classList.remove("has-value");
+      if (clearBtn) clearBtn.classList.add("hidden");
+    }
+  }
+  updateCustomEdSkipUI();
+}
+
+function getSubjectCustomEdSkip(subjectId) {
+  if (!subjectId) return null;
+  const val = localStorage.getItem(`ani_ed_skip_${subjectId}`);
+  if (val !== null && !isNaN(Number(val))) {
+    return Number(val);
+  }
+  return null;
+}
+
+function setSubjectCustomEdSkip(subjectId, seconds) {
+  if (!subjectId) return;
+  localStorage.setItem(`ani_ed_skip_${subjectId}`, String(seconds));
+}
+
+function clearSubjectCustomEdSkip(subjectId) {
+  if (!subjectId) return;
+  localStorage.removeItem(`ani_ed_skip_${subjectId}`);
+}
+
+function updateCustomEdSkipUI() {
+  const hint = $("custom-ed-hint");
+  const clearBtn = $("btn-clear-custom-ed");
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
   if (!hint) return;
 
-  const custom = getSubjectCustomOpSkip(subjectId);
+  const custom = getSubjectCustomEdSkip(subjectId);
   if (custom !== null) {
-    hint.textContent = `${fmtTime(custom)} (${Math.round(custom)}s)`;
+    const v = $("video");
+    const dur = v && v.duration && isFinite(v.duration) ? v.duration : 0;
+    const remainText = dur > custom ? ` (剩 ${Math.round(dur - custom)}s)` : "";
+    hint.textContent = `${fmtTime(custom)}${remainText}`;
     hint.classList.add("has-value");
     if (clearBtn) clearBtn.classList.remove("hidden");
   } else {
@@ -7927,6 +8015,8 @@ function destroyPlayer() {
   if (rateMenu) rateMenu.classList.add("hidden");
   const skipCapsule = $("player-skip-capsule");
   if (skipCapsule) skipCapsule.classList.add("hidden");
+  const memesPopup = $("dm-memes-popup");
+  if (memesPopup) memesPopup.classList.add("hidden");
   if (document.pictureInPictureElement) {
     document.exitPictureInPicture().catch(() => {});
   }
@@ -8374,17 +8464,23 @@ $("video").addEventListener("timeupdate", () => {
     skipOp();
   }
 
-  // 自动跳过片尾（若开启，在离结尾还有 autoSkipEd 秒时自动跳过并连播）
+  // 自动跳过片尾（若开启，在离结尾还有 autoSkipEd 秒或到达专属片尾点时自动跳过并连播）
   const edSkip = getEdSkipSeconds();
+  const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+  const customEdPoint = typeof getSubjectCustomEdSkip === "function" ? getSubjectCustomEdSkip(subjectId) : null;
+  const targetEdTrigger = (customEdPoint !== null && customEdPoint > v.duration * 0.4 && customEdPoint < v.duration)
+    ? customEdPoint
+    : (visualState.autoSkipEd > 0 ? (v.duration - edSkip) : null);
+
   if (
-    visualState.autoSkipEd > 0 &&
+    targetEdTrigger !== null &&
     !edAutoSkipped &&
     v.duration > 180 &&
-    v.currentTime >= (v.duration - edSkip) &&
+    v.currentTime >= targetEdTrigger &&
     !v.paused
   ) {
     edAutoSkipped = true;
-    showPlayerOsd(`⏭ 已自动跳过片尾 (-${edSkip}s)`);
+    showPlayerOsd("⏭ 已到达片尾 ED，自动连播下一集…");
     toast("已跳过片尾，自动连播下一集…", true);
     v.currentTime = v.duration;
   }
@@ -8880,6 +8976,13 @@ function syncDanmakuMenuUI() {
     avoidSubBtn.classList.toggle("active", isAvoid);
     avoidSubBtn.textContent = `🛡️ 防挡字幕: ${isAvoid ? "开" : "关"}`;
   }
+
+  const avoidCenterBtn = $("dm-avoid-center-toggle");
+  if (avoidCenterBtn) {
+    const isAvoidCenter = DanmakuOverlay.isAvoidCenter();
+    avoidCenterBtn.classList.toggle("active", isAvoidCenter);
+    avoidCenterBtn.textContent = `👤 防挡人物: ${isAvoidCenter ? "开" : "关"}`;
+  }
 }
 
 function setDanmakuOpacity(op, notify = true) {
@@ -9010,6 +9113,13 @@ $("dm-avoid-sub-toggle")?.addEventListener("click", () => {
   DanmakuOverlay.setAvoidSubtitle(next);
   syncDanmakuMenuUI();
   showPlayerOsd(next ? "已开启防挡字幕保护区" : "已关闭防挡字幕");
+});
+
+$("dm-avoid-center-toggle")?.addEventListener("click", () => {
+  const next = !DanmakuOverlay.isAvoidCenter();
+  DanmakuOverlay.setAvoidCenter(next);
+  syncDanmakuMenuUI();
+  showPlayerOsd(next ? "已开启防挡人物脸部 (中央避让)" : "已关闭防挡人物脸部");
 });
 
 // ---------- 弹幕屏蔽词与高级过滤器模态框交互 ----------
@@ -10777,6 +10887,49 @@ if (btnClearCustomOp) {
   };
 }
 
+// 番剧专属片尾跳过点按钮绑定
+const btnSetCustomEd = $("btn-set-custom-ed");
+if (btnSetCustomEd) {
+  btnSetCustomEd.onclick = () => {
+    const v = $("video");
+    const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+    if (!v) {
+      toast("播放器未就绪");
+      return;
+    }
+    if (!subjectId) {
+      toast("未获取到当前番剧信息");
+      return;
+    }
+    const curTime = Math.round(v.currentTime);
+    const dur = v.duration && isFinite(v.duration) ? v.duration : 0;
+    if (dur > 0 && curTime < dur * 0.4) {
+      toast("当前时间过早，请在片尾 ED 开始处再标记 📌");
+      return;
+    }
+    setSubjectCustomEdSkip(subjectId, curTime);
+    updateCustomEdSkipUI();
+    const sTitle = state.subject?.display_title || state.subject?.name_cn || state.subject?.name || "当前番剧";
+    showPlayerOsd(`📌 已将 ${fmtTime(curTime)} 设为《${sTitle}》专属片尾跳过点`);
+    toast(`已保存《${sTitle}》专属片尾跳过点: ${fmtTime(curTime)}`, true);
+    if (dur > 0) renderTimelineChapters(dur);
+  };
+}
+
+const btnClearCustomEd = $("btn-clear-custom-ed");
+if (btnClearCustomEd) {
+  btnClearCustomEd.onclick = () => {
+    const subjectId = Number(state.subject?.id?.id ?? state.subject?.id ?? state.subject?.bangumi_id);
+    if (!subjectId) return;
+    clearSubjectCustomEdSkip(subjectId);
+    updateCustomEdSkipUI();
+    showPlayerOsd("已清除专属片尾跳过点");
+    toast("已清除专属片尾跳过点，恢复全局默认时长", true);
+    const v = $("video");
+    if (v && v.duration > 0) renderTimelineChapters(v.duration);
+  };
+}
+
 document.querySelectorAll(".visual-ed-len-opt").forEach((btn) => {
   const len = parseInt(btn.getAttribute("data-len"), 10);
   if (len === getEdSkipSeconds()) btn.classList.add("active");
@@ -11433,6 +11586,26 @@ function stepVideoFrame(frames = 1) {
   showPlayerOsd(`🎞️ 逐帧微调: ${sign}${frames} 帧 · ${timeStr} (${frameStepFps}fps)`);
 }
 
+const jumpBackBtn = $("player-jump-back");
+if (jumpBackBtn) {
+  jumpBackBtn.onclick = () => {
+    const v = $("video");
+    if (!v) return;
+    v.currentTime = Math.max(0, v.currentTime - 5);
+    showPlayerOsd(`⏪ 快退 5s · ${fmtTime(v.currentTime)}`);
+  };
+}
+const jumpFwdBtn = $("player-jump-fwd");
+if (jumpFwdBtn) {
+  jumpFwdBtn.onclick = () => {
+    const v = $("video");
+    if (!v) return;
+    const dur = v.duration && isFinite(v.duration) ? v.duration : Infinity;
+    v.currentTime = Math.min(dur, v.currentTime + 5);
+    showPlayerOsd(`⏩ 快进 5s · ${fmtTime(v.currentTime)}`);
+  };
+}
+
 const framePrevBtn = $("player-frame-prev");
 if (framePrevBtn) framePrevBtn.onclick = () => stepVideoFrame(-1);
 const frameNextBtn = $("player-frame-next");
@@ -11520,9 +11693,8 @@ function initDanmakuSender() {
     $("dm-delay-popup")?.classList.add("hidden");
   });
 
-  function doSend() {
-    if (!sendInput) return;
-    const text = sendInput.value.trim();
+  function doSend(customText = null) {
+    const text = customText !== null ? String(customText).trim() : (sendInput ? sendInput.value.trim() : "");
     if (!text) {
       toast("请输入弹幕内容", false);
       return;
@@ -11552,13 +11724,17 @@ function initDanmakuSender() {
       }
     }
 
-    sendInput.value = "";
-    sendInput.blur();
+    if (customText === null && sendInput) {
+      sendInput.value = "";
+      sendInput.blur();
+    }
     showPlayerOsd(`弹幕已发送 🚀（${text}）`);
     toast("弹幕发送成功！", true);
   }
 
-  if (sendBtn) sendBtn.onclick = doSend;
+  window.doSendDanmakuDirect = doSend;
+
+  if (sendBtn) sendBtn.onclick = () => doSend();
   if (sendInput) {
     sendInput.onkeydown = (e) => {
       if (e.key === "Enter") {
@@ -11569,6 +11745,50 @@ function initDanmakuSender() {
       }
     };
   }
+
+  initDanmakuMemes();
+}
+
+function initDanmakuMemes() {
+  const btn = $("dm-memes-btn");
+  const popup = $("dm-memes-popup");
+  const instantCheck = $("dm-memes-instant-send");
+  const sendInput = $("dm-send-input");
+  if (!btn || !popup) return;
+
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    popup.classList.toggle("hidden");
+    $("dm-send-mode-menu")?.classList.add("hidden");
+    $("dm-send-color-menu")?.classList.add("hidden");
+    $("dm-delay-popup")?.classList.add("hidden");
+  };
+
+  popup.querySelectorAll(".dm-meme-chip").forEach((chip) => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      const memeText = chip.getAttribute("data-meme") || chip.textContent.trim();
+      if (!memeText) return;
+
+      const isInstant = instantCheck ? instantCheck.checked : true;
+      if (isInstant && typeof window.doSendDanmakuDirect === "function") {
+        window.doSendDanmakuDirect(memeText);
+        popup.classList.add("hidden");
+      } else {
+        if (sendInput) {
+          sendInput.value = memeText;
+          sendInput.focus();
+        }
+        popup.classList.add("hidden");
+      }
+    };
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".dm-memes-wrap")) {
+      popup.classList.add("hidden");
+    }
+  });
 }
 
 // ---------- 完整观影历史看板 ----------
@@ -11793,6 +12013,15 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
+  if (e.altKey && (e.key === "m" || e.key === "M") && !$("view-player").classList.contains("hidden")) {
+    e.preventDefault();
+    const popup = $("dm-memes-popup");
+    if (popup) {
+      popup.classList.toggle("hidden");
+    }
+    return;
+  }
+
   if (e.key === "Enter" && !isInput && !$("view-player").classList.contains("hidden")) {
     const dmInput = $("dm-send-input");
     if (dmInput) {
@@ -11820,6 +12049,11 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    const memesPopup = $("dm-memes-popup");
+    if (memesPopup && !memesPopup.classList.contains("hidden")) {
+      memesPopup.classList.add("hidden");
+      return;
+    }
     const charModal = $("character-modal");
     if (charModal && !charModal.classList.contains("hidden")) {
       charModal.classList.add("hidden");

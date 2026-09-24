@@ -217,7 +217,10 @@ impl SyncplayManager {
 
         let mgr = self.clone();
         tokio::spawn(async move {
-            tracing::info!("Syncplay server listening on http://0.0.0.0:{}", actual_port);
+            tracing::info!(
+                "Syncplay server listening on http://0.0.0.0:{}",
+                actual_port
+            );
             loop {
                 tokio::select! {
                     res = listener.accept() => {
@@ -412,7 +415,8 @@ Access-Control-Allow-Origin: *\r\n\r\n";
     }
 
     if method == "POST" {
-        let json_body: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));
+        let json_body: serde_json::Value =
+            serde_json::from_str(body).unwrap_or(serde_json::json!({}));
 
         match path {
             "/api/join" => {
@@ -431,7 +435,12 @@ Access-Control-Allow-Origin: *\r\n\r\n";
                         is_synced: true,
                     };
                     mgr.members.write().await.insert(id.clone(), member.clone());
-                    mgr.emit_event("member_joined", Some(id), Some(nickname), serde_json::to_value(&member)?);
+                    mgr.emit_event(
+                        "member_joined",
+                        Some(id),
+                        Some(nickname),
+                        serde_json::to_value(&member)?,
+                    );
                     mgr.broadcast_members().await;
                 }
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
@@ -440,7 +449,12 @@ Access-Control-Allow-Origin: *\r\n\r\n";
             "/api/leave" => {
                 let id = json_body["member_id"].as_str().unwrap_or("");
                 if let Some(removed) = mgr.members.write().await.remove(id) {
-                    mgr.emit_event("member_left", Some(removed.id), Some(removed.nickname), serde_json::json!({ "id": id }));
+                    mgr.emit_event(
+                        "member_left",
+                        Some(removed.id),
+                        Some(removed.nickname),
+                        serde_json::json!({ "id": id }),
+                    );
                     mgr.broadcast_members().await;
                 }
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
@@ -462,47 +476,74 @@ Access-Control-Allow-Origin: *\r\n\r\n";
                     pb.updated_at = now;
                 }
 
-                mgr.emit_event("playback_sync", sender_id, sender_name, serde_json::json!({
-                    "playing": playing,
-                    "position": current_time,
-                    "rate": playback_rate,
-                    "updated_at": now,
-                }));
+                mgr.emit_event(
+                    "playback_sync",
+                    sender_id,
+                    sender_name,
+                    serde_json::json!({
+                        "playing": playing,
+                        "position": current_time,
+                        "rate": playback_rate,
+                        "updated_at": now,
+                    }),
+                );
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
                 return Ok(());
             }
             "/api/media" => {
                 let sender_id = json_body["sender_id"].as_str().map(|s| s.to_string());
                 let sender_name = json_body["sender_name"].as_str().map(|s| s.to_string());
-                let media_obj: MediaState = serde_json::from_value(json_body["media"].clone()).unwrap_or_default();
+                let media_obj: MediaState =
+                    serde_json::from_value(json_body["media"].clone()).unwrap_or_default();
 
                 *mgr.media.write().await = media_obj.clone();
 
-                mgr.emit_event("media_sync", sender_id, sender_name, serde_json::to_value(&media_obj)?);
+                mgr.emit_event(
+                    "media_sync",
+                    sender_id,
+                    sender_name,
+                    serde_json::to_value(&media_obj)?,
+                );
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
                 return Ok(());
             }
             "/api/chat" => {
                 let sender_id = json_body["sender_id"].as_str().map(|s| s.to_string());
-                let sender_name = json_body["sender_name"].as_str().unwrap_or("群友").to_string();
+                let sender_name = json_body["sender_name"]
+                    .as_str()
+                    .unwrap_or("群友")
+                    .to_string();
                 let text = json_body["text"].as_str().unwrap_or("").trim().to_string();
                 if !text.is_empty() {
-                    mgr.emit_event("chat", sender_id, Some(sender_name), serde_json::json!({
-                        "text": text,
-                        "timestamp": current_timestamp(),
-                    }));
+                    mgr.emit_event(
+                        "chat",
+                        sender_id,
+                        Some(sender_name),
+                        serde_json::json!({
+                            "text": text,
+                            "timestamp": current_timestamp(),
+                        }),
+                    );
                 }
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
                 return Ok(());
             }
             "/api/reaction" => {
                 let sender_id = json_body["sender_id"].as_str().map(|s| s.to_string());
-                let sender_name = json_body["sender_name"].as_str().unwrap_or("群友").to_string();
+                let sender_name = json_body["sender_name"]
+                    .as_str()
+                    .unwrap_or("群友")
+                    .to_string();
                 let emoji = json_body["emoji"].as_str().unwrap_or("🎉").to_string();
-                mgr.emit_event("reaction", sender_id, Some(sender_name), serde_json::json!({
-                    "emoji": emoji,
-                    "timestamp": current_timestamp(),
-                }));
+                mgr.emit_event(
+                    "reaction",
+                    sender_id,
+                    Some(sender_name),
+                    serde_json::json!({
+                        "emoji": emoji,
+                        "timestamp": current_timestamp(),
+                    }),
+                );
                 send_json_response(&mut stream, 200, &serde_json::json!({ "ok": true })).await?;
                 return Ok(());
             }
@@ -523,11 +564,20 @@ Access-Control-Allow-Origin: *\r\n\r\n";
         }
     }
 
-    send_json_response(&mut stream, 404, &serde_json::json!({ "error": "Not Found" })).await?;
+    send_json_response(
+        &mut stream,
+        404,
+        &serde_json::json!({ "error": "Not Found" }),
+    )
+    .await?;
     Ok(())
 }
 
-async fn send_json_response(stream: &mut TcpStream, status: u16, data: &serde_json::Value) -> anyhow::Result<()> {
+async fn send_json_response(
+    stream: &mut TcpStream,
+    status: u16,
+    data: &serde_json::Value,
+) -> anyhow::Result<()> {
     let body = serde_json::to_string(data)?;
     let status_line = match status {
         200 => "HTTP/1.1 200 OK",
@@ -586,7 +636,10 @@ pub fn parse_anime_filename(name: &str) -> (String, Option<u32>) {
             if let Some(pos) = stem.find(prefix) {
                 let after = &stem[pos + prefix.len()..];
                 let after_trimmed = after.trim_start_matches('.');
-                let digits: String = after_trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+                let digits: String = after_trimmed
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
                 if !digits.is_empty() {
                     if let Ok(n) = digits.parse::<u32>() {
                         if n > 0 && n < 2000 {
@@ -731,7 +784,8 @@ mod tests {
         assert_eq!(ep, Some(8));
         assert!(title.contains("Frieren"));
 
-        let (_, ep2) = parse_anime_filename("【喵萌奶茶屋】★10月新番 葬送的芙莉莲 第04话 1080p.mkv");
+        let (_, ep2) =
+            parse_anime_filename("【喵萌奶茶屋】★10月新番 葬送的芙莉莲 第04话 1080p.mkv");
         assert_eq!(ep2, Some(4));
 
         let (_, ep3) = parse_anime_filename("Dungeon.Meshi.S01E12.1080p.WEBRip.x264.mkv");

@@ -800,6 +800,10 @@
               <span class="danmaku-menu-label">防挡字幕</span>
               <button id="dm-avoid-sub-toggle" class="ghost small dm-action-btn active" title="在底部划定字幕保护区，防止滚动弹幕与底部弹幕遮挡台词">🛡️ 防挡字幕: 开</button>
             </div>
+            <div class="danmaku-menu-row">
+              <span class="danmaku-menu-label">防挡人物</span>
+              <button id="dm-avoid-center-toggle" class="ghost small dm-action-btn" title="保护画面中央核心人物视区，弹幕上下分流防止遮挡特写脸部">👤 防挡人物: 关</button>
+            </div>
             <div class="sub-menu-sep"></div>
             <div class="danmaku-menu-row">
               <span class="danmaku-menu-label">不透明度</span>
@@ -1070,6 +1074,9 @@
                 <button class="ghost small visual-filter-opt" data-filter="warm">护眼柔和</button>
                 <button class="ghost small visual-filter-opt" data-filter="contrast">明亮锐利</button>
                 <button class="ghost small visual-filter-opt" data-filter="shadow" title="增强暗部细节，提升暗场表现">暗部增强</button>
+                <button class="ghost small visual-filter-opt" data-filter="cinema" title="胶片院线：细腻微对比度与温暖微红质感">胶片院线</button>
+                <button class="ghost small visual-filter-opt" data-filter="cyber" title="激燃战斗：冷艳高饱和与霓虹微锐化">激燃战斗</button>
+                <button class="ghost small visual-filter-opt" data-filter="vintage" title="复古赛璐珞：90年代经典 OVA 黄金时代胶片质感">复古赛璐珞</button>
                 <button class="ghost small visual-filter-opt" data-filter="manga" title="黑白漫画风高对比灰阶">黑白漫画</button>
               </div>
             </div>
@@ -1122,6 +1129,14 @@
                 <span id="custom-op-hint" class="custom-op-hint" title="当前番剧专属跳过点">未设置</span>
                 <button id="btn-set-custom-op" class="ghost small visual-action-btn" title="将当前播放器进度记录为此番剧的片头跳过点">📌 设为跳过点</button>
                 <button id="btn-clear-custom-op" class="ghost small visual-action-btn hidden" title="清除专属片头跳过点">✕</button>
+              </div>
+            </div>
+            <div class="visual-menu-row">
+              <span class="visual-menu-label">专属片尾点</span>
+              <div class="visual-btn-group" style="flex: 1; justify-content: flex-end; align-items: center; gap: 6px;">
+                <span id="custom-ed-hint" class="custom-op-hint" title="当前番剧专属片尾跳过点">未设置</span>
+                <button id="btn-set-custom-ed" class="ghost small visual-action-btn" title="将当前播放器进度记录为此番剧的片尾跳过点 (ED 开始时刻)">📌 设为片尾点</button>
+                <button id="btn-clear-custom-ed" class="ghost small visual-action-btn hidden" title="清除专属片尾跳过点">✕</button>
               </div>
             </div>
             <div class="visual-menu-row">
@@ -1249,6 +1264,10 @@
               <span>包含字幕 + 弹幕合成</span>
             </label>
           </div>
+        </div>
+        <div class="player-jump-group">
+          <button id="player-jump-back" class="ghost small" title="快退 5 秒 (快捷键 ← 或 J)">⏪ 5s</button>
+          <button id="player-jump-fwd" class="ghost small" title="快进 5 秒 (快捷键 → 或 L)">5s ⏩</button>
         </div>
         <div class="player-frame-step-group">
           <button id="player-frame-prev" class="ghost small" title="上一帧 (快捷键 ,)">⏮ 帧</button>
@@ -1562,6 +1581,53 @@
             </div>
           </div>
         </div>
+        <div class="dm-memes-wrap">
+          <button id="dm-memes-btn" class="ghost small dm-memes-btn" title="快捷发送高能名梗与弹幕表情 (快捷键 Alt+M)">✨ 名梗</button>
+          <div id="dm-memes-popup" class="dm-memes-popup hidden">
+            <div class="dm-memes-header">
+              <span class="dm-memes-title">二次元高能名梗与弹幕表情</span>
+              <label class="dm-memes-instant-toggle" title="开启后点击名梗直接发射，关闭则填入输入框">
+                <input type="checkbox" id="dm-memes-instant-send" checked />
+                <span>即点即发 🚀</span>
+              </label>
+            </div>
+            <div class="dm-memes-category">
+              <span class="dm-memes-cat-title">⚡ 高能助威</span>
+              <div class="dm-memes-grid">
+                <button class="dm-meme-chip" data-meme="前方高能！">前方高能！</button>
+                <button class="dm-meme-chip" data-meme="全体起立！">全体起立 🧎</button>
+                <button class="dm-meme-chip" data-meme="战歌起！">战歌起 🎵</button>
+                <button class="dm-meme-chip" data-meme="这就是主场吗！">这就是主场吗！</button>
+                <button class="dm-meme-chip" data-meme="核能预警 ⚡">核能预警 ⚡</button>
+                <button class="dm-meme-chip" data-meme="燃起来了！">燃起来了 🔥</button>
+              </div>
+            </div>
+            <div class="dm-memes-category">
+              <span class="dm-memes-cat-title">🌟 名台词与名梗</span>
+              <div class="dm-memes-grid">
+                <button class="dm-meme-chip" data-meme="草 (中文)">草 (中文)</button>
+                <button class="dm-meme-chip" data-meme="awsl">awsl</button>
+                <button class="dm-meme-chip" data-meme="神回！">神回！</button>
+                <button class="dm-meme-chip" data-meme="世界名画">世界名画 🖼️</button>
+                <button class="dm-meme-chip" data-meme="心肺停止">心肺停止</button>
+                <button class="dm-meme-chip" data-meme="不愧是你">不愧是你</button>
+                <button class="dm-meme-chip" data-meme="封神！">封神！</button>
+                <button class="dm-meme-chip" data-meme="请收下我的膝盖">请收下我的膝盖</button>
+              </div>
+            </div>
+            <div class="dm-memes-category">
+              <span class="dm-memes-cat-title">💖 打卡共鸣</span>
+              <div class="dm-memes-grid">
+                <button class="dm-meme-chip" data-meme="打卡！">打卡！</button>
+                <button class="dm-meme-chip" data-meme="泪目 😭">泪目 😭</button>
+                <button class="dm-meme-chip" data-meme="完结撒花 🎉">完结撒花 🎉</button>
+                <button class="dm-meme-chip" data-meme="圣地巡礼 ⛩️">圣地巡礼 ⛩️</button>
+                <button class="dm-meme-chip" data-meme="二刷打卡">二刷打卡</button>
+                <button class="dm-meme-chip" data-meme="我哭死">我哭死</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <input id="dm-send-input" class="dm-send-input" type="text" placeholder="发一条友善的弹幕见证高能时刻 (快捷键 Enter 发送)…" />
         <button id="dm-send-btn" class="button small dm-send-btn">发射 🚀</button>
       </div>
@@ -1708,7 +1774,9 @@
           <div class="sg-title">播放器控制</div>
           <div class="sg-item"><span class="sg-desc">播放 / 暂停</span><kbd>Space</kbd></div>
           <div class="sg-item"><span class="sg-desc">聚焦弹幕发射输入框</span><kbd>Enter</kbd></div>
+          <div class="sg-item"><span class="sg-desc">快捷发送高能名梗与弹幕表情</span><div class="kbds"><kbd>Alt</kbd> + <kbd>M</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">快退 10 秒 / 快进 10 秒</span><div class="kbds"><kbd>←</kbd> <kbd>→</kbd> <span class="meta">或</span> <kbd>J</kbd> <kbd>L</kbd></div></div>
+          <div class="sg-item"><span class="sg-desc">快退 5 秒 / 快进 5 秒微调</span><span>控制栏「⏪ 5s」与「5s ⏩」</span></div>
           <div class="sg-item"><span class="sg-desc">音量调整 (+10% / -10%)</span><div class="kbds"><kbd>↑</kbd> <kbd>↓</kbd></div></div>
           <div class="sg-item"><span class="sg-desc">标记名场面打点书签</span><kbd>M</kbd></div>
           <div class="sg-item"><span class="sg-desc">静音 / 取消静音</span><div class="kbds"><kbd>U</kbd> <span class="meta">或</span> <kbd>Shift</kbd>+<kbd>M</kbd></div></div>

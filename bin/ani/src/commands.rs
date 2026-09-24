@@ -609,7 +609,8 @@ pub fn win_toggle_always_on_top(win: tauri::WebviewWindow) -> Result<bool, Strin
 
 #[tauri::command]
 pub fn win_set_size(win: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
-    win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height })).map_err(|e| e.to_string())
+    win.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2795,10 +2796,7 @@ pub async fn list_scene_bookmarks(
 }
 
 #[tauri::command]
-pub async fn delete_scene_bookmark(
-    ctx: State<'_, AppContext>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn delete_scene_bookmark(ctx: State<'_, AppContext>, id: i64) -> Result<(), String> {
     let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
     repo.delete(id).await.map_err(|e| e.to_string())
 }
@@ -2810,7 +2808,9 @@ pub async fn update_scene_bookmark_title(
     title: String,
 ) -> Result<(), String> {
     let repo = ani_db::SceneBookmarkRepo::new(ctx.db.clone());
-    repo.update_title(id, &title).await.map_err(|e| e.to_string())
+    repo.update_title(id, &title)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
